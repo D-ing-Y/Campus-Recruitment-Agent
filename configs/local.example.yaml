@@ -1,0 +1,14 @@
+# Local development config example.
+
+project:
+  name: campus-job-agent
+
+llm:
+  provider: openai_compatible
+  base_url: ""
+  model: ""
+
+storage:
+  sqlite_path: data/runs/local.db
+  evidence_dir: data/evidence
+

@@ -1,0 +1,2 @@
+"""Campus Job Agent package."""
+
