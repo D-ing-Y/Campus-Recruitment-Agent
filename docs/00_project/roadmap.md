@@ -112,11 +112,12 @@
 - 相同输入可以命中缓存。
 - 测试可在 mock provider 下稳定运行。
 
-待创建文档：
+文档状态：
 
-- `docs/03_requirements/v0.2-llm-provider.md`
-- `docs/04_rfc/0002-llm-provider-and-structured-output.md`
-- 视情况新增 ADR。
+- 已创建：`docs/03_requirements/v0.2-llm-provider.md`
+- 已创建：`docs/03_requirements/v0.2-implementation-tasks.md`
+- 已创建：`docs/04_rfc/0002-llm-provider-and-structured-output.md`
+- 已创建：`docs/05_adr/0002-use-llm-provider-abstraction-for-structured-output.md`
 
 ## v0.3：Tool Registry 与 Evidence Store
 
@@ -297,4 +298,3 @@
 - 服务器可持续运行任务。
 - 服务默认不公开危险执行能力。
 - 密钥、cookie、真实数据不进入 Git。
-
