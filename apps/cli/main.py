@@ -37,6 +37,10 @@ def main() -> int:
         print(f"status: {status}")
         print(f"report_path: {state.get('report_path')}")
         print(f"trace_path: data/runs/{run_id}/trace.json")
+        if state.get("llm_calls") is not None:
+            print(f"llm_calls_path: data/runs/{run_id}/llm_calls.json")
+        if status == "failed" and state.get("errors"):
+            print(f"errors: {state['errors']}")
         return 0 if status == "success" else 1
 
     parser.print_help()

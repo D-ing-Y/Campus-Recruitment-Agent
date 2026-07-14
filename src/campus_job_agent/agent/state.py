@@ -12,6 +12,7 @@ class AgentState(TypedDict, total=False):
     tool_results: list[dict]
     verification: dict
     trace: list[dict]
+    llm_calls: list[dict]
     errors: list[dict]
     report_path: str | None
     output_dir: str
@@ -27,6 +28,7 @@ def create_initial_state(user_input: str) -> AgentState:
         "tool_results": [],
         "verification": {},
         "trace": [],
+        "llm_calls": [],
         "errors": [],
         "report_path": None,
         "output_dir": f"data/runs/{run_id}",

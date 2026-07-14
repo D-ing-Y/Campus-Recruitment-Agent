@@ -11,6 +11,7 @@ requires-python = ">=3.11"
 dependencies = [
   "langgraph",
   "pydantic",
+  "httpx",
 ]
 
 [project.optional-dependencies]
@@ -24,3 +25,4 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+addopts = ["-p", "no:langsmith_plugin", "-p", "no:anyio"]

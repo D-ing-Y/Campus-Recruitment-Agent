@@ -1,11 +1,11 @@
-"""LangGraph workflow for the v0.1 Mini Agent Runtime."""
+"""LangGraph workflow for the Mini Agent Runtime."""
 
 from time import perf_counter
 
 from langgraph.graph import END, START, StateGraph
 
 from campus_job_agent.agent.executor import execute_plan
-from campus_job_agent.agent.planner import create_plan, parse_goal_text
+from campus_job_agent.agent.planner import create_plan, parse_goal_with_llm
 from campus_job_agent.agent.report_writer import write_runtime_outputs
 from campus_job_agent.agent.state import AgentState, create_initial_state
 from campus_job_agent.agent.trace import (
@@ -56,8 +56,12 @@ def run_agent(user_input: str) -> AgentState:
 
 def _parse_goal_node(state: AgentState) -> dict:
     def parse(state: AgentState) -> dict:
-        parsed_goal = parse_goal_text(state["user_input"])
-        return {"parsed_goal": parsed_goal.model_dump()}
+        parsed_goal, llm_calls, errors = parse_goal_with_llm(state["user_input"])
+        return {
+            "parsed_goal": parsed_goal,
+            "llm_calls": list(state.get("llm_calls", [])) + llm_calls,
+            "errors": list(state.get("errors", [])) + errors,
+        }
 
     return run_node_with_trace("parse_goal", state, parse)
 

@@ -1,4 +1,4 @@
-"""Write v0.1 runtime outputs."""
+"""Write runtime outputs."""
 
 import json
 from pathlib import Path
@@ -11,6 +11,7 @@ REPORT_SECTIONS = [
     "# Mini Runtime Report",
     "## User Goal",
     "## Parsed Goal",
+    "## LLM Calls",
     "## Plan",
     "## Tool Results",
     "## Verification",
@@ -38,6 +39,14 @@ def write_runtime_outputs(state: AgentState) -> str:
         json.dumps(serializable_state.get("trace", []), ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    (output_dir / "llm_calls.json").write_text(
+        json.dumps(
+            serializable_state.get("llm_calls", []),
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     report_path.write_text(render_markdown_report(serializable_state), encoding="utf-8")
 
     return str(report_path)
@@ -54,6 +63,10 @@ def render_markdown_report(state: dict[str, Any]) -> str:
         "## Parsed Goal",
         "",
         _json_block(state.get("parsed_goal", {})),
+        "",
+        "## LLM Calls",
+        "",
+        _render_llm_calls(state.get("llm_calls", [])),
         "",
         "## Plan",
         "",
@@ -93,6 +106,27 @@ def _render_tool_results(tool_results: list[dict[str, Any]]) -> str:
         lines.append(f"  - records: {len(result.get('records', []))}")
         if result.get("error"):
             lines.append(f"  - error: {result['error']}")
+    return "\n".join(lines)
+
+
+def _render_llm_calls(llm_calls: list[dict[str, Any]]) -> str:
+    if not llm_calls:
+        return "No LLM calls."
+
+    lines: list[str] = []
+    for call in llm_calls:
+        lines.append(
+            "- "
+            f"provider: `{call.get('provider')}`, "
+            f"model: `{call.get('model')}`, "
+            f"prompt: `{call.get('prompt_name')}@{call.get('prompt_version')}`, "
+            f"schema: `{call.get('schema_version')}`, "
+            f"cache_hit: `{call.get('cache_hit')}`, "
+            f"retry_count: `{call.get('retry_count')}`, "
+            f"status: `{call.get('status')}`"
+        )
+        if call.get("error_type"):
+            lines.append(f"  - error_type: `{call.get('error_type')}`")
     return "\n".join(lines)
 
 

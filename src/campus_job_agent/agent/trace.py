@@ -21,6 +21,7 @@ def summarize_state(state: AgentState) -> dict[str, Any]:
         "tool_result_count": len(state.get("tool_results", [])),
         "verification_passed": state.get("verification", {}).get("passed"),
         "error_count": len(state.get("errors", [])),
+        "llm_call_count": len(state.get("llm_calls", [])),
         "trace_count": len(state.get("trace", [])),
     }
 
@@ -28,13 +29,26 @@ def summarize_state(state: AgentState) -> dict[str, Any]:
 def summarize_update(update: dict[str, Any]) -> dict[str, Any]:
     summary: dict[str, Any] = {}
     for key, value in update.items():
-        if isinstance(value, list):
+        if key == "llm_calls" and isinstance(value, list):
+            summary[key] = [_summarize_llm_call(call) for call in value[-3:]]
+        elif isinstance(value, list):
             summary[key] = {"count": len(value)}
         elif isinstance(value, dict):
             summary[key] = {"keys": sorted(value.keys())}
         else:
             summary[key] = value
     return summary
+
+
+def _summarize_llm_call(call: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "provider": call.get("provider"),
+        "model": call.get("model"),
+        "cache_hit": call.get("cache_hit"),
+        "retry_count": call.get("retry_count"),
+        "status": call.get("status"),
+        "error_type": call.get("error_type"),
+    }
 
 
 def build_trace_event(

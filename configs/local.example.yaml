@@ -4,11 +4,12 @@ project:
   name: campus-job-agent
 
 llm:
-  provider: openai_compatible
+  provider: mock
   base_url: ""
   model: ""
+  cache_enabled: true
+  fallback_to_rule_parser: false
 
 storage:
   sqlite_path: data/runs/local.db
   evidence_dir: data/evidence
-
