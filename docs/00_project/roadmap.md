@@ -1,300 +1,234 @@
 # Roadmap
 
-本文档是项目版本迭代的主索引。后续开发以本文件为入口，再进入对应版本的 requirements、RFC、ADR 和 implementation tasks。
+本文档是项目版本迭代的主索引。项目从 v0.3 起转向“证据驱动的双画像求职 Agent”：统一证据层是事实来源，候选人画像与岗位需求画像是可版本化的派生状态，LangGraph 负责长期闭环、条件路由、人工介入和恢复。
+
+## 开发协作方式
+
+- 桌面端 Codex：需求澄清、架构讨论、roadmap、requirements、RFC、ADR、contracts 和验收设计。
+- VSCode 端 Codex：依据已确认文档实现代码、测试、eval 和运行产物。
+- 历史版本文档不事后改写；架构变化通过新版本文档和 ADR 记录。
+- 每项前沿技术必须承担真实业务职责并有可测验收标准，不做仅用于展示的装饰性接入。
 
 ## 版本总览
 
-| 版本 | 主题 | 核心交付 |
-| --- | --- | --- |
-| v0 | 项目结构与开发流程 | 标准目录、文档驱动流程、旧资产归档 |
-| v0.1 | Mini Agent Runtime | LangGraph 最小闭环、mock tool、trace、report、测试 |
-| v0.2 | LLM Provider 与结构化输出 | API provider、JSON 输出、Pydantic 校验、重试、缓存 |
-| v0.3 | Tool Registry 与 Evidence Store | 工具契约升级、本地证据存储、evidence_id 追踪 |
-| v1.0 | 单 Agent 岗位检索闭环 | 招聘工具接入、岗位表、技能词频、岗位分布报告 |
-| v1.1 | 舆情与经验帖采集 | 牛客/小红书等内容归档、经验帖总结 schema |
-| v1.2 | 岗位筛选与最小能力包 | 共性/特异性要求分析、技能覆盖矩阵、项目建议 |
-| v1.3 | Eval 与 Observability | 评估指标、trace 汇总、质量报告、失败案例分析 |
-| v2.0 | Memory / RAG | 向量检索、历史证据查询、带引用回答 |
-| v2.5 | Multi-Agent / Sub-Agent | 子 Agent 拆分、主 Agent 调度、上下文隔离 |
-| v3.0 | 云服务器部署 | FastAPI、Docker Compose、持久化存储、远程运行 |
+| 版本 | 状态 | 主题 | 核心交付 |
+| --- | --- | --- | --- |
+| v0 | 已完成 | 项目结构与开发流程 | 标准目录、文档驱动流程、旧资产归档 |
+| v0.1 | 已完成 | Mini Agent Runtime | LangGraph 最小图、ToolRegistry、trace、report、测试 |
+| v0.2 | 已完成 | LLM Provider 与结构化输出 | Provider、JSON/Pydantic、重试、缓存、LLM trace |
+| v0.3 | 下一版本 | 统一证据层与领域契约 | Evidence Store、Claim、Provenance、画像契约、能力本体 |
+| v0.4 | 计划中 | 候选人画像 Graph | 文档摄取、画像构建、充分性评价、定向提问、interrupt |
+| v0.5 | 计划中 | 岗位需求画像 Graph | 招聘/面经证据、岗位族与具体岗位画像、检索循环 |
+| v0.6 | 计划中 | 双画像匹配与用户决策 | 四类差距、可解释匹配、偏好调整、回退与重检索 |
+| v0.7 | 计划中 | 准备计划与反馈闭环 | 能力路线、练习/笔面试反馈、画像更新、动态重排 |
+| v0.8 | 计划中 | Hybrid RAG 与长期记忆 | 稀疏+稠密检索、metadata filter、rerank、引用回答 |
+| v1.0 | 计划中 | 单 Agent 端到端产品 | 父图、subgraph、checkpoint、interrupt、完整 eval |
+| v1.1 | 计划中 | 分布式存储与异步执行 | PostgreSQL、对象存储、向量存储、队列、幂等与恢复 |
+| v1.2 | 条件引入 | Multi-Agent / Sub-Agent | 动态并行研究、上下文隔离、主 Agent 综合 |
+| v1.3 | 计划中 | 服务化与可观测部署 | FastAPI、容器化、追踪、指标、远程运行与安全边界 |
 
-## v0：项目结构与开发流程
+## v0.1 与 v0.2 的复用结论
+
+### v0.1：可复用 Runtime 骨架
+
+保留：
+
+- LangGraph `StateGraph` 入口和节点化执行方式；
+- `AgentState` 作为跨节点状态契约的设计；
+- `ToolRegistry`、Executor、Verifier、trace helper、ReportWriter 和 CLI；
+- mock tool、单元测试、集成测试和 eval 的组织方式。
+
+需要升级：
+
+- 线性五节点拓扑升级为父图、子图、条件边、循环和 interrupt；
+- 扁平 `AgentState` 升级为证据、画像、差距、反馈和预算状态；
+- 固定 `create_plan()` 升级为基于当前不确定性的动作决策；
+- Verifier 从字段存在性检查升级为证据和完成条件评价。
+
+### v0.2：可复用 LLM 基础设施
+
+保留：
+
+- `LLMProvider`、mock provider、OpenAI-compatible provider；
+- JSON 解析、Pydantic 校验、有限重试、缓存；
+- prompt/schema 版本和 `LLMCallRecord`；
+- 密钥隔离和可测试性设计。
+
+需要升级：
+
+- `SearchGoal` 和 `goal_parser` 是早期业务样例，将逐步替换为 `CareerIntent`、`EvidenceClaim`、`CandidateProfile` 和 `RoleProfile` 等契约；
+- structured output 层从单一 schema 函数升级为可复用的泛型结构化调用入口。
+
+结论：在当前仓库内演进，不新建项目、不重写 Git 历史。
+
+## v0.3：统一证据层与领域契约
 
 目标：
 
-- 建立标准项目目录。
-- 确认文档驱动开发流程。
-- 归档旧 Skill 和旧爬虫资产。
-- 明确 Mac Codex 与 VSCode Codex 的分工。
+- 把原始材料设为事实来源，把画像设为证据派生的版本化视图。
+- 建立后续所有 Graph、RAG、匹配和反馈共同依赖的数据契约。
 
 核心交付：
 
-- `docs/00_project/`
-- `docs/01_architecture/`
-- `docs/02_development/`
-- `archive/legacy-recruitment-crawler-skill-2026-07-03/`
+- `EvidenceArtifact`：简历、论文、项目文件、JD、网页和反馈的原始载体。
+- `EvidenceFragment`：带页码、行号、选择器或文本范围的可引用片段。
+- `EvidenceClaim`：由片段支撑的结构化事实、用户自述或模型推断。
+- `Provenance`：来源、获取时间、解析器、模型、prompt/schema 版本和置信度。
+- `CandidateProfile`、`CareerIntent`、`RoleProfile`、`GapAssessment` 的首版 schema。
+- `CapabilityOntology`：双画像共享的能力概念、别名和层级。
+- SQLite + 本地文件的 Evidence Store，保留未来远程存储接口。
+- 内容 hash 去重、不可变原始证据、画像 snapshot/version。
+- 证据追溯 eval。
 
 完成标准：
 
-- 新旧项目入口清晰。
-- 后续开发从 `campus-job-agent/` 开始。
+- 给定本地简历、项目说明和JD fixture，可归档原文、提取 claim，并从每条 claim 回溯到原始片段。
+- 不带 evidence 引用的事实性画像字段不得进入确认画像；推断必须显式标记。
+- v0.1/v0.2 回归测试继续通过。
 
-## v0.1：Mini Agent Runtime
-
-目标：
-
-- 实现基于 LangGraph 的最小 Agent Runtime。
-- 用 mock tool 验证状态图、工具调用、校验、trace 和报告输出。
+## v0.4：候选人画像 Graph
 
 核心交付：
 
-- `AgentState`
-- `ParsedGoal`
-- `PlanTask`
-- `ToolResult`
-- `TraceEvent`
-- `ToolRegistry`
-- `mock_job_search`
-- LangGraph workflow
-- CLI 入口
-- 单元测试、集成测试、eval 测试
-
-非目标：
-
-- 不接入真实招聘网站。
-- 不接入真实 LLM API。
-- 不做 RAG、Memory、多 Agent、Web UI、服务器部署。
+- PDF、Markdown、TXT、项目 README 摄取工具。
+- 候选人能力、经历、教育和能力证据画像。
+- 独立 `CareerIntent`，保存岗位、城市、薪资、行业和硬性/可协商约束。
+- `candidate_profile` subgraph：摄取、claim 提取、画像生成、充分性评价、继续读材料/提问/保留 unknown 的条件路由。
+- LangGraph conditional edge、loop、checkpoint 和 human interrupt。
+- 用户纠正作为新证据保存，画像可重建、可比较。
 
 完成标准：
 
-- `python apps/cli/main.py run "成都 AI Agent 2027 秋招"` 可运行。
-- 输出 `state.json`、`trace.json`、Markdown report。
-- 单元测试、集成测试、eval 测试通过。
+- 完成“上传材料→初始画像→发现高价值缺口→定向提问→更新画像”的可恢复闭环。
 
-关联文档：
-
-- `docs/03_requirements/v0.1-mini-runtime.md`
-- `docs/03_requirements/v0.1-implementation-tasks.md`
-- `docs/04_rfc/0001-mini-agent-runtime.md`
-- `docs/05_adr/0001-use-langgraph-for-runtime.md`
-
-## v0.2：LLM Provider 与结构化输出
-
-目标：
-
-- 接入一个可配置的 LLM API provider。
-- 将 v0.1 的规则解析逐步升级为 LLM JSON 解析。
-- 建立结构化输出校验、失败重试和缓存机制。
+## v0.5：岗位需求画像 Graph
 
 核心交付：
 
-- `LLMProvider` 抽象。
-- OpenAI-compatible provider 实现。
-- `.env` / config 读取。
-- `SearchGoal` 或升级版 `ParsedGoal` schema。
-- JSON-only prompt contract。
-- Pydantic 校验。
-- 校验失败后的有限重试。
-- LLM 调用缓存。
-- LLM 调用 trace 元信息。
-
-非目标：
-
-- 不接入真实招聘网站。
-- 不做多 provider 复杂路由。
-- 不做 RAG。
-- 不做长期记忆。
+- 招聘来源和经验帖来源分离的采集/归档契约。
+- 一个真实招聘来源、一个真实经验帖来源，其余来源先用 fixture 验证。
+- 具体岗位画像与岗位族画像。
+- 硬性资格、工作能力、加分项、招聘筛选信号和公司特异项分层。
+- `role_profile` subgraph：查询规划、检索、归一化、去重、覆盖度评价、换词/换源/停止。
+- 所有岗位事实保留 source URL、发布时间、获取时间和置信度。
 
 完成标准：
 
-- 使用 API 将用户目标解析为结构化 JSON。
-- 输出不合规时能够被捕获并重试。
-- 相同输入可以命中缓存。
-- 测试可在 mock provider 下稳定运行。
+- 针对一个岗位方向生成有证据支持的岗位族画像和若干具体岗位画像。
 
-文档状态：
-
-- 已创建：`docs/03_requirements/v0.2-llm-provider.md`
-- 已创建：`docs/03_requirements/v0.2-implementation-tasks.md`
-- 已创建：`docs/04_rfc/0002-llm-provider-and-structured-output.md`
-- 已创建：`docs/05_adr/0002-use-llm-provider-abstraction-for-structured-output.md`
-
-## v0.3：Tool Registry 与 Evidence Store
-
-目标：
-
-- 将工具层从 mock 验证升级为可扩展工具系统。
-- 实现本地证据归档和 `evidence_id` 追踪。
+## v0.6：双画像匹配与用户决策
 
 核心交付：
 
-- 工具元数据。
-- 工具输入/输出 schema。
-- 工具错误分类。
-- 本地 Evidence Store。
-- 原始文本/HTML 文件归档。
-- `evidence_id` 与 tool result 绑定。
-- 基础去重 hash。
-
-非目标：
-
-- 不做复杂数据库设计。
-- 不做向量检索。
-- 不做大规模爬虫调度。
+- 硬性条件校验与能力覆盖度分离。
+- 能力差距、证据差距、偏好冲突和认知不确定性四类结果。
+- 由确定性代码计算的可解释覆盖度，LLM 负责证据解释而不直接拍分。
+- 用户确认、画像纠正、目标选择和偏好调整 interrupt。
+- 偏好变化只更新 `CareerIntent`，并触发岗位重检索，不错误修改候选人能力。
 
 完成标准：
 
-- 每次工具调用可以产生或关联 evidence。
-- 报告中的关键结论能引用 evidence_id。
-- 重复证据可以通过 hash 识别。
+- 用户调整目标后，Graph 能回退并重建相关岗位画像，再次输出带证据的比较结果。
 
-## v1.0：单 Agent 岗位检索闭环
-
-目标：
-
-- 接入招聘工具，完成岗位检索到报告的单 Agent 闭环。
+## v0.7：准备计划与反馈闭环
 
 核心交付：
 
-- 招聘工具适配层。
-- 岗位结构化 schema。
-- 岗位归档。
-- 岗位表导出。
-- 公司分布、岗位分布、技能词频报告。
-
-非目标：
-
-- 不做最终岗位筛选决策。
-- 不保证完全清除招聘网站噪声。
-- 不绕过验证码或反爬。
+- 基于岗位重要性、差距、面试频率、迁移价值、可提升性和时间成本生成准备优先级。
+- 最低可投递/可面试能力包，不追求画像 100% 相等。
+- 练习、笔试、面试反馈作为证据事件进入系统。
+- 诊断反馈影响候选人画像、具体岗位画像、岗位族画像或学习计划。
+- 防止一次面试反馈过度改写岗位族模型。
 
 完成标准：
 
-- 针对一个城市和岗位关键词生成岗位表。
-- 每条岗位记录可追溯来源。
-- 输出岗位分布和技能词频。
+- 一次反馈能够产生有依据的画像版本变化和学习计划重排。
 
-## v1.1：舆情与经验帖采集
+## v0.8：Hybrid RAG 与长期记忆
 
 目标：
 
-- 接入牛客、小红书等经验帖和讨论帖采集工具。
-- 将非结构化文本归档并总结为统一 schema。
+- 让 RAG 成为画像构建和长期任务的证据检索基础设施，而不是通用问答装饰。
 
 核心交付：
 
-- 经验帖采集工具。
-- 原始 HTML / 文本归档。
-- 经验帖总结 prompt。
-- 面试、笔试、加班、氛围、技术栈等信号字段。
+- 文档切分、embedding、向量索引和全文/稀疏检索。
+- metadata filter：用户、证据类型、公司、岗位族、时间和可信度。
+- dense + sparse hybrid retrieval、reranker 和引用组装。
+- profile-aware retrieval：围绕当前未知项检索最相关证据。
+- 跨 run 的事实记忆与用户偏好记忆分离。
+- 检索命中率、引用正确率、groundedness 和无答案测试。
 
 完成标准：
 
-- 可按公司和岗位聚合经验帖。
-- 总结结果符合统一 JSON schema。
-- 关键总结带 evidence quote。
+- 画像和计划中的每个事实性结论可引用检索证据；与无 RAG 基线相比有量化提升。
 
-## v1.2：岗位筛选与最小能力包
-
-目标：
-
-- 分析目标岗位的共性要求和特异性要求。
-- 生成最小准备能力包和项目策略建议。
+## v1.0：单 Agent 端到端产品
 
 核心交付：
 
-- 技能需求聚类。
-- 技能覆盖矩阵。
-- 岗位匹配评分。
-- 最小能力包生成。
-- 项目建议生成。
+- 父图整合 candidate、role、matching、decision、preparation 和 feedback subgraph。
+- durable checkpoint、interrupt/resume、失败恢复、循环预算和停止条件。
+- 完整 trace、证据图、画像版本、差距报告和准备计划。
+- CLI 或最小 Web 交互入口。
+- 端到端 eval 数据集和回归报告。
 
 完成标准：
 
-- 输出高频技能、低频特异技能和准备优先级。
-- 给出一个覆盖最多岗位需求的项目方案。
-- 每个建议可追溯到岗位或经验帖证据。
+- 一名用户可以从材料上传走到岗位选择、学习计划和反馈更新，且关键结论全部可追溯。
 
-## v1.3：Eval 与 Observability
+## v1.1：分布式存储与异步执行
 
 目标：
 
-- 建立 Agent 质量评估体系。
-- 将 trace、工具调用、LLM 调用和证据追溯转化为可读评估报告。
+- 用真实多服务架构验证大文件、长任务、多 worker 和恢复场景，而不是把单机数据库包装成“分布式”。
 
 核心交付：
 
-- `schema_valid_rate`
-- `tool_success_rate`
-- `evidence_trace_rate`
-- `extraction_completeness`
-- `duplicate_rate`
-- `recommendation_coverage`
-- eval report
+- PostgreSQL：任务、画像、claim、版本和事务元数据。
+- S3/MinIO：不可变原始文件、解析产物和报告。
+- pgvector 或独立 vector store：embedding 索引。
+- Redis/队列：异步任务、状态通知、限流和短期缓存。
+- Storage/Repository 抽象，支持本地实现与远程实现切换。
+- 幂等键、去重、重试、补偿、并发控制和故障恢复测试。
 
 完成标准：
 
-- 每次 run 可生成评估摘要。
-- 能定位字段缺失、证据缺失、工具失败和推荐覆盖不足。
+- 多 worker 可安全处理同一任务族；服务重启后 Graph 和证据状态可恢复；重复消息不产生重复证据。
 
-## v2.0：Memory / RAG
+## v1.2：Multi-Agent / Sub-Agent（条件引入）
 
-目标：
+只在单 Agent eval 证明存在动态并行、上下文污染或长任务瓶颈时引入。
 
-- 引入向量化检索和跨 run 记忆。
-- 支持基于历史证据回答问题。
+候选职责：
+
+- 多来源岗位研究 worker；
+- 经验帖证据研究 worker；
+- 候选人材料分析 worker；
+- 主 Agent 负责选择未知项、委派、校验和综合。
+
+完成标准：
+
+- 与单 Agent 基线比较质量、延迟、成本和失败率，证明拆分确实产生收益。
+
+## v1.3：服务化与可观测部署
 
 核心交付：
 
-- embedding provider。
-- vector store。
-- evidence retriever。
-- source-grounded answer。
-- 历史岗位和经验帖检索。
+- FastAPI、Docker Compose、任务 API、文件上传和结果查询。
+- OpenTelemetry + LangSmith/Langfuse 可选集成。
+- 节点、LLM、工具、检索、存储和队列指标。
+- 权限、密钥、Cookie、个人数据删除和审计边界。
 
 完成标准：
 
-- Agent 可以检索历史证据回答问题。
-- 回答必须包含 evidence_id 和 source_url。
+- 桌面端可远程发起和恢复任务；系统能够定位一次错误来自模型、工具、检索、存储还是 Graph 路由。
 
-## v2.5：Multi-Agent / Sub-Agent
+## 跨版本强制要求
 
-目标：
-
-- 将单 Agent 拆分为多个职责明确的子 Agent。
-
-候选子 Agent：
-
-- `JobSearchAgent`
-- `ReputationAgent`
-- `RequirementAnalysisAgent`
-- `InterviewPrepAgent`
-- `ProjectStrategyAgent`
-
-完成标准：
-
-- 子 Agent 上下文隔离。
-- 子 Agent 输出结构化结果。
-- 主 Agent 能合并结果并生成最终报告。
-
-## v3.0：云服务器部署
-
-目标：
-
-- 将个人开发版迁移为可远程运行的服务。
-
-核心交付：
-
-- FastAPI 服务。
-- Docker Compose。
-- 持久化数据库。
-- 文件归档卷。
-- API key 和 secrets 管理。
-- 云服务器部署文档。
-
-完成标准：
-
-- Mac 可作为交互端访问云服务器。
-- 服务器可持续运行任务。
-- 服务默认不公开危险执行能力。
-- 密钥、cookie、真实数据不进入 Git。
+- 每个版本先有 requirements，重要设计先有 RFC/ADR，跨模块对象先更新 contracts。
+- 原始证据不可被模型输出覆盖；解析器或 prompt 更新后可从原始材料重建派生数据。
+- Eval 从 v0.3 起贯穿所有版本，不推迟到单独的“评估版本”。
+- RAG、分布式存储和 Multi-Agent 都必须保留可比较的简单基线。
+- 不绕过验证码或反爬；登录和 Cookie/cURL 导入必须由用户主动完成。
+- 真实简历、Cookie、API key 和个人敏感数据不得进入 Git。

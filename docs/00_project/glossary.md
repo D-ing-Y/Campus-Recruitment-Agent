@@ -1,11 +1,27 @@
 # Glossary
 
-- Agent Runtime：负责状态管理、工作流编排、工具调用和执行追踪的运行时。
-- Tool：Agent 可调用的确定性或半确定性能力，例如岗位检索、HTML 抽取、LLM 总结。
-- Evidence：支持结论的原始网页、文本、截图或结构化记录。
-- Memory：可被后续任务复用的历史信息，包括结构化数据库和向量检索。
-- RAG：Retrieval-Augmented Generation，通过检索证据增强模型回答。
-- RFC：Request for Comments，重要功能的设计提案。
-- ADR：Architecture Decision Record，架构决策记录。
-- Eval：评估 Agent 行为质量的测试和指标体系。
-
+- Agent Runtime：负责状态管理、图编排、工具调用、中断恢复和执行追踪的运行时。
+- Parent Graph：串联候选人画像、岗位画像、匹配、决策、准备和反馈的顶层 LangGraph。
+- Subgraph：具有独立状态边界和完成条件的可复用 Graph；不等同于 Sub-Agent。
+- Tool：Agent 可调用的确定性或半确定性能力，例如文档解析、岗位检索、证据保存和向量检索。
+- Evidence Artifact：不可变的原始材料载体，例如 PDF、网页 HTML、项目文件、JD 或面试反馈。
+- Evidence Fragment：Artifact 中可精确引用的片段，包含页码、行号、选择器或文本范围。
+- Evidence Claim：由一个或多个 Fragment 支撑的结构化事实、用户自述或模型推断。
+- Provenance：证据和派生结论的来源、时间、解析器、模型、prompt/schema 版本及置信度。
+- Evidence Store：保存 Artifact、Fragment、Claim、hash 和 provenance 的事实存储层。
+- Candidate Profile：由证据派生的候选人能力、教育、科研、项目、实习和能力证明画像。
+- Career Intent：与能力画像分离的岗位、城市、薪资、行业及硬性/可协商约束。
+- Role Profile：具体岗位或岗位族的资格、工作能力、加分项和招聘筛选信号画像。
+- Capability Ontology：候选人画像与岗位画像共享的能力概念、别名、层级和版本。
+- Profile Snapshot：某一时间点由证据和 claim 构建的不可变画像版本。
+- Gap Assessment：双画像比较结果，包括能力差距、证据差距、偏好冲突和认知不确定性。
+- Memory：跨任务保留的事实、偏好和历史状态；不得用未追溯的聊天摘要替代证据。
+- RAG：Retrieval-Augmented Generation，通过检索真实证据增强模型输出。
+- Hybrid RAG：结合稀疏/全文检索、稠密向量检索、metadata filter 和 reranker 的检索方案。
+- Checkpoint：LangGraph 在节点边界持久化的状态快照，用于恢复长任务。
+- Interrupt：Graph 主动暂停并等待用户输入、确认、登录或判断的机制。
+- Sub-Agent：由主 Agent 动态委派、具有隔离上下文和终止条件的工作单元。
+- Distributed Storage：由元数据数据库、对象存储、向量存储等组成并支持多 worker 的持久层；不是单机 SQLite 的别名。
+- Eval：评估 schema、证据追溯、检索、路由、匹配、恢复、成本和最终任务质量的体系。
+- RFC：Request for Comments，重要功能或模块的设计提案。
+- ADR：Architecture Decision Record，记录架构选择、替代方案和影响。

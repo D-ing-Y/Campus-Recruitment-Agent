@@ -6,9 +6,13 @@
 
 ## 当前阶段
 
-当前处于 `v0.2-llm-provider`：基于 LangGraph 的最小闭环 Agent Runtime，加上 LLM Provider 与结构化输出层。
+v0.2 已完成并保留为 Runtime 基座；当前进入 `v0.3-evidence-domain-foundation` 的文档与设计阶段。
 
-v0.2 只实现：
+项目从 v0.3 起定位为“证据驱动的双画像求职 Agent”：原始材料进入统一证据层，系统构建候选人画像、求职意图和岗位需求画像，通过 LangGraph 完成画像充分性评价、岗位检索、差距分析、人工决策、准备计划和反馈更新。
+
+v0.1/v0.2 的 LangGraph Mini Runtime、ToolRegistry、trace、LLM Provider、结构化输出、重试和缓存继续复用；线性拓扑与早期 `SearchGoal` 业务 schema 将在后续版本升级。
+
+v0.2 已实现：
 
 - 单轮 CLI 运行。
 - LangGraph 线性工作流。
@@ -21,6 +25,8 @@ v0.2 只实现：
 - 单元测试、集成测试和 eval 测试。
 
 v0.2 不接入真实招聘网站，不实现 RAG、Memory、多 Agent、Web UI 或服务器部署。默认运行不需要真实 API key。
+
+后续路线会实际实现 LangGraph 高级编排、Hybrid RAG、分布式存储和必要的 Sub-Agent；每项技术必须对应真实业务问题、简单基线和量化验收，而不是仅作为技术展示。
 
 ## 项目结构
 

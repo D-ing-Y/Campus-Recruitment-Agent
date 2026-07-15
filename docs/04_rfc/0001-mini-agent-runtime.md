@@ -1,6 +1,6 @@
 # RFC-0001: Mini Agent Runtime
 
-状态：Draft
+状态：Accepted
 日期：2026-07-07
 关联需求：`docs/03_requirements/v0.1-mini-runtime.md`
 
@@ -490,4 +490,3 @@ v0.1 不改变：
 - 单元测试通过。
 - 集成测试通过。
 - eval 规则检查通过。
-

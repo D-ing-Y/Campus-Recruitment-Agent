@@ -1,6 +1,6 @@
 # RFC-0002: LLM Provider 与结构化输出
 
-状态：Draft
+状态：Accepted
 日期：2026-07-08
 关联需求：`docs/03_requirements/v0.2-llm-provider.md`
 

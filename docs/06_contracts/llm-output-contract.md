@@ -43,3 +43,23 @@
 - cache value 可保存 raw output 和 parsed JSON，但不得保存 API key、Authorization header 或完整环境变量。
 - `llm_calls.json` 记录 provider、model、prompt/schema version、cache hit、retry count、duration、status、error summary、usage。
 - trace 和 Markdown report 只展示非敏感摘要。
+
+## v0.3 通用 Structured Output Contract
+
+v0.2 的 Provider、缓存、重试和调用记录继续复用。v0.3 将 SearchGoal 专用结构化入口提炼为泛型入口，所有业务 schema 仍遵守：
+
+- JSON-only；
+- Pydantic 校验后才能进入业务层；
+- prompt name/version 和 schema version 必须进入 cache key 与 LLMCallRecord；
+- 重试次数有限；
+- 模型输出不得绕过确定性 Validator 直接持久化。
+
+### Claim extraction 额外约束
+
+- 输入消息只包含明确授权的 Fragment 和必要上下文。
+- 输出必须返回原输入中的 `evidence_fragment_ids`。
+- 不允许生成输入 Fragment 没有表达的事实。
+- 推断使用 `model_inference`，不得伪装为 `observed_fact`。
+- 引用存在性、owner 权限、Claim 类型与 evidence 要求由代码验证。
+
+后续 CandidateProfile、RoleProfile、GapAssessment 和 LearningPlan prompt 均采用同一版本化结构化调用机制。
