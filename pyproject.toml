@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "campus-job-agent"
-version = "0.1.0"
+version = "0.3.0"
 description = "Mini Agent Runtime for campus job intelligence."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -21,6 +21,9 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+campus_job_agent = ["storage/migrations/*.sql", "ontology/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

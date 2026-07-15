@@ -6,7 +6,7 @@
 
 ## 当前阶段
 
-v0.2 已完成并保留为 Runtime 基座；当前进入 `v0.3-evidence-domain-foundation` 的文档与设计阶段。
+v0.3 已完成并通过验收。v0.1/v0.2 保留为 Runtime 与 LLM 基座，v0.3 新增统一证据层、领域契约、版本化画像快照和证据质量评估。
 
 项目从 v0.3 起定位为“证据驱动的双画像求职 Agent”：原始材料进入统一证据层，系统构建候选人画像、求职意图和岗位需求画像，通过 LangGraph 完成画像充分性评价、岗位检索、差距分析、人工决策、准备计划和反馈更新。
 
@@ -23,6 +23,16 @@ v0.2 已实现：
 - `ToolRegistry` 调用 `mock_job_search`。
 - `state.json`、`trace.json`、`llm_calls.json` 和 Markdown report 输出。
 - 单元测试、集成测试和 eval 测试。
+
+v0.3 已实现：
+
+- `EvidenceArtifact → EvidenceFragment → EvidenceClaim → ProfileSnapshot` 证据链。
+- SQLite Repository 与带原子写入的本地不可变 BlobStore。
+- TXT/Markdown/HTML 文本抽取，PDF/二进制文件登记，SHA-256 去重。
+- 确定性分片、可验证 locator、Claim 引用/越权/更新校验。
+- 通用 Pydantic structured output，同时保持 v0.2 `SearchGoal` 兼容。
+- 版本化 Capability Ontology，未知技能保留 raw label。
+- Candidate/CareerIntent/Role 画像快照持久化，证据 trace/report/eval。
 
 v0.2 不接入真实招聘网站，不实现 RAG、Memory、多 Agent、Web UI 或服务器部署。默认运行不需要真实 API key。
 
@@ -98,3 +108,5 @@ CAMPUS_AGENT_LLM_FALLBACK_TO_RULE_PARSER=false
 ```bash
 pytest
 ```
+
+v0.3 验收基线为 45 项测试全部通过，其中包含 v0.1/v0.2 全量回归。v0.3 证据管线当前作为独立模块与测试入口验收，v0.4 再接入候选人画像 LangGraph subgraph。

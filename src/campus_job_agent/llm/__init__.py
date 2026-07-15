@@ -7,6 +7,7 @@ from campus_job_agent.llm.mock import MockLLMProvider
 from campus_job_agent.llm.structured import (
     StructuredOutputError,
     parse_search_goal_with_llm,
+    parse_structured_output,
 )
 from campus_job_agent.schemas import LLMConfig
 
@@ -21,6 +22,7 @@ __all__ = [
     "OpenAICompatibleProvider",
     "StructuredOutputError",
     "parse_search_goal_with_llm",
+    "parse_structured_output",
 ]
 
 

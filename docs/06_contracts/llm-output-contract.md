@@ -46,6 +46,8 @@
 
 ## v0.3 通用 Structured Output Contract
 
+实现状态：已通过 `parse_structured_output()` 实现，`parse_search_goal_with_llm()` 保持为兼容包装层。
+
 v0.2 的 Provider、缓存、重试和调用记录继续复用。v0.3 将 SearchGoal 专用结构化入口提炼为泛型入口，所有业务 schema 仍遵守：
 
 - JSON-only；

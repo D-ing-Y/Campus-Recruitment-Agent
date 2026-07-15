@@ -1,0 +1,2 @@
+Implemented an evidence-grounded RAG prototype. Responsibilities included document
+parsing, deterministic chunking, retrieval evaluation and backend API integration.

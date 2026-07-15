@@ -1,6 +1,6 @@
 # RFC-0003: 统一证据层与双画像领域基础
 
-状态：Proposed
+状态：Accepted / Implemented
 日期：2026-07-15
 关联需求：`docs/03_requirements/v0.3-evidence-domain-foundation.md`
 

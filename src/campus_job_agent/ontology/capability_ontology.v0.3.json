@@ -1,0 +1,13 @@
+{
+  "version": "v0.3.0",
+  "capabilities": [
+    {"capability_id": "programming.python", "canonical_name": "Python", "aliases": ["python3", "Python 编程"]},
+    {"capability_id": "database.sql", "canonical_name": "SQL", "aliases": ["关系型数据库", "Structured Query Language"]},
+    {"capability_id": "ai.llm", "canonical_name": "LLM", "aliases": ["大语言模型", "Large Language Model"]},
+    {"capability_id": "ai.rag", "canonical_name": "RAG", "aliases": ["检索增强生成", "Retrieval-Augmented Generation"]},
+    {"capability_id": "agent.langgraph", "canonical_name": "LangGraph", "aliases": ["lang graph"]},
+    {"capability_id": "engineering.backend", "canonical_name": "Backend Engineering", "aliases": ["后端", "后端开发"]},
+    {"capability_id": "cs.algorithms", "canonical_name": "Algorithms", "aliases": ["算法", "数据结构与算法"]},
+    {"capability_id": "systems.distributed", "canonical_name": "Distributed Systems", "aliases": ["分布式系统", "分布式"]}
+  ]
+}
