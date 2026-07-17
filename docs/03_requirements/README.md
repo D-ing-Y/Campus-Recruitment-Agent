@@ -10,6 +10,16 @@
 - `v0.4-candidate-profile-graph.md`
 - `v0.5-role-profile-graph.md`
 
+实现任务文档与需求文档使用相同版本号，例如：
+
+- `v0.3-implementation-tasks.md`
+- `v0.4-implementation-tasks.md`
+
+当前活动版本：
+
+- v0.3：Accepted / Implemented。
+- v0.4：Requirements / ADR / RFC / Contracts / Tasks 已确认，Ready for Implementation。
+
 每份需求文档必须说明：
 
 - 背景

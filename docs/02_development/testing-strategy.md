@@ -24,9 +24,37 @@
 - Profile snapshot supporting claim 引用完整。
 - 匿名 fixture 端到端 Artifact→Fragment→Claim。
 
+## v0.4 测试重点
+
+### 单元测试
+
+- CandidateProfile、SufficiencyAssessment、QuestionPlan 和 Human Interaction schema。
+- State reducer 的 append、stable union、replace 和 clear 语义。
+- 文本型 PDF 页码 locator，Markdown/TXT/README 行号或字符 locator。
+- 信息价值计算、路由优先级、问题去重和硬预算。
+- request/response、owner、action、correction 和 supersedes 校验。
+
+### 集成测试
+
+- 充分材料：无 interrupt 完成并生成证据化 profile。
+- 信息不足：生成高价值问题，interrupt 后用相同 thread resume。
+- 补充文件：resume 后重新摄取并构建新 snapshot。
+- 用户纠正：新旧 Claim 可追溯，ProfileVersionDiff 正确。
+- 用户 skip、材料 unsupported 和预算耗尽：显式 unknown 并终止。
+- SQLite checkpointer：重建 Graph/进程边界后恢复。
+- 重复 resume：不重复创建 Artifact、Claim 或 snapshot。
+- LLM、工具、存储和 checkpoint 错误使用结构化安全回退。
+
+### Contract 与回归
+
+- 内存/SQLite checkpointer 遵守相同恢复语义。
+- deterministic/LLM evaluator 遵守相同输出 schema。
+- ToolRegistry 中真实本地工具与 mock 错误工具遵守统一 ToolResult。
+- v0.1-v0.3 全量回归必须继续通过。
+
 ## 后续专项评估
 
-- LangGraph：conditional route accuracy、loop count、interrupt/resume、checkpoint recovery。
+- LangGraph：v0.4 起评估 conditional route accuracy、loop count、interrupt/resume、checkpoint recovery。
 - RAG：Recall@K、NDCG/MRR、citation precision、groundedness、无答案正确率、延迟和成本。
 - 分布式系统：幂等、并发冲突、消息重投、对象/元数据部分失败、服务重启恢复。
 - Multi-Agent：与单 Agent 比较质量、延迟、token 成本、上下文污染和失败率。

@@ -91,7 +91,129 @@ class EvidencePipelineState(TypedDict, total=False):
 - State 保存 ID、摘要和决策，不保存二进制文件或完整长文本。
 - Artifact、Fragment、Claim 和 Profile 的完整内容通过 repository 读取。
 - list 字段的追加/覆盖策略必须显式定义，避免 LangGraph 合并歧义。
-- v0.4 设计 ParentState 时再将候选人画像 subgraph 接入主图。
+- v0.3 不接入 Graph；v0.4 使用下述独立 CandidateProfileGraphState，v1.0 再映射到 ParentState。
+
+## v0.4 CandidateProfileGraphState
+
+实现状态：Design Accepted / Pending Implementation。
+
+关联：
+
+- `docs/03_requirements/v0.4-candidate-profile-graph.md`
+- `docs/04_rfc/0004-candidate-profile-graph.md`
+- `docs/06_contracts/human-interaction-contract.md`
+
+```python
+class CandidateProfileGraphState(TypedDict, total=False):
+    # identity and lifecycle
+    run_id: str
+    thread_id: str
+    user_id: str
+    candidate_id: str
+    status: str
+
+    # submitted and persisted evidence references
+    input_paths: list[str]
+    pending_artifact_ids: list[str]
+    active_artifact_ids: list[str]
+    processed_artifact_ids: list[str]
+    fragment_ids: list[str]
+    claim_ids: list[str]
+
+    # derived profile references and decisions
+    candidate_profile_snapshot_id: str | None
+    sufficiency_assessment: dict | None
+    information_gaps: list[dict]
+    question_plan: dict | None
+    next_action: str | None
+
+    # human-in-the-loop
+    pending_interaction: dict | None
+    resume_input: dict | None
+    processed_response_ids: list[str]
+
+    # controls and observability
+    budgets: dict
+    counters: dict
+    tool_results: list[dict]
+    llm_calls: list[dict]
+    trace: list[dict]
+    errors: list[dict]
+```
+
+### 状态枚举
+
+`status`：
+
+```text
+initialized
+running
+interrupted
+completed
+completed_with_unknowns
+cancelled
+failed
+```
+
+`next_action`：
+
+```text
+read_more
+ask_user
+request_more_materials
+finalize_with_unknowns
+complete
+fail
+```
+
+### Reducer 规则
+
+| 字段 | 合并方式 | 说明 |
+| --- | --- | --- |
+| `trace`、`errors`、`llm_calls`、`tool_results` | append | 节点只返回本次新增项，由 reducer 追加 |
+| Artifact/Fragment/Claim/response ID 列表 | stable union | 去重并保持首次出现顺序 |
+| `input_paths` | replace after consume | 摄取完成后清除已消费路径 |
+| `sufficiency_assessment` | replace | 只保留最新评估；历史进入 trace/eval |
+| `information_gaps` | replace | 每次基于最新 profile 重算 |
+| `question_plan`、`pending_interaction` | replace/clear | 一个 thread 同时最多一个 pending request |
+| `resume_input` | replace then clear | 证据化成功后必须清除正文 |
+| `candidate_profile_snapshot_id` | replace | 旧版本保存在 ProfileRepository |
+| `budgets` | initialize once | 节点不得提高预算 |
+| `counters` | deterministic increment | 只允许增加或由初始化恢复 |
+
+### BudgetState
+
+```json
+{
+  "max_profile_rounds": 3,
+  "max_questions_per_interrupt": 3,
+  "max_llm_calls": 12,
+  "max_tool_calls": 30
+}
+```
+
+### CounterState
+
+```json
+{
+  "profile_rounds": 0,
+  "interaction_rounds": 0,
+  "llm_calls": 0,
+  "tool_calls": 0
+}
+```
+
+默认值是设计基线，可由配置降低；运行中的节点不得自行提高。任何硬预算耗尽后只能
+`finalize_with_unknowns` 或 `fail`。
+
+### Checkpoint 与恢复
+
+- checkpointer 在 Graph compile 时注入，节点不得自行创建。
+- invoke/resume 必须传 `configurable.thread_id`，且与 State 的 `thread_id` 一致。
+- `pending_interaction` 保存 request 摘要；完整材料和长期事实仍保存在 Evidence Store。
+- `resume_input` 仅用于恢复边界，`archive_human_input` 写入证据成功后必须清除。
+- 相同 response 的重放通过 `processed_response_ids` 和 Evidence Store 幂等键去重。
+- checkpoint 序列化失败必须使 run 失败，不得声称任务可恢复。
 
 ## v1.0 ParentState 目标形态
 

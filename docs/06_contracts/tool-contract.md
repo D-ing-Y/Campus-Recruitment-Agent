@@ -65,3 +65,77 @@ evidence.load_fragments
 profile.save_snapshot
 profile.load_snapshot
 ```
+
+## v0.4 Candidate Profile Tool
+
+实现状态：Design Accepted / Pending Implementation。
+
+v0.4 最终集成必须使用真实本地实现；mock 只用于单元测试、错误注入和
+deterministic eval baseline。外部 MCP/插件可以在未来实现同一契约，但不是完成条件。
+
+### 通用 ToolResult 扩展
+
+```json
+{
+  "tool_name": "candidate.ingest_material",
+  "status": "success",
+  "records": [],
+  "evidence_ids": ["artifact-1"],
+  "error": null,
+  "metadata": {
+    "error_type": null,
+    "retryable": false,
+    "needs_user_action": false,
+    "idempotency_key": "sha256",
+    "parser_name": "pdf_text",
+    "parser_version": "v1"
+  }
+}
+```
+
+失败时 `metadata.error_type` 为：
+
+```text
+validation_error
+unsupported_input
+permission_denied
+llm_output_error
+tool_retryable_error
+storage_error
+checkpoint_error
+budget_exhausted
+idempotency_conflict
+```
+
+### 必须实现的 Tool
+
+| Tool | 输入摘要 | 输出/副作用 |
+| --- | --- | --- |
+| `candidate.ingest_material` | owner、candidate、path/content type | 归档 Artifact，返回 ID 和去重状态 |
+| `evidence.extract_pdf_text` | artifact ID | 保存带页边界的标准化文本与 parser metadata；只支持文本型 PDF |
+| `evidence.extract_plain_text` | artifact ID | 保存 Markdown/TXT/README 标准化文本与行号映射 |
+| `evidence.create_fragments` | artifact ID、parser version | 幂等创建 Fragment |
+| `evidence.extract_candidate_claims` | subject、fragment IDs | 结构化提取、校验并保存 Claim |
+| `evidence.archive_user_response` | request/response contract | 保存 response Artifact/Fragment/Claim |
+| `profile.project_candidate` | candidate ID、active claim IDs | 创建或复用 Candidate ProfileSnapshot |
+| `profile.load_candidate` | candidate ID 或 snapshot ID | 返回小型画像摘要和引用 |
+| `profile.diff_candidate_versions` | 两个 snapshot ID | 返回确定性字段差异 |
+
+### 调用边界
+
+- Graph 节点通过 ToolRegistry 或显式 repository service 调用，不直接拼 SQL/路径。
+- 摄取工具先归档 Artifact，解析失败也不得丢失原始材料登记。
+- Claim 工具必须经过 ClaimValidator，不允许模型直接保存。
+- Profile 工具只读取已持久化 active Claim。
+- `evidence.archive_user_response` 必须校验 request/response/owner 并使用稳定幂等键。
+- ToolResult 不复制完整材料、完整回答或二进制。
+
+### Checkpointer 边界
+
+LangGraph checkpointer 是 runtime dependency，不伪装为业务 Tool：
+
+- 在 Graph compile 时注入；
+- 本地运行使用 SQLite 持久化实现；
+- 测试可以使用内存实现；
+- 通过 `thread_id` 恢复；
+- 不被 Evidence Repository 或 ProfileProjector 当作事实来源。

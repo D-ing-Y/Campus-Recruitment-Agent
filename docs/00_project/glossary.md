@@ -14,12 +14,18 @@
 - Role Profile：具体岗位或岗位族的资格、工作能力、加分项和招聘筛选信号画像。
 - Capability Ontology：候选人画像与岗位画像共享的能力概念、别名、层级和版本。
 - Profile Snapshot：某一时间点由证据和 claim 构建的不可变画像版本。
+- Sufficiency Assessment：评价当前候选人画像能否在明确未知边界下用于下一阶段，并给出分维度结果、信息缺口和建议动作；不等于岗位匹配评分。
+- Information Gap：画像中需要补充、核验或保留未知的字段级缺口，包含重要性、不确定性、可回答性、证据成本和信息价值。
+- Question Plan：把高价值 Information Gap 转换为有限、可回答、可跳过且不重复的问题集合。
+- Profile Correction：用户对画像字段的纠正请求；必须转换为新 Claim 并关联被替代 Claim，不能直接覆盖画像。
+- Information Value：用于选择下一步收集动作的排序信号，综合缺口重要性、不确定性、可回答性和证据成本。
 - Gap Assessment：双画像比较结果，包括能力差距、证据差距、偏好冲突和认知不确定性。
 - Memory：跨任务保留的事实、偏好和历史状态；不得用未追溯的聊天摘要替代证据。
 - RAG：Retrieval-Augmented Generation，通过检索真实证据增强模型输出。
 - Hybrid RAG：结合稀疏/全文检索、稠密向量检索、metadata filter 和 reranker 的检索方案。
 - Checkpoint：LangGraph 在节点边界持久化的状态快照，用于恢复长任务。
 - Interrupt：Graph 主动暂停并等待用户输入、确认、登录或判断的机制。
+- Resume：使用相同 `thread_id` 和匹配的交互 request 恢复已中断 Graph；重复提交必须幂等。
 - Sub-Agent：由主 Agent 动态委派、具有隔离上下文和终止条件的工作单元。
 - Distributed Storage：由元数据数据库、对象存储、向量存储等组成并支持多 worker 的持久层；不是单机 SQLite 的别名。
 - Eval：评估 schema、证据追溯、检索、路由、匹配、恢复、成本和最终任务质量的体系。

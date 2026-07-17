@@ -17,7 +17,7 @@
 | v0.1 | 已完成 | Mini Agent Runtime | LangGraph 最小图、ToolRegistry、trace、report、测试 |
 | v0.2 | 已完成 | LLM Provider 与结构化输出 | Provider、JSON/Pydantic、重试、缓存、LLM trace |
 | v0.3 | 已完成 | 统一证据层与领域契约 | Evidence Store、Claim、Provenance、画像契约、能力本体 |
-| v0.4 | 下一版本 | 候选人画像 Graph | 文档摄取、画像构建、充分性评价、定向提问、interrupt |
+| v0.4 | 设计完成 / 待实现 | 候选人画像 Graph | 文档摄取、画像构建、充分性评价、定向提问、interrupt/resume |
 | v0.5 | 计划中 | 岗位需求画像 Graph | 招聘/面经证据、岗位族与具体岗位画像、检索循环 |
 | v0.6 | 计划中 | 双画像匹配与用户决策 | 四类差距、可解释匹配、偏好调整、回退与重检索 |
 | v0.7 | 计划中 | 准备计划与反馈闭环 | 能力路线、练习/笔面试反馈、画像更新、动态重排 |
@@ -90,18 +90,47 @@
 
 ## v0.4：候选人画像 Graph
 
+状态：Requirements / ADR / RFC / Contracts / Tasks / Eval Design 已完成（2026-07-17），待代码实现与验收。
+
+版本定位：
+
+- 把 v0.1 LangGraph Runtime、v0.2 Structured Output 和 v0.3 Evidence Pipeline 接成第一个真实业务 subgraph。
+- 固定业务边界由人定义，LLM 在动作枚举、证据约束和预算内判断高价值未知项及下一动作。
+- checkpoint 保存执行状态，Evidence Store 保存事实；二者不得混用。
+
 核心交付：
 
-- PDF、Markdown、TXT、项目 README 摄取工具。
+- 文本型 PDF、Markdown、TXT、项目 README 的真实本地摄取工具；扫描件和复杂版式显式返回 unsupported，不伪装为已解析。
 - 候选人能力、经历、教育和能力证据画像。
 - 独立 `CareerIntent`，保存岗位、城市、薪资、行业和硬性/可协商约束。
 - `candidate_profile` subgraph：摄取、claim 提取、画像生成、充分性评价、继续读材料/提问/保留 unknown 的条件路由。
-- LangGraph conditional edge、loop、checkpoint 和 human interrupt。
-- 用户纠正作为新证据保存，画像可重建、可比较。
+- `read_more`、`ask_user`、`request_more_materials`、`finalize_with_unknowns`、`complete` 动作枚举。
+- LangGraph conditional edge、loop、SQLite checkpoint、human interrupt 和相同 thread resume。
+- 用户回答、补充材料和纠正先作为新证据保存，画像可重建、可比较。
+- 循环次数、单轮问题数、LLM 和 Tool 调用预算，以及确定性停止守卫。
+
+本版本不包含：
+
+- 岗位检索、岗位画像、双画像匹配和学习计划。
+- OCR、完整代码仓库分析、RAG、分布式存储和 Multi-Agent。
+- 外部 MCP 不是完成依赖；仓库内 Tool 必须真实完成本地解析、保存和恢复。
 
 完成标准：
 
-- 完成“上传材料→初始画像→发现高价值缺口→定向提问→更新画像”的可恢复闭环。
+- 完成“上传材料→初始画像→发现高价值缺口→定向提问→回答证据化→更新画像”的可恢复闭环。
+- 进程重启后可用相同 `thread_id` 从 SQLite checkpoint 恢复。
+- 重复 resume 不产生重复 Artifact、Claim 或 ProfileSnapshot。
+- 用户跳过、材料不可解析或预算耗尽时显式保留 unknown 并安全终止。
+- v0.1-v0.3 回归通过，生成实际 v0.4 eval report 后才能标记已完成。
+
+设计文档：
+
+- `docs/03_requirements/v0.4-candidate-profile-graph.md`
+- `docs/03_requirements/v0.4-implementation-tasks.md`
+- `docs/04_rfc/0004-candidate-profile-graph.md`
+- `docs/05_adr/0004-use-stateful-candidate-profile-subgraph.md`
+- `docs/06_contracts/candidate-profile-contract.md`
+- `docs/06_contracts/human-interaction-contract.md`
 
 ## v0.5：岗位需求画像 Graph
 

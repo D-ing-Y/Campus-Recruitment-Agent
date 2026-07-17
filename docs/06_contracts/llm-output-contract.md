@@ -65,3 +65,80 @@ v0.2 的 Provider、缓存、重试和调用记录继续复用。v0.3 将 Search
 - 引用存在性、owner 权限、Claim 类型与 evidence 要求由代码验证。
 
 后续 CandidateProfile、RoleProfile、GapAssessment 和 LearningPlan prompt 均采用同一版本化结构化调用机制。
+
+## v0.4 Candidate Profile Structured Outputs
+
+实现状态：Design Accepted / Pending Implementation。
+
+v0.4 新增两个模型输出边界。两者都必须使用 `parse_structured_output()`、JSON-only、
+Pydantic 校验、版本化 cache key 和有限重试。
+
+### Candidate Sufficiency Output
+
+输出必须符合 `SufficiencyAssessment`：
+
+```json
+{
+  "is_sufficient": false,
+  "dimension_results": {
+    "education": "sufficient",
+    "experience": "partial",
+    "capability": "partial",
+    "responsibility_boundary": "insufficient",
+    "evidence_quality": "partial"
+  },
+  "information_gaps": [],
+  "blocking_conflict_ids": [],
+  "recommended_action": "ask_user",
+  "reason": "需要确认项目中的个人职责",
+  "confidence": 0.85
+}
+```
+
+输入只包含：
+
+- 最新 profile 摘要与 snapshot ID；
+- supporting Claim/证据覆盖摘要；
+- 未处理材料的类型和引用；
+- 已问问题、用户 skip 和剩余预算；
+- 动作枚举与明确评价标准。
+
+模型不得：
+
+- 根据岗位要求判断候选人是否“足够优秀”；
+- 把 CareerIntent 缺失当作能力画像不足；
+- 输出动作枚举之外的工具名或节点；
+- 建议突破预算；
+- 把不存在的证据写成画像事实。
+
+### Question Plan Output
+
+输出必须符合 `QuestionPlan`。每个问题必须：
+
+- 绑定一个 open `InformationGap`；
+- 包含 `question_id`、`gap_id`、`target_path`、`prompt`、`reason` 和 `answer_type`；
+- 不与已回答或已跳过的问题重复；
+- 不诱导用户虚构能力、成果或个人职责；
+- 允许用户跳过非必要问题；
+- 不超过 `max_questions_per_interrupt`。
+
+### 确定性校验和回退
+
+- LLM 的 `recommended_action` 只是建议，最终路由由确定性 policy 决定。
+- `information_value` 由代码根据已校验分量计算，不采用模型直接给出的最终值。
+- 非法 gap、越界引用或重复问题必须拒绝。
+- 一次结构化重试后仍失败时，使用 deterministic evaluator/planner 或安全
+  `finalize_with_unknowns`，并记录错误。
+
+### Prompt 与 Schema 版本
+
+建议首版：
+
+```text
+candidate_sufficiency_v1 / schema v0.4
+candidate_question_planner_v1 / schema v0.4
+candidate_claim_extractor_v2 / schema v0.4
+```
+
+版本、provider、model、profile canonical hash、Claim ID 集和预算摘要必须进入 cache key。
+不得把完整 PDF 或完整用户回答直接写入 cache/trace。

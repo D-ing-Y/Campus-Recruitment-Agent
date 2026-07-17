@@ -13,3 +13,5 @@
 - 新增事实性输出能够追溯到 evidence；推断有明确类型和置信度。
 - 新增 RAG、分布式存储或 Multi-Agent 时，已与简单基线比较并记录收益、成本和失败案例。
 - 长任务版本已测试中断、恢复、幂等和停止条件。
+- human-in-the-loop 输入已归档为 evidence，checkpoint 或聊天摘要没有绕过 Claim/Validator 更新画像。
+- 文档设计阶段只能标记 Ready for Implementation；实际测试与 eval report 完成后才能标记 Implemented。

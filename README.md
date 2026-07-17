@@ -6,7 +6,9 @@
 
 ## 当前阶段
 
-v0.3 已完成并通过验收。v0.1/v0.2 保留为 Runtime 与 LLM 基座，v0.3 新增统一证据层、领域契约、版本化画像快照和证据质量评估。
+v0.3 已完成并通过验收。v0.4 的 Requirements、ADR、RFC、跨模块 Contracts、实现任务和 Eval 设计已于 2026-07-17 完成，当前状态为待代码实现。
+
+v0.1/v0.2 保留为 Runtime 与 LLM 基座，v0.3 提供统一证据层、领域契约、版本化画像快照和证据质量评估；v0.4 将把这些能力接入第一个可循环、可中断、可恢复的候选人画像 LangGraph subgraph。
 
 项目从 v0.3 起定位为“证据驱动的双画像求职 Agent”：原始材料进入统一证据层，系统构建候选人画像、求职意图和岗位需求画像，通过 LangGraph 完成画像充分性评价、岗位检索、差距分析、人工决策、准备计划和反馈更新。
 
@@ -34,7 +36,16 @@ v0.3 已实现：
 - 版本化 Capability Ontology，未知技能保留 raw label。
 - Candidate/CareerIntent/Role 画像快照持久化，证据 trace/report/eval。
 
-v0.2 不接入真实招聘网站，不实现 RAG、Memory、多 Agent、Web UI 或服务器部署。默认运行不需要真实 API key。
+v0.4 已完成设计、待实现：
+
+- PDF、Markdown、TXT 和项目 README 的真实本地摄取 Tool。
+- `candidate_profile` subgraph 与充分性评价。
+- `read_more`、`ask_user`、`request_more_materials`、`finalize_with_unknowns` 条件路由。
+- SQLite checkpoint、LangGraph interrupt/resume 和循环预算。
+- 用户回答、补充材料与纠正先证据化，再重建版本化 CandidateProfile。
+- CandidateProfile、Human Interaction、State、Evidence、LLM 和 Tool contract。
+
+v0.4 不接入真实招聘网站，不实现岗位画像、RAG、分布式存储、Multi-Agent、Web UI 或服务器部署。默认测试不需要真实 API key。
 
 后续路线会实际实现 LangGraph 高级编排、Hybrid RAG、分布式存储和必要的 Sub-Agent；每项技术必须对应真实业务问题、简单基线和量化验收，而不是仅作为技术展示。
 
@@ -109,4 +120,4 @@ CAMPUS_AGENT_LLM_FALLBACK_TO_RULE_PARSER=false
 pytest
 ```
 
-v0.3 验收基线为 45 项测试全部通过，其中包含 v0.1/v0.2 全量回归。v0.3 证据管线当前作为独立模块与测试入口验收，v0.4 再接入候选人画像 LangGraph subgraph。
+v0.3 验收基线为 45 项测试全部通过，其中包含 v0.1/v0.2 全量回归。v0.4 当前只完成设计文档，代码验收结果和实际测试数量将在实现后写入 `docs/07_evaluation/v0.4-eval-report.md`，在此之前不得标记为已实现。

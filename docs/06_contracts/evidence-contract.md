@@ -99,3 +99,55 @@ v0.3 实现中的 `ProfileSnapshot` 是 Candidate/CareerIntent/Role 的统一持
 - 岗位存在、职责、城市和硬性条件优先使用企业或招聘平台原始岗位页。
 - 社区来源用于笔面试、薪资、氛围和实践信号，必须保留平台、作者/匿名状态、发布时间、获取时间和独立置信度。
 - 原始 HTML/文本必须先归档，再由模型总结。
+
+## v0.4 候选人画像 Graph 增量
+
+实现状态：Design Accepted / Pending Implementation。
+
+### 材料摄取
+
+- 文本型 PDF、Markdown、TXT 和 README 必须先保存不可变 Artifact，再解析 Fragment。
+- PDF Fragment locator 至少包含页码和页内范围；Markdown/TXT/README 使用行号、字符范围或二者。
+- 扫描件或不可解析 PDF 返回 `unsupported_input`，不得生成空文本却标记成功。
+- 相同 owner 下的相同内容继续按 hash 去重。
+
+### 用户回答 Artifact
+
+用户通过 interrupt/resume 提交的回答必须保存为：
+
+```json
+{
+  "source_type": "human_interaction",
+  "content_type": "conversation_response",
+  "original_name": "response-<response_id>.json",
+  "metadata": {
+    "thread_id": "thread-1",
+    "request_id": "request-1",
+    "response_id": "response-1",
+    "question_ids": ["question-1"]
+  }
+}
+```
+
+约束：
+
+- 原始 response payload 进入本地不可变 BlobStore。
+- 每个回答使用 `json_pointer` 或等效 locator 生成 Fragment。
+- 回答生成 `user_reported` Claim；不能从聊天摘要直接更新 Profile。
+- trace 只保存 ID、数量和状态，不保存完整回答正文。
+
+### 用户纠正与 supersede
+
+- 纠正生成新的 `user_reported` Claim，并引用 response Fragment。
+- `supersedes_claim_id` 必须属于同一 owner、subject 和允许纠正的字段。
+- 被替代 Claim 保留历史并标为 `superseded`。
+- 若用户自述与材料中的 observed fact 暂时无法调和，两条 Claim 均保留，Profile 标为 `conflicted`。
+- `remove` 或 `mark_unknown` 也是可审计事件，不允许直接删除 Claim 或 Profile 字段。
+
+### Snapshot 重建和幂等
+
+- CandidateProfile 只能从 active、已验证、已持久化 Claim 投影。
+- 每个 snapshot 保存完整 supporting claim ID 集合、schema version 和 previous snapshot 引用。
+- profile canonical hash 未变化时复用最新 snapshot，不增加版本。
+- 新 Claim、supersede、冲突变化或 schema 迁移时创建递增版本。
+- checkpoint 不得被 ProfileProjector 当作 Claim 来源。

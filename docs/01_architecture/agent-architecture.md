@@ -1,7 +1,7 @@
 # Campus Job Agent 总体架构
 
-版本：v0.3 设计基线
-日期：2026-07-15
+版本：v0.4 设计基线
+日期：2026-07-17
 
 ## 1. 项目定位
 
@@ -80,7 +80,7 @@ LLM Agent 负责：
 - `SearchGoal` 逐步迁移为 `CareerIntent`；
 - 新增 Claim、Profile、Role、Gap 和 Evaluator 的版本化 prompt/schema。
 
-结论：保留同一仓库和历史版本，在 v0.3 上做领域架构升级。
+结论：保留同一仓库和历史版本；v0.4 在 v0.3 证据基础上实现首个有状态业务 subgraph。
 
 ## 4. 总体分层
 
@@ -242,6 +242,43 @@ next_action, budgets, checkpoints, errors, trace_refs
 - Subgraph 是固定业务边界中的状态机，v0.4 起使用。
 - Sub-Agent 是运行时动态创建的隔离工作单元，只有 v1.2 的评估证明有收益时使用。
 - 多来源检索若任务列表已知，优先普通并行工具调用；子任务不可预先确定时才使用动态 worker。
+
+### 6.3 v0.4 Candidate Profile Subgraph
+
+```text
+START
+  → initialize_profile_run
+  → ingest_pending_materials
+  → extract_and_validate_claims
+  → project_candidate_profile
+  → assess_profile_sufficiency
+  → route_next_action
+      ├─ read_more → ingest_pending_materials
+      ├─ ask_user / request_more_materials
+      │      → plan_human_interaction
+      │      → interrupt_for_user
+      │      → archive_human_input
+      │      → evidence/profile loop
+      ├─ finalize_with_unknowns → finalize_profile
+      ├─ complete → finalize_profile
+      └─ fail → finalize_profile
+```
+
+动态决策采用“模型建议、代码裁决”：
+
+- LLM 或 deterministic evaluator 识别高价值 Information Gap，并提出枚举动作。
+- 确定性 policy 检查是否存在未处理材料、问题是否可回答、用户是否跳过、预算是否耗尽。
+- Graph 只能在预定义节点和动作之间路由，LLM 不得生成任意工具名或突破预算。
+
+执行状态与事实状态严格分离：
+
+- LangGraph checkpointer 保存节点边界、pending interrupt、计数器和引用。
+- Evidence Store 保存不可变材料、用户回答、Fragment 和 Claim。
+- Profile Store 保存可从 Claim 重建的 CandidateProfile snapshot。
+- resume 载荷先由 `archive_human_input` 证据化，随后才能更新画像。
+
+v0.4 本地运行使用 SQLite checkpointer，测试可使用内存 checkpointer。相同
+`thread_id` 用于恢复同一任务；中断前后的外部写入必须具备稳定幂等键。
 
 ## 7. 统一证据管线
 
