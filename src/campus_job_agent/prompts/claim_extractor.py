@@ -4,9 +4,9 @@ import json
 
 from campus_job_agent.schemas import EvidenceFragment
 
-CLAIM_PROMPT_NAME = "claim_extractor"
-CLAIM_PROMPT_VERSION = "v0.3.0"
-CLAIM_SCHEMA_VERSION = "v0.3"
+CLAIM_PROMPT_NAME = "candidate_claim_extractor"
+CLAIM_PROMPT_VERSION = "candidate_claim_extractor_v2"
+CLAIM_SCHEMA_VERSION = "v0.4"
 
 
 def build_claim_extractor_messages(
@@ -26,12 +26,15 @@ def build_claim_extractor_messages(
         {
             "role": "system",
             "content": (
-                "CLAIM_EXTRACTOR_V03\n"
+                "CLAIM_EXTRACTOR_V04\n"
                 "You extract atomic candidate facts only from supplied evidence. "
                 "Return one JSON object with key claims. Every claim must cite at "
                 "least one supplied fragment_id. Never invent facts. Allowed "
                 "claim_type: observed_fact, user_reported, model_inference, "
-                "feedback_signal. Use capability:<label> for explicit skills."
+                "feedback_signal. Use capability:<label> for explicit skills; "
+                "education.<field> for explicit education; and "
+                "experiences[<id>].<field> for project or work evidence. A project "
+                "title does not prove an individual responsibility."
             ),
         },
         {

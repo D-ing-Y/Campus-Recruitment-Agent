@@ -13,11 +13,12 @@ data/evidence/**
 data/runs/**
 data/cache/**
 data/reports/**
+data/checkpoints/**
 reports/**
 
 !data/evidence/.gitkeep
 !data/runs/.gitkeep
 !data/cache/.gitkeep
 !data/reports/.gitkeep
+!data/checkpoints/.gitkeep
 !reports/.gitkeep
-

@@ -95,7 +95,7 @@ class EvidencePipelineState(TypedDict, total=False):
 
 ## v0.4 CandidateProfileGraphState
 
-实现状态：Design Accepted / Pending Implementation。
+实现状态：v0.4 已实现。
 
 关联：
 
@@ -111,13 +111,16 @@ class CandidateProfileGraphState(TypedDict, total=False):
     user_id: str
     candidate_id: str
     status: str
+    allowed_path_roots: list[str]
 
     # submitted and persisted evidence references
     input_paths: list[str]
     pending_artifact_ids: list[str]
     active_artifact_ids: list[str]
     processed_artifact_ids: list[str]
+    unsupported_artifact_ids: list[str]
     fragment_ids: list[str]
+    processed_fragment_ids: list[str]
     claim_ids: list[str]
 
     # derived profile references and decisions
@@ -131,6 +134,9 @@ class CandidateProfileGraphState(TypedDict, total=False):
     pending_interaction: dict | None
     resume_input: dict | None
     processed_response_ids: list[str]
+    skipped_gap_ids: list[str]
+    asked_question_keys: list[str]
+    last_human_action: str | None
 
     # controls and observability
     budgets: dict
@@ -139,6 +145,7 @@ class CandidateProfileGraphState(TypedDict, total=False):
     llm_calls: list[dict]
     trace: list[dict]
     errors: list[dict]
+    report: dict | None
 ```
 
 ### 状态枚举
@@ -178,6 +185,8 @@ fail
 | `question_plan`、`pending_interaction` | replace/clear | 一个 thread 同时最多一个 pending request |
 | `resume_input` | replace then clear | 证据化成功后必须清除正文 |
 | `candidate_profile_snapshot_id` | replace | 旧版本保存在 ProfileRepository |
+| `allowed_path_roots` | initialize once | 调用方授权的本地读取边界，resume 不得扩大 |
+| `report` | replace | 仅保存最终画像版本、覆盖率、unknown/conflict 和引用计数摘要 |
 | `budgets` | initialize once | 节点不得提高预算 |
 | `counters` | deterministic increment | 只允许增加或由初始化恢复 |
 

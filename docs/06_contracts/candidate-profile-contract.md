@@ -1,6 +1,6 @@
 # Candidate Profile Contract
 
-状态：v0.4 Design Accepted / Pending Implementation
+状态：v0.4 Implemented
 日期：2026-07-17
 
 本契约定义候选人画像 Graph 的领域对象。事实性字段必须能回溯到已持久化 Claim；未被证据支持的内容只能是显式 `unknown` 或带来源的 `model_inference`。

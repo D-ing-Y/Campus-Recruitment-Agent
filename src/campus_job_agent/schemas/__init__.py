@@ -4,8 +4,22 @@ from campus_job_agent.schemas.candidate import (
     CandidateProfile,
     CapabilityAssessment,
     EducationRecord,
+    EvidenceCoverage,
     ExperienceRecord,
+    ResponsibilityBoundary,
 )
+from campus_job_agent.schemas.candidate_graph import (
+    BudgetState,
+    CandidateProfileGraphState,
+    CounterState,
+    InformationGap,
+    ProfileCorrection,
+    ProfileVersionDiff,
+    QuestionItem,
+    QuestionPlan,
+    SufficiencyAssessment,
+)
+from campus_job_agent.schemas.document import DocumentExtraction, ExtractionUnit
 from campus_job_agent.schemas.evidence import (
     ClaimExtractionBatch,
     ClaimExtractor,
@@ -26,6 +40,12 @@ from campus_job_agent.schemas.llm import (
     LLMResponse,
 )
 from campus_job_agent.schemas.tool import ToolResult
+from campus_job_agent.schemas.human_interaction import (
+    HumanAnswer,
+    HumanInteractionRequest,
+    HumanInteractionResponse,
+    RequestedMaterial,
+)
 from campus_job_agent.schemas.role import HiringSignal, RoleProfile, RoleRequirement
 from campus_job_agent.schemas.trace import (
     RuntimeErrorRecord,
@@ -57,6 +77,23 @@ __all__ = [
     "CapabilityAssessment",
     "EducationRecord",
     "ExperienceRecord",
+    "ResponsibilityBoundary",
+    "EvidenceCoverage",
+    "InformationGap",
+    "SufficiencyAssessment",
+    "QuestionItem",
+    "QuestionPlan",
+    "ProfileCorrection",
+    "ProfileVersionDiff",
+    "HumanAnswer",
+    "RequestedMaterial",
+    "HumanInteractionRequest",
+    "HumanInteractionResponse",
+    "CandidateProfileGraphState",
+    "BudgetState",
+    "CounterState",
+    "DocumentExtraction",
+    "ExtractionUnit",
     "CareerIntent",
     "RoleProfile",
     "RoleRequirement",

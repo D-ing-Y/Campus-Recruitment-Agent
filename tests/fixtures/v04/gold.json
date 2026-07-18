@@ -1,0 +1,17 @@
+{
+  "candidate_sufficient": {
+    "next_action": "complete",
+    "high_value_gaps": [],
+    "final_status": "completed"
+  },
+  "candidate_missing_responsibility": {
+    "next_action": "ask_user",
+    "high_value_gaps": ["gap:experience.project.responsibility"],
+    "allowed_targets": ["experiences[project].responsibilities"],
+    "final_status_after_answer": "completed"
+  },
+  "candidate_scanned_pdf": {
+    "next_action": "request_more_materials",
+    "final_status_after_skip": "completed_with_unknowns"
+  }
+}

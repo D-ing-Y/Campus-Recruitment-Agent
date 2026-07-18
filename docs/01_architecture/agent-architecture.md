@@ -1,7 +1,7 @@
 # Campus Job Agent 总体架构
 
-版本：v0.4 设计基线
-日期：2026-07-17
+版本：v0.4 实现基线
+日期：2026-07-18
 
 ## 1. 项目定位
 
@@ -279,6 +279,11 @@ START
 
 v0.4 本地运行使用 SQLite checkpointer，测试可使用内存 checkpointer。相同
 `thread_id` 用于恢复同一任务；中断前后的外部写入必须具备稳定幂等键。
+
+实现状态：上述 subgraph 已位于 `src/campus_job_agent/workflows/candidate_profile/`；
+真实本地 Tool 位于 `tools/candidate_profile.py`，Evidence/Profile metadata 与
+LangGraph checkpoint 分库保存。文本型 PDF 使用 `pypdf`，持久化恢复使用官方
+`langgraph-checkpoint-sqlite`。2026-07-18 的全量验收为 68/68 通过。
 
 ## 7. 统一证据管线
 

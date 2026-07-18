@@ -68,7 +68,7 @@ profile.load_snapshot
 
 ## v0.4 Candidate Profile Tool
 
-实现状态：Design Accepted / Pending Implementation。
+实现状态：v0.4 已实现；最终集成使用仓库内真实本地 Tool。
 
 v0.4 最终集成必须使用真实本地实现；mock 只用于单元测试、错误注入和
 deterministic eval baseline。外部 MCP/插件可以在未来实现同一契约，但不是完成条件。
@@ -128,6 +128,7 @@ idempotency_conflict
 - Claim 工具必须经过 ClaimValidator，不允许模型直接保存。
 - Profile 工具只读取已持久化 active Claim。
 - `evidence.archive_user_response` 必须校验 request/response/owner 并使用稳定幂等键。
+- 文件型 resume 还必须校验路径处于 Graph 初始化时固定的 `allowed_path_roots`。
 - ToolResult 不复制完整材料、完整回答或二进制。
 
 ### Checkpointer 边界

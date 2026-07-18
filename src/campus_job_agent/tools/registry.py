@@ -25,7 +25,11 @@ class ToolRegistry:
                 records=[],
                 evidence_ids=[],
                 error=f"Tool not registered: {tool_name}",
-                metadata={"args": args},
+                metadata={
+                    "error_type": "validation_error",
+                    "retryable": False,
+                    "needs_user_action": False,
+                },
             )
 
         try:
@@ -37,5 +41,9 @@ class ToolRegistry:
                 records=[],
                 evidence_ids=[],
                 error=str(exc),
-                metadata={"args": args},
+                metadata={
+                    "error_type": "tool_retryable_error",
+                    "retryable": True,
+                    "needs_user_action": False,
+                },
             )

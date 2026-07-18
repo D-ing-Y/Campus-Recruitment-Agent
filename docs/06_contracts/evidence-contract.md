@@ -102,7 +102,7 @@ v0.3 实现中的 `ProfileSnapshot` 是 Candidate/CareerIntent/Role 的统一持
 
 ## v0.4 候选人画像 Graph 增量
 
-实现状态：Design Accepted / Pending Implementation。
+实现状态：v0.4 已实现；保留 v0.3 兼容读取与回归。
 
 ### 材料摄取
 
@@ -110,6 +110,8 @@ v0.3 实现中的 `ProfileSnapshot` 是 Candidate/CareerIntent/Role 的统一持
 - PDF Fragment locator 至少包含页码和页内范围；Markdown/TXT/README 使用行号、字符范围或二者。
 - 扫描件或不可解析 PDF 返回 `unsupported_input`，不得生成空文本却标记成功。
 - 相同 owner 下的相同内容继续按 hash 去重。
+- 解析后的标准化文本保存为独立 `DocumentExtraction` 派生记录与不可变文本
+  blob；Graph State 只保存 Artifact/Fragment ID，不保存派生正文。
 
 ### 用户回答 Artifact
 

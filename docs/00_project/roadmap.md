@@ -17,7 +17,7 @@
 | v0.1 | 已完成 | Mini Agent Runtime | LangGraph 最小图、ToolRegistry、trace、report、测试 |
 | v0.2 | 已完成 | LLM Provider 与结构化输出 | Provider、JSON/Pydantic、重试、缓存、LLM trace |
 | v0.3 | 已完成 | 统一证据层与领域契约 | Evidence Store、Claim、Provenance、画像契约、能力本体 |
-| v0.4 | 设计完成 / 待实现 | 候选人画像 Graph | 文档摄取、画像构建、充分性评价、定向提问、interrupt/resume |
+| v0.4 | 已完成 | 候选人画像 Graph | 文档摄取、画像构建、充分性评价、定向提问、interrupt/resume |
 | v0.5 | 计划中 | 岗位需求画像 Graph | 招聘/面经证据、岗位族与具体岗位画像、检索循环 |
 | v0.6 | 计划中 | 双画像匹配与用户决策 | 四类差距、可解释匹配、偏好调整、回退与重检索 |
 | v0.7 | 计划中 | 准备计划与反馈闭环 | 能力路线、练习/笔面试反馈、画像更新、动态重排 |
@@ -90,7 +90,7 @@
 
 ## v0.4：候选人画像 Graph
 
-状态：Requirements / ADR / RFC / Contracts / Tasks / Eval Design 已完成（2026-07-17），待代码实现与验收。
+状态：已完成（2026-07-18）。Requirements / ADR / RFC / Contracts、代码、真实本地 Tool、测试和 Eval 均已验收；68 项测试全部通过。
 
 版本定位：
 

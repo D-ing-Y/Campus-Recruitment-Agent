@@ -27,17 +27,30 @@ class ClaimExtractorService:
         self.cache = cache
 
     def extract(
-        self, subject_id: str, fragments: list[EvidenceFragment]
+        self,
+        subject_id: str,
+        fragments: list[EvidenceFragment],
+        *,
+        max_attempts: int | None = None,
     ) -> tuple[list[EvidenceClaim], list[LLMCallRecord]]:
         def retry(previous: str, error: str) -> list[dict[str, str]]:
             return build_claim_retry_messages(
                 fragments, subject_id, previous, error
             )
 
+        config = self.config
+        if max_attempts is not None:
+            config = self.config.model_copy(
+                update={
+                    "max_retries": min(
+                        self.config.max_retries, max(0, max_attempts - 1)
+                    )
+                }
+            )
         batch, records = parse_structured_output(
             messages=build_claim_extractor_messages(fragments, subject_id),
             output_model=ClaimExtractionBatch,
-            config=self.config,
+            config=config,
             provider=self.provider,
             cache=self.cache,
             prompt_name=CLAIM_PROMPT_NAME,
@@ -56,6 +69,7 @@ class ClaimExtractorService:
                 confidence=item.confidence,
                 extractor=extractor,
                 prompt_version=CLAIM_PROMPT_VERSION,
+                schema_version=CLAIM_SCHEMA_VERSION,
             )
             for item in batch.claims
         ]

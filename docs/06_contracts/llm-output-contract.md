@@ -68,7 +68,7 @@ v0.2 的 Provider、缓存、重试和调用记录继续复用。v0.3 将 Search
 
 ## v0.4 Candidate Profile Structured Outputs
 
-实现状态：Design Accepted / Pending Implementation。
+实现状态：v0.4 已实现；deterministic baseline 与结构化 LLM evaluator 共用本契约。
 
 v0.4 新增两个模型输出边界。两者都必须使用 `parse_structured_output()`、JSON-only、
 Pydantic 校验、版本化 cache key 和有限重试。

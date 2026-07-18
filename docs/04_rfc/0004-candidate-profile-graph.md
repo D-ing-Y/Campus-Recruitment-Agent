@@ -1,7 +1,8 @@
 # RFC-0004: 有状态候选人画像 Graph
 
-状态：Accepted / Ready for Implementation
+状态：Implemented
 日期：2026-07-17
+实现验收：2026-07-18，68 项测试通过
 关联需求：`docs/03_requirements/v0.4-candidate-profile-graph.md`
 关联 ADR：`docs/05_adr/0004-use-stateful-candidate-profile-subgraph.md`
 

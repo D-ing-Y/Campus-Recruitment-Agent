@@ -3,6 +3,7 @@
 from typing import Protocol
 
 from campus_job_agent.schemas import (
+    DocumentExtraction,
     EvidenceArtifact,
     EvidenceClaim,
     EvidenceFragment,
@@ -41,6 +42,27 @@ class EvidenceRepository(Protocol):
 
     def list_claims(self, subject_id: str) -> list[EvidenceClaim]: ...
 
+    def list_active_claims(self, subject_id: str) -> list[EvidenceClaim]: ...
+
+    def mark_claim_superseded(self, claim_id: str) -> EvidenceClaim: ...
+
+    def save_extraction(
+        self, extraction: DocumentExtraction
+    ) -> DocumentExtraction: ...
+
+    def get_extraction(self, artifact_id: str) -> DocumentExtraction | None: ...
+
+    def save_response_receipt(
+        self,
+        *,
+        response_id: str,
+        idempotency_key: str,
+        payload_hash: str,
+        result: dict,
+    ) -> dict: ...
+
+    def get_response_receipt(self, response_id: str) -> dict | None: ...
+
 
 class ProfileRepository(Protocol):
     def save_profile(self, profile: ProfileSnapshot) -> ProfileSnapshot: ...
@@ -52,3 +74,5 @@ class ProfileRepository(Protocol):
     def list_profiles(
         self, subject_id: str, profile_type: str | None = None
     ) -> list[ProfileSnapshot]: ...
+
+    def get_profile(self, snapshot_id: str) -> ProfileSnapshot | None: ...

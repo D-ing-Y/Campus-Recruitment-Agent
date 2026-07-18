@@ -30,6 +30,8 @@ class ArtifactIngestor:
         owner_id: str,
         source_type: str = "user_upload",
         source_url: str | None = None,
+        extract_text: bool = True,
+        parser_version: str = "v0.3.0",
     ) -> IngestionResult:
         file_path = Path(path)
         raw = file_path.read_bytes()
@@ -41,20 +43,25 @@ class ArtifactIngestor:
         suffix = file_path.suffix.lower()
         content_type = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
         artifact_id = str(uuid4())
-        raw_key = f"raw/{owner_id}/{artifact_id}/{file_path.name}"
-        text_key = f"text/{owner_id}/{artifact_id}.txt"
+        owner_segment = hashlib.sha256(owner_id.encode("utf-8")).hexdigest()[:24]
+        raw_key = f"raw/{owner_segment}/{artifact_id}/{file_path.name}"
+        text_key = f"text/{owner_segment}/{artifact_id}.txt"
         created_uris: list[str] = []
         warnings: list[str] = []
         try:
             raw_uri = self.blob_store.put(raw_key, raw)
             created_uris.append(raw_uri)
-            text, parser_name = _extract_text(raw, suffix)
+            text, parser_name = (
+                _extract_text(raw, suffix)
+                if extract_text
+                else (None, "registration_only")
+            )
             text_uri = None
             if text is not None:
                 text_uri = self.blob_store.put(text_key, text.encode("utf-8"))
                 created_uris.append(text_uri)
             else:
-                warnings.append("PDF/binary artifact registered without text extraction")
+                warnings.append("artifact registered without inline text extraction")
                 parser_name = "registration_only"
             artifact = EvidenceArtifact(
                 artifact_id=artifact_id,
@@ -67,11 +74,11 @@ class ArtifactIngestor:
                 text_uri=text_uri,
                 content_hash=digest,
                 parser_name=parser_name,
-                parser_version="v0.3.0",
+                parser_version=parser_version,
                 provenance=Provenance(
                     source_url=source_url,
                     parser_name=parser_name,
-                    parser_version="v0.3.0",
+                    parser_version=parser_version,
                 ),
             )
             saved = self.repository.save_artifact(artifact)

@@ -57,8 +57,29 @@ def evaluate_evidence(
 
 
 def _valid_locator(fragment: EvidenceFragment) -> bool:
+    if fragment.locator_type == "json_pointer":
+        return str(fragment.locator.get("pointer", "")).startswith("/")
+    if fragment.locator_type == "page_and_char_range":
+        return (
+            isinstance(fragment.locator.get("page"), int)
+            and fragment.locator["page"] >= 1
+            and _valid_range(fragment)
+        )
+    if fragment.locator_type == "line_and_char_range":
+        return (
+            isinstance(fragment.locator.get("start_line"), int)
+            and isinstance(fragment.locator.get("end_line"), int)
+            and 1
+            <= fragment.locator["start_line"]
+            <= fragment.locator["end_line"]
+            and _valid_range(fragment)
+        )
     if fragment.locator_type != "char_range":
-        return bool(fragment.locator)
+        return False
+    return _valid_range(fragment)
+
+
+def _valid_range(fragment: EvidenceFragment) -> bool:
     start = fragment.locator.get("start")
     end = fragment.locator.get("end")
     return (

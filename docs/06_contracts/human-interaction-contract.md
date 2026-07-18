@@ -1,6 +1,6 @@
 # Human Interaction Contract
 
-状态：v0.4 Design Accepted / Pending Implementation
+状态：v0.4 Implemented
 日期：2026-07-17
 
 本契约统一 LangGraph `interrupt()` 与 resume 的结构化载荷。v0.4 用于候选人画像提问、补充材料和可选画像复核，后续版本可复用。
@@ -102,6 +102,9 @@
 - question ID、material request ID 和 correction target 属于当前 request。
 - request 未过期或已由 policy 允许恢复。
 - 本地文件路径在调用方授权范围内。
+
+实现中授权范围由 Graph 初始化时的 `allowed_path_roots` 固定；resume 只能提交该
+范围内且实际存在的文件，不能通过响应扩大授权根目录。
 
 校验失败时不得写 Evidence Store，也不得推进 Graph。
 

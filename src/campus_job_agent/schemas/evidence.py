@@ -110,8 +110,10 @@ class EvidenceClaim(BaseModel):
             "subject_id": self.subject_id,
             "predicate": self.predicate,
             "value": self.value,
+            "claim_type": self.claim_type,
             "evidence_fragment_ids": sorted(self.evidence_fragment_ids),
             "schema_version": self.schema_version,
+            "supersedes_claim_id": self.supersedes_claim_id,
         }
         canonical = json.dumps(
             payload,

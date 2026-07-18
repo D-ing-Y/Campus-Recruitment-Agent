@@ -1,5 +1,6 @@
 """SQLite repository for evidence metadata and profile snapshots."""
 
+import json
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
@@ -8,6 +9,7 @@ from typing import TypeVar
 from pydantic import BaseModel
 
 from campus_job_agent.schemas import (
+    DocumentExtraction,
     EvidenceArtifact,
     EvidenceClaim,
     EvidenceFragment,
@@ -162,6 +164,88 @@ class SQLiteRepository:
             EvidenceClaim,
         )
 
+    def list_active_claims(self, subject_id: str) -> list[EvidenceClaim]:
+        # Lifecycle status is part of the immutable claim payload stored by this
+        # local adapter. Superseding changes only that lifecycle marker.
+        return [
+            claim for claim in self.list_claims(subject_id) if claim.status == "active"
+        ]
+
+    def mark_claim_superseded(self, claim_id: str) -> EvidenceClaim:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM claims WHERE claim_id = ?", (claim_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"unknown claim: {claim_id}")
+            claim = EvidenceClaim.model_validate_json(row[0])
+            if claim.status == "superseded":
+                return claim
+            updated = claim.model_copy(update={"status": "superseded"})
+            connection.execute(
+                "UPDATE claims SET payload_json = ? WHERE claim_id = ?",
+                (updated.model_dump_json(), claim_id),
+            )
+        return updated
+
+    def save_extraction(
+        self, extraction: DocumentExtraction
+    ) -> DocumentExtraction:
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT OR IGNORE INTO document_extractions VALUES (?, ?)",
+                (extraction.artifact_id, extraction.model_dump_json()),
+            )
+        return self.get_extraction(extraction.artifact_id) or extraction
+
+    def get_extraction(self, artifact_id: str) -> DocumentExtraction | None:
+        return self._one(
+            "SELECT payload_json FROM document_extractions WHERE artifact_id = ?",
+            (artifact_id,),
+            DocumentExtraction,
+        )
+
+    def save_response_receipt(
+        self,
+        *,
+        response_id: str,
+        idempotency_key: str,
+        payload_hash: str,
+        result: dict,
+    ) -> dict:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT payload_hash, result_json FROM human_response_receipts "
+                "WHERE response_id = ?",
+                (response_id,),
+            ).fetchone()
+            if row is not None:
+                if row["payload_hash"] != payload_hash:
+                    raise ValueError(
+                        "idempotency_conflict: response_id has a different payload"
+                    )
+                return json.loads(row["result_json"])
+            connection.execute(
+                "INSERT INTO human_response_receipts VALUES (?, ?, ?, ?, ?)",
+                (
+                    response_id,
+                    idempotency_key,
+                    payload_hash,
+                    json.dumps(result, ensure_ascii=False, sort_keys=True),
+                    datetime.now(UTC).isoformat(),
+                ),
+            )
+        return result
+
+    def get_response_receipt(self, response_id: str) -> dict | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT result_json FROM human_response_receipts "
+                "WHERE response_id = ?",
+                (response_id,),
+            ).fetchone()
+        return None if row is None else json.loads(row["result_json"])
+
     def save_profile(self, profile: ProfileSnapshot) -> ProfileSnapshot:
         with self._connect() as connection:
             connection.execute(
@@ -186,6 +270,13 @@ class SQLiteRepository:
             "WHERE subject_id = ? AND profile_type = ? "
             "ORDER BY version DESC LIMIT 1",
             (subject_id, profile_type),
+            ProfileSnapshot,
+        )
+
+    def get_profile(self, snapshot_id: str) -> ProfileSnapshot | None:
+        return self._one(
+            "SELECT payload_json FROM profile_snapshots WHERE snapshot_id = ?",
+            (snapshot_id,),
             ProfileSnapshot,
         )
 
