@@ -23,7 +23,22 @@
   - `candidate_budget_exhausted`：连续缺口达到循环预算，应安全终止。
   - `candidate_resume_duplicate`：相同 response 重放，不得重复写入。
   - `candidate_checkpoint_restart`：重建 Graph 后使用同一 thread 恢复。
-- v0.5：岗位族、具体岗位、官方/社区冲突和过期信息案例。
+- v0.5：岗位需求画像 Graph 固定数据集：
+  - `role_sufficient_sample`：至少 3 个去重岗位、2 家公司和招聘/经验证据，可完成岗位族画像。
+  - `role_pagination_available`：当前 query 有 next cursor，应选择 `search_more`。
+  - `role_low_relevance`：结果与目标岗位族相关性低，应选择 `change_query`。
+  - `role_low_company_diversity`：岗位只来自一家企业，应选择 `change_source` 或继续补证。
+  - `role_auth_required`：经验来源要求登录，应 interrupt；authorized/skip 分别有 gold route。
+  - `role_cross_source_duplicate`：同一岗位跨来源出现，只计一个 job cluster。
+  - `role_fuzzy_not_duplicate`：相似标题但公司/地点/招聘周期不同，不应错误合并。
+  - `role_community_authority_violation`：面经声称“必须硕士”，不得创建 hard qualification。
+  - `role_experience_scope_unknown`：帖子未明确公司/岗位，不能归到具体岗位。
+  - `role_expired_job`：明确截止时间已过，岗位 snapshot 标 expired。
+  - `role_source_changed`：页面结构不匹配，返回 source_changed 并换源/unknown。
+  - `role_budget_exhausted`：连续空结果或失败达到预算，安全终止。
+  - `role_source_batch_duplicate`：相同 batch 重放，不重复写入。
+  - `role_checkpoint_restart`：重建 Graph 后从 collection/auth 边界恢复。
+  - `role_raw_before_parse_failure`：raw 写入失败时 parser 不得执行。
 - v0.8：带 relevance judgement、无答案问题和 citation gold 的检索集。
 - v1.1：重复消息、worker 崩溃、对象写入失败和数据库冲突场景。
 
@@ -34,3 +49,6 @@
 - 每条 gold Claim、岗位要求和检索相关性标注应记录标注依据。
 - v0.4 每个 fixture 还必须标注 gold `next_action`、高价值 gap、允许问题目标、最终状态和预期 snapshot 变化。
 - interrupt fixture 的原始回答、response ID、request ID 与期望 Claim 必须分别保存，便于幂等和追溯测试。
+- v0.5 每个 fixture 标注 source/channel/query、公开来源时间、gold normalized record、
+  job cluster、Claim authority、profile 字段、样本分母、freshness 和 next action。
+- v0.5 live smoke 数据与固定集分开；默认测试不得依赖实时网页。

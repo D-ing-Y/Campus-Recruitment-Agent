@@ -18,7 +18,7 @@
 | v0.2 | 已完成 | LLM Provider 与结构化输出 | Provider、JSON/Pydantic、重试、缓存、LLM trace |
 | v0.3 | 已完成 | 统一证据层与领域契约 | Evidence Store、Claim、Provenance、画像契约、能力本体 |
 | v0.4 | 已完成 | 候选人画像 Graph | 文档摄取、画像构建、充分性评价、定向提问、interrupt/resume |
-| v0.5 | 计划中 | 岗位需求画像 Graph | 招聘/面经证据、岗位族与具体岗位画像、检索循环 |
+| v0.5 | 设计完成 / 待实现 | 岗位需求画像 Graph | 招聘/面经证据、岗位族与具体岗位画像、检索循环 |
 | v0.6 | 计划中 | 双画像匹配与用户决策 | 四类差距、可解释匹配、偏好调整、回退与重检索 |
 | v0.7 | 计划中 | 准备计划与反馈闭环 | 能力路线、练习/笔面试反馈、画像更新、动态重排 |
 | v0.8 | 计划中 | Hybrid RAG 与长期记忆 | 稀疏+稠密检索、metadata filter、rerank、引用回答 |
@@ -134,18 +134,52 @@
 
 ## v0.5：岗位需求画像 Graph
 
+状态：Requirements / ADR / RFC / Contracts / Tasks / Eval Design 已完成（2026-07-18），待代码实现与验收。
+
+版本定位：
+
+- 复用 v0.4 的 subgraph、checkpoint、预算和 interrupt 模式，构建第二个独立业务 Graph。
+- 招聘岗位页和社区经验帖使用不同 channel、schema、authority 和覆盖评价。
+- CareerIntent 决定搜索范围；CandidateProfile 不参与本版本的岗位排除或匹配。
+
 核心交付：
 
 - 招聘来源和经验帖来源分离的采集/归档契约。
-- 一个真实招聘来源、一个真实经验帖来源，其余来源先用 fixture 验证。
+- `zhaopin_jobs` 和 `nowcoder_experience` 两个首版 live adapter；默认 CI 使用 fixture。
+- raw-before-parse、SourceRunReceipt、query/source/batch 幂等和字段级来源权威校验。
 - 具体岗位画像与岗位族画像。
-- 硬性资格、工作能力、加分项、招聘筛选信号和公司特异项分层。
-- `role_profile` subgraph：查询规划、检索、归一化、去重、覆盖度评价、换词/换源/停止。
+- 硬性资格、职责、核心能力、加分项、工作场景、招聘筛选信号和公司特异项分层。
+- 岗位族画像保留样本、分母、公司数、prevalence、时间窗口和 insufficient sample。
+- `role_profile` subgraph：查询规划、检索、归档、归一化、去重、画像聚合、覆盖度评价、换词/换源/停止。
+- `search_more`、`change_query`、`change_source`、`await_user_auth`、
+  `finalize_with_unknowns`、`complete`、`fail` 动作枚举。
+- 用户正常登录与本地 Copy as cURL/Cookie 导入；Graph 只保存 credential ref。
 - 所有岗位事实保留 source URL、发布时间、获取时间和置信度。
+
+本版本不包含：
+
+- Candidate/Role 匹配百分比、能力差距、岗位排序和用户目标选择。
+- RAG、向量检索、分布式存储、Multi-Agent 和自动投递。
+- 验证码绕过、攻击性反爬或全平台覆盖。
 
 完成标准：
 
 - 针对一个岗位方向生成有证据支持的岗位族画像和若干具体岗位画像。
+- 招聘和经验 raw 均先归档；100% 事实性岗位字段可回溯到允许该 predicate 的来源。
+- 跨平台重复岗位在岗位族分母中只计一次，所有来源仍保留。
+- Graph 能换词、换源和在预算内停止；样本不足时诚实输出 insufficient sample。
+- 授权来源可 interrupt/resume，Cookie/cURL 不进入 State、Evidence、trace 或 Git。
+- 两个 live adapter 分别完成本地 opt-in smoke；默认 CI 保持完全离线。
+- v0.1-v0.4 回归通过并生成实际 v0.5 eval report 后才能标记完成。
+
+设计文档：
+
+- `docs/03_requirements/v0.5-role-profile-graph.md`
+- `docs/03_requirements/v0.5-implementation-tasks.md`
+- `docs/04_rfc/0005-role-profile-graph.md`
+- `docs/05_adr/0005-separate-source-channels-and-role-profile-levels.md`
+- `docs/06_contracts/source-collection-contract.md`
+- `docs/06_contracts/role-profile-contract.md`
 
 ## v0.6：双画像匹配与用户决策
 

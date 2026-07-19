@@ -142,3 +142,80 @@ candidate_claim_extractor_v2 / schema v0.4
 
 版本、provider、model、profile canonical hash、Claim ID 集和预算摘要必须进入 cache key。
 不得把完整 PDF 或完整用户回答直接写入 cache/trace。
+
+## v0.5 Role Profile Structured Outputs
+
+实现状态：Design Accepted / Pending Implementation。
+
+v0.5 新增四类结构化输出。所有输出继续使用 `parse_structured_output()`、JSON-only、
+Pydantic、有限重试、版本化 cache/trace，并由确定性 validator 裁决。
+
+### Role Query Plan
+
+输入：
+
+- SearchScope；
+- source capability；
+- query history/空结果/失败原因；
+- RoleCoverageGap；
+- 剩余预算。
+
+输出只能包含 `SourceQuery` 枚举字段。模型不得：
+
+- 扩大 hard scope；
+- 引用未启用 source；
+- 输出 credential/cookie；
+- 重复已有 query fingerprint；
+- 根据 CandidateProfile 能力排除岗位。
+
+### Recruitment Normalization
+
+输出必须符合 `NormalizedJobPosting`：
+
+- preserve company/role/city/application/source URL；
+- preserve raw description/requirements；
+- 缺失字段显式 unknown/null/[]；
+- 不因噪声或字段缺失静默丢弃记录；
+- `excluded_hard_scope` 必须给出可验证 exclusion code/evidence。
+
+### Experience Extraction
+
+输出必须符合 `ExperienceEvidenceRecord`：
+
+- 只总结已归档 Fragment；
+- 分开 written exam、interview、tech stack、project preference、salary、work context；
+- 每个 signal 绑定 fragment IDs；
+- 明确 company/role/role family/unknown scope；
+- 不合并不同公司或岗位；
+- 不把个人经验表达为官方硬性要求。
+
+### Role Coverage Output
+
+输出必须符合 `RoleCoverageAssessment`：
+
+- 评价招聘字段、岗位样本、公司多样性、authority、freshness、experience signal 和 conflict；
+- 给出 RoleCoverageGap 与枚举 recommended action；
+- 不修改 deterministic sample/count/prevalence/frequency；
+- 不输出 Candidate/Role match score。
+
+### 确定性验证
+
+- query fingerprint/source capability/budget 由代码校验；
+- normalized record 的 URL、artifact/fragment refs 和 hard scope 由代码校验；
+- Claim predicate × source authority 由代码校验；
+- dedup cluster 和聚合分母由代码计算；
+- information value、freshness 和 prevalence band 由代码计算；
+- 非法输出重试后使用 deterministic baseline 或保留 unknown。
+
+### 建议版本
+
+```text
+role_query_planner_v1 / schema v0.5
+job_posting_normalizer_v1 / schema v0.5
+experience_signal_extractor_v1 / schema v0.5
+role_claim_extractor_v1 / schema v0.5
+role_coverage_v1 / schema v0.5
+```
+
+cache key 包含 source/query/artifact/fragment hash、prompt/schema/adapter version 和 scope hash；
+不得缓存 credential、完整 headers 或 cURL。

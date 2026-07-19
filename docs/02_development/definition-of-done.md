@@ -15,3 +15,6 @@
 - 长任务版本已测试中断、恢复、幂等和停止条件。
 - human-in-the-loop 输入已归档为 evidence，checkpoint 或聊天摘要没有绕过 Claim/Validator 更新画像。
 - 文档设计阶段只能标记 Ready for Implementation；实际测试与 eval report 完成后才能标记 Implemented。
+- 引入 live source 的版本已区分离线 CI 与 opt-in live smoke，并记录真实来源、时间、结果和限制。
+- 外部内容遵守 raw-before-parse；来源 authority、freshness、去重分母和 credential redaction 均有测试。
+- 如果文档要求的 live smoke 未实际通过，版本不得以 fixture 结果替代并标记 Implemented。

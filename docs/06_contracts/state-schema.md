@@ -224,6 +224,149 @@ fail
 - 相同 response 的重放通过 `processed_response_ids` 和 Evidence Store 幂等键去重。
 - checkpoint 序列化失败必须使 run 失败，不得声称任务可恢复。
 
+## v0.5 RoleProfileGraphState
+
+实现状态：Design Accepted / Pending Implementation。
+
+关联：
+
+- `docs/03_requirements/v0.5-role-profile-graph.md`
+- `docs/04_rfc/0005-role-profile-graph.md`
+- `docs/06_contracts/source-collection-contract.md`
+- `docs/06_contracts/role-profile-contract.md`
+
+```python
+class RoleProfileGraphState(TypedDict, total=False):
+    # identity and lifecycle
+    run_id: str
+    thread_id: str
+    user_id: str
+    status: str
+
+    # immutable scope
+    career_intent_snapshot_id: str | None
+    search_scope: dict
+
+    # query and source execution
+    query_plan: dict | None
+    pending_queries: list[dict]
+    completed_query_ids: list[str]
+    query_history: list[dict]
+    enabled_source_ids: list[str]
+    skipped_source_ids: list[str]
+    source_capabilities: dict[str, dict]
+    pending_auth_source_id: str | None
+    credential_refs: dict[str, str]
+    source_batch_ids: list[str]
+    source_run_receipts: list[dict]
+
+    # evidence and normalized records
+    raw_artifact_ids: list[str]
+    extraction_ids: list[str]
+    fragment_ids: list[str]
+    normalized_job_ids: list[str]
+    experience_record_ids: list[str]
+    job_cluster_ids: list[str]
+    claim_ids: list[str]
+
+    # derived profiles and decisions
+    job_instance_profile_snapshot_ids: list[str]
+    role_family_profile_snapshot_id: str | None
+    coverage_assessment: dict | None
+    coverage_gaps: list[dict]
+    next_action: str | None
+
+    # human authorization
+    pending_interaction: dict | None
+    resume_input: dict | None
+
+    # controls and observability
+    budgets: dict
+    counters: dict
+    tool_results: list[dict]
+    llm_calls: list[dict]
+    trace: list[dict]
+    errors: list[dict]
+    report: dict | None
+```
+
+### 状态枚举
+
+`status`：
+
+```text
+initialized
+running
+interrupted
+completed
+completed_with_unknowns
+cancelled
+failed
+```
+
+`next_action`：
+
+```text
+search_more
+change_query
+change_source
+await_user_auth
+finalize_with_unknowns
+complete
+fail
+```
+
+### Reducer
+
+| 字段 | 合并方式 | 说明 |
+| --- | --- | --- |
+| `trace`、`errors`、`llm_calls`、`tool_results`、`source_run_receipts` | append | 保存每轮增量摘要 |
+| Artifact/Extraction/Fragment/Record/Cluster/Claim/Snapshot ID | stable union | 去重并保持首次顺序 |
+| `search_scope`、`budgets`、`enabled_source_ids` | initialize once | 节点不得扩大 scope、预算或来源权限 |
+| `pending_queries` | replace after consume | 完成/失败的 query 写入 history |
+| `completed_query_ids`、`skipped_source_ids` | stable union | 防止重复查询/授权 |
+| `credential_refs` | merge by source ID | 只保存非敏感引用 |
+| `query_plan`、`coverage_assessment`、`coverage_gaps`、`next_action` | replace | 只保留当前决策 |
+| `pending_interaction`、`resume_input`、`pending_auth_source_id` | replace/clear | 同时最多等待一个来源授权 |
+| `role_family_profile_snapshot_id`、`report` | replace | 历史版本留在 repository |
+| `counters` | deterministic increment | 不能由 LLM 修改 |
+
+### RoleSearchBudget
+
+```json
+{
+  "max_query_rounds": 3,
+  "max_queries": 12,
+  "max_source_switches": 2,
+  "max_documents": 60,
+  "max_llm_calls": 20,
+  "max_tool_calls": 50
+}
+```
+
+### RoleSearchCounter
+
+```json
+{
+  "query_rounds": 0,
+  "queries": 0,
+  "source_switches": 0,
+  "documents": 0,
+  "llm_calls": 0,
+  "tool_calls": 0
+}
+```
+
+预算耗尽后只能 `finalize_with_unknowns` 或 `fail`。
+
+### 授权与 Checkpoint
+
+- `credential_refs` 只保存 source→ref，不保存 Cookie、Authorization 或 cURL。
+- `resume_input` 只允许 `authorized`、`skip_source`、`cancel` 及相关 ID。
+- 用户在 Graph 外正常登录和导入凭据；Graph 恢复时只验证 ref。
+- checkpointer 在 compile 时注入，Evidence/Source Repository 与 checkpoint 分库。
+- source batch、query 和授权节点均需幂等，以支持 checkpoint 重放。
+
 ## v1.0 ParentState 目标形态
 
 ```python

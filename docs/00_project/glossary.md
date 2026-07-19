@@ -12,6 +12,17 @@
 - Candidate Profile：由证据派生的候选人能力、教育、科研、项目、实习和能力证明画像。
 - Career Intent：与能力画像分离的岗位、城市、薪资、行业及硬性/可协商约束。
 - Role Profile：具体岗位或岗位族的资格、工作能力、加分项和招聘筛选信号画像。
+- Job Instance Role Profile：由一个去重后的具体岗位集群构建的画像，保留公司、地点、招聘周期、职责、资格、申请入口和公司特异项。
+- Role Family Profile：由多个具体岗位画像和去重经验信号聚合的岗位族画像，必须展示样本、分母、公司覆盖、时间窗口和差异。
+- Source Channel：外部证据采集通道；v0.5 至少区分 recruitment 与 experience，两者不能共享业务输出 schema。
+- Source Adapter：封装特定招聘或经验来源查询、分页、授权、raw 归档和错误语义的可替换实现。
+- Source Authority：字段级来源权限，决定某类来源可否确认某个 predicate；不是来源的单一总分。
+- SourceRunReceipt：一次来源运行的非敏感收据，记录查询、数量、时间、adapter 版本、Artifact 引用和错误，不记录 Cookie/cURL。
+- Search Scope：从 CareerIntent 派生的岗位检索硬范围，包括目标岗位、城市、毕业年份、招聘类型和显式 hard constraints。
+- Job Posting Cluster：把跨平台重复招聘记录归为一个具体岗位统计单位，同时保留所有原始来源。
+- Raw-before-parse：任何网页或接口响应必须先以不可变 Artifact 归档，再进行解析、归一化或模型总结。
+- Prevalence：某要求在去重岗位样本中的出现比例；必须同时展示分子、分母和公司覆盖。
+- Freshness：根据发布时间、获取时间、截止时间和配置窗口计算的时效标签。
 - Capability Ontology：候选人画像与岗位画像共享的能力概念、别名、层级和版本。
 - Profile Snapshot：某一时间点由证据和 claim 构建的不可变画像版本。
 - Sufficiency Assessment：评价当前候选人画像能否在明确未知边界下用于下一阶段，并给出分维度结果、信息缺口和建议动作；不等于岗位匹配评分。
@@ -26,6 +37,7 @@
 - Checkpoint：LangGraph 在节点边界持久化的状态快照，用于恢复长任务。
 - Interrupt：Graph 主动暂停并等待用户输入、确认、登录或判断的机制。
 - Resume：使用相同 `thread_id` 和匹配的交互 request 恢复已中断 Graph；重复提交必须幂等。
+- Credential Ref：指向本地秘密存储中登录材料的非敏感引用；Cookie、Authorization 和 cURL 原文不得进入 Graph State。
 - Sub-Agent：由主 Agent 动态委派、具有隔离上下文和终止条件的工作单元。
 - Distributed Storage：由元数据数据库、对象存储、向量存储等组成并支持多 worker 的持久层；不是单机 SQLite 的别名。
 - Eval：评估 schema、证据追溯、检索、路由、匹配、恢复、成本和最终任务质量的体系。

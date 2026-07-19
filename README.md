@@ -6,7 +6,9 @@
 
 ## 当前阶段
 
-v0.4 候选人画像 Graph 已于 2026-07-18 完成代码、测试和 Eval 验收，当前项目版本为 0.4.0。
+v0.4 候选人画像 Graph 已于 2026-07-18 完成代码、测试和 Eval 验收，当前代码版本为 0.4.0。
+
+v0.5 岗位需求画像 Graph 的 Requirements、ADR、RFC、跨模块 Contracts、实现任务和 Eval 设计已于 2026-07-18 完成，当前状态为待代码实现。
 
 v0.1/v0.2 保留为 Runtime 与 LLM 基座，v0.3 提供统一证据层、领域契约、版本化画像快照和证据质量评估；v0.4 已将这些能力接入第一个可循环、可中断、可恢复的候选人画像 LangGraph subgraph。
 
@@ -47,7 +49,17 @@ v0.4 已实现：
 - 真实 Tool 统一通过 `ToolRegistry`，checkpoint 使用官方 SQLite saver。
 - 回答与纠正先归档为 Artifact/Fragment/Claim，再重建画像；重复 resume 幂等。
 
-v0.4 不接入真实招聘网站，不实现岗位画像、RAG、分布式存储、Multi-Agent、Web UI 或服务器部署。默认测试不需要真实 API key。
+v0.5 已完成设计、待实现：
+
+- recruitment 与 experience 来源分离的 SourceAdapter 和 raw-before-parse 证据链。
+- `zhaopin_jobs` 与 `nowcoder_experience` 首版 live adapter，默认 CI 使用离线 fixture。
+- 具体岗位画像与带样本/分母的岗位族画像。
+- 查询规划、翻页、换词、换源、覆盖度评价和授权 interrupt/resume。
+- 招聘事实与社区笔面试信号的字段级来源权威校验。
+- 跨来源岗位去重、经验帖去重、时效标签和 SourceRunReceipt。
+- 用户正常登录与本地 cURL/Cookie 导入；秘密值不进入 State、Evidence、trace 或 Git。
+
+v0.5 不实现双画像匹配、学习计划、RAG、分布式存储、Multi-Agent、Web UI 或自动投递。默认测试不访问真实招聘网站，不需要登录或真实 API key。
 
 后续路线会实际实现 LangGraph 高级编排、Hybrid RAG、分布式存储和必要的 Sub-Agent；每项技术必须对应真实业务问题、简单基线和量化验收，而不是仅作为技术展示。
 
@@ -123,3 +135,5 @@ pytest
 ```
 
 v0.3 验收基线为 45 项测试全部通过。v0.4 全量验收为 68 项测试全部通过，其中 v0.1-v0.3 的 45 项回归全部保留通过；指标和限制见 `docs/07_evaluation/v0.4-eval-report.md`。
+
+v0.5 当前只完成设计文档。实际测试数量、离线指标和两项 live smoke 结果将在实现后写入 `docs/07_evaluation/v0.5-eval-report.md`；在此之前不得标记为 Implemented。

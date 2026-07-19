@@ -1,6 +1,6 @@
 # Campus Job Agent 总体架构
 
-版本：v0.4 实现基线
+版本：v0.5 设计基线
 日期：2026-07-18
 
 ## 1. 项目定位
@@ -80,7 +80,7 @@ LLM Agent 负责：
 - `SearchGoal` 逐步迁移为 `CareerIntent`；
 - 新增 Claim、Profile、Role、Gap 和 Evaluator 的版本化 prompt/schema。
 
-结论：保留同一仓库和历史版本；v0.4 在 v0.3 证据基础上实现首个有状态业务 subgraph。
+结论：保留同一仓库和历史版本；v0.4 已实现候选人画像 subgraph，v0.5 在相同运行时上增加岗位来源与画像 subgraph。
 
 ## 4. 总体分层
 
@@ -185,6 +185,14 @@ status, created_at, supersedes_claim_id
 - 市场分布和证据覆盖；
 - 适用时间、地域和置信度。
 
+v0.5 进一步要求：
+
+- `job_instance` 以去重后的 JobPostingCluster 为统计单位，保留所有来源；
+- `role_family` 显示去重岗位数、公司数、时间窗口、prevalence 和分母；
+- 招聘 requirement 与社区 hiring signal 分栏；
+- company/location/time-specific variation 不得提升为岗位族通用要求；
+- 样本不足时显式标记 `insufficient_sample`。
+
 ### 5.7 GapAssessment
 
 至少区分：
@@ -284,6 +292,46 @@ v0.4 本地运行使用 SQLite checkpointer，测试可使用内存 checkpointer
 真实本地 Tool 位于 `tools/candidate_profile.py`，Evidence/Profile metadata 与
 LangGraph checkpoint 分库保存。文本型 PDF 使用 `pypdf`，持久化恢复使用官方
 `langgraph-checkpoint-sqlite`。2026-07-18 的全量验收为 68/68 通过。
+
+### 6.4 v0.5 Role Profile Subgraph
+
+```text
+START
+  → initialize_role_run
+  → plan_role_queries
+  → collect_and_archive_sources
+  → extract_and_normalize_sources
+  → deduplicate_source_records
+  → extract_and_validate_role_claims
+  → project_job_instance_profiles
+  → aggregate_role_family_profile
+  → assess_role_coverage
+  → route_role_next_action
+      ├─ search_more / change_query / change_source → plan_role_queries
+      ├─ await_user_auth
+      │      → plan_source_auth
+      │      → interrupt_for_source_auth
+      │      → validate_source_authorization
+      │      → source collection loop
+      ├─ finalize_with_unknowns → finalize_role_profiles
+      ├─ complete → finalize_role_profiles
+      └─ fail → finalize_role_profiles
+```
+
+来源边界：
+
+- recruitment adapter 负责岗位发现与岗位事实；
+- experience adapter 负责笔试、面试和实践信号；
+- 两类来源的 raw response 都先进入 Evidence Store；
+- Source Authority Validator 限制每个 channel 可支持的 predicate；
+- Graph State 只保存 query/source/artifact/record/profile 引用。
+
+首版 live adapter 为 `zhaopin_jobs` 与 `nowcoder_experience`，默认 CI 使用 fixture。
+需要登录时，用户在真实 Chrome 正常登录并将 Copy as cURL/Cookie 导入本地秘密存储，
+Graph 仅通过 credential ref 恢复，不接触秘密正文。
+
+RoleFamily 聚合的 prevalence、company coverage、signal frequency 和样本门槛由确定性代码计算。
+LLM 负责查询建议、结构化提取和解释，不能直接合并岗位、修改分母或突破搜索预算。
 
 ## 7. 统一证据管线
 

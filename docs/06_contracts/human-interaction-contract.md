@@ -171,3 +171,62 @@ sha256(
 - 未识别的 schema version 必须拒绝或先迁移。
 - 后续版本可增加 interaction type，但不得改变 v0.4 action 的既有语义。
 - Parent Graph 复用本契约时，每次 request 仍必须声明 stage 和目标对象引用。
+
+## 11. v0.5 Source Authorization
+
+v0.5 增加 `authorize_source`，不改变 v0.4 既有语义。
+
+### Request
+
+```json
+{
+  "request_id": "hir-source-auth-1",
+  "schema_version": "v0.5",
+  "thread_id": "role-thread-1",
+  "run_id": "role-run-1",
+  "user_id": "user-1",
+  "interaction_type": "authorize_source",
+  "reason": "该经验来源需要用户正常登录",
+  "source_authorization": {
+    "source_id": "nowcoder_experience",
+    "login_url": "https://www.nowcoder.com/",
+    "credential_type": "imported_curl",
+    "import_instruction": "在真实 Chrome 正常登录后，将 Copy as cURL 保存到本地秘密目录并执行导入命令",
+    "expected_credential_ref_prefix": "local-secret://nowcoder/"
+  },
+  "allowed_actions": ["authorized", "skip_source", "cancel"],
+  "created_at": "2026-07-18T00:00:00+08:00"
+}
+```
+
+### Response
+
+```json
+{
+  "response_id": "response-source-auth-1",
+  "schema_version": "v0.5",
+  "request_id": "hir-source-auth-1",
+  "thread_id": "role-thread-1",
+  "user_id": "user-1",
+  "action": "authorized",
+  "source_id": "nowcoder_experience",
+  "credential_ref": "local-secret://nowcoder/default",
+  "submitted_at": "2026-07-18T00:05:00+08:00"
+}
+```
+
+新增 action：
+
+```text
+authorized
+skip_source
+```
+
+约束：
+
+- request/response 不得包含 Cookie、Authorization、headers 或 cURL 正文。
+- credential import 在 Graph 外完成；resume 只传 ref。
+- `authorized` 必须校验 ref 存在、source 匹配和调用权限。
+- `skip_source` 将 source ID 写入 skipped set，不得重复中断请求。
+- 错误 ref/request/thread/user/action 时 Evidence Store 零写入。
+- Source authorization 不是 Evidence Claim，不进入 Candidate/Role Profile。

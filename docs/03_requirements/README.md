@@ -14,11 +14,13 @@
 
 - `v0.3-implementation-tasks.md`
 - `v0.4-implementation-tasks.md`
+- `v0.5-implementation-tasks.md`
 
 当前活动版本：
 
 - v0.3：Accepted / Implemented。
 - v0.4：Requirements / ADR / RFC / Contracts / Tasks、实现、测试和 Eval 已完成，Implemented（2026-07-18）。
+- v0.5：Requirements / ADR / RFC / Contracts / Tasks 已确认，Ready for Implementation（2026-07-18）。
 
 每份需求文档必须说明：
 

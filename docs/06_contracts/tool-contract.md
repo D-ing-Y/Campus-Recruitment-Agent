@@ -140,3 +140,61 @@ LangGraph checkpointer 是 runtime dependency，不伪装为业务 Tool：
 - 测试可以使用内存实现；
 - 通过 `thread_id` 恢复；
 - 不被 Evidence Repository 或 ProfileProjector 当作事实来源。
+
+## v0.5 Source 与 Role Profile Tool
+
+实现状态：Design Accepted / Pending Implementation。
+
+### Source Tool
+
+| Tool | 输入摘要 | 输出/副作用 |
+| --- | --- | --- |
+| `source.plan_role_queries` | SearchScope、coverage、history、budget | 版本化 RoleQueryPlan |
+| `source.collect_recruitment` | SourceQuery、credential ref | raw-first SourceCollectionBatch |
+| `source.collect_experience` | SourceQuery、credential ref | raw-first SourceCollectionBatch |
+| `source.extract_document` | raw artifact、parser version | DocumentExtraction 与 Fragment refs |
+| `source.normalize_job_posting` | recruitment fragment IDs | NormalizedJobPosting |
+| `source.normalize_experience` | experience fragment IDs | ExperienceEvidenceRecord |
+| `source.deduplicate_jobs` | normalized job IDs | JobPostingCluster |
+| `source.deduplicate_experience` | experience record IDs | 去重统计单位 |
+| `source.import_credential` | source ID、本地 cURL 文件路径 | CredentialRef；不得返回秘密值 |
+| `source.validate_credential_ref` | source ID、credential ref | 授权状态摘要 |
+
+### Role Tool
+
+| Tool | 输入摘要 | 输出/副作用 |
+| --- | --- | --- |
+| `evidence.extract_role_claims` | recruitment/experience fragments | 经过 authority validator 的 Claim |
+| `profile.project_job_instance` | cluster、active Claim IDs | 创建/复用具体岗位 snapshot |
+| `profile.aggregate_role_family` | scope、job snapshots、experience signals | 确定性岗位族 snapshot |
+| `profile.load_role` | snapshot/subject ID | 小型画像摘要与 refs |
+| `profile.diff_role_versions` | 两个 snapshot ID | 确定性版本差异 |
+
+### SourceAdapter 规则
+
+- Graph 节点只选择 source/query，不直接实现站点请求。
+- adapter 只有在 raw bytes 已成功进入 BlobStore/Artifact 后才能返回 document success。
+- live adapter 默认关闭；fixture adapter 遵守相同 raw-before-parse 路径。
+- source adapter 返回分页 cursor、auth、rate limit、source changed 和 retryable 状态。
+- `zhaopin_jobs` 与 `nowcoder_experience` 的站点细节封装在 adapter，不进入 Agent Runtime。
+
+### 新增错误类型
+
+```text
+authentication_required
+credential_invalid
+rate_limited
+source_changed
+robots_disallowed
+network_timeout
+parse_error
+normalization_error
+authority_violation
+```
+
+### Credential 边界
+
+- Tool 输入只能包含 credential ref，不包含 Cookie/cURL/Authorization。
+- import tool 从调用方授权的本地路径读取，并写入 Git 忽略的 credential store。
+- ToolResult 只能返回 ref、source、类型、验证时间和错误摘要。
+- trace、checkpoint、Artifact metadata 和 report 不得记录秘密正文。

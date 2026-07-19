@@ -71,3 +71,31 @@
 - 上述目标先用于可提交的 L0/L1 固定 fixture，不声称代表开放世界真实用户质量。
 - deterministic evaluator 是回归基线；接入真实 LLM 后单独报告同一数据集结果、重试、延迟和 token 成本。
 - `is_sufficient` 评价的是画像是否可诚实进入下一阶段，不评价 Offer 概率或岗位匹配度。
+
+## v0.5 Role Profile Graph 指标
+
+| 指标 | 定义 | 文档验收目标 |
+| --- | --- | ---: |
+| `role_route_accuracy` | Graph next action 与固定集 gold 一致的比例 | 100% |
+| `raw_before_parse_rate` | 已解析 source document 中先存在 raw Artifact 的比例 | 100% |
+| `normalized_job_schema_valid_rate` | 岗位归一化结果通过 v0.5 schema 的比例 | 100% |
+| `job_dedup_precision` | 被合并 job pair 中 gold duplicate 的比例 | 100% 固定集 |
+| `job_dedup_recall` | gold duplicate pair 被正确聚类的比例 | 100% 固定集 |
+| `hard_scope_exclusion_precision` | excluded_hard_scope 中确有证据违反 hard scope 的比例 | 100% |
+| `role_claim_trace_rate` | 已接受 Role Claim 可回溯有效 Fragment 的比例 | 100% |
+| `source_authority_violation_count` | 被接受但来源无权支持 predicate 的 Claim 数 | 0 |
+| `role_family_prevalence_accuracy` | prevalence/分子/分母与 gold 完全一致的聚合项比例 | 100% |
+| `experience_scope_accuracy` | experience scope_level 与 gold 一致的比例 | ≥ 95% |
+| `freshness_label_accuracy` | freshness/expired 与 gold 一致的比例 | 100% 固定集 |
+| `auth_interrupt_resume_success_rate` | 合法授权/跳过可恢复到正确分支的比例 | 100% |
+| `source_run_idempotency_violation_count` | 重复 query/batch 导致的重复事实对象数量 | 0 |
+| `credential_secret_leak_count` | State/trace/evidence/report/test snapshot 中秘密值命中数 | 0 |
+| `live_source_smoke_pass_count` | 实际完成并产生 receipt 的目标 live adapter 数 | 2/2 |
+| `max_search_loop_termination_rate` | 达到搜索硬预算后正确终止的比例 | 100% |
+
+说明：
+
+- 离线 L0/L1 指标和 live smoke 必须分栏报告。
+- live smoke 只证明 adapter/归档/授权链路在验收时可运行，不代表长期稳定或完整覆盖。
+- source 临时不可用时报告真实失败，不把 fixture 计入 `live_source_smoke_pass_count`。
+- RoleCoverage 评价岗位画像证据，不评价候选人与岗位匹配程度。

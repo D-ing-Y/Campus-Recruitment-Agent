@@ -153,3 +153,69 @@ v0.3 实现中的 `ProfileSnapshot` 是 Candidate/CareerIntent/Role 的统一持
 - profile canonical hash 未变化时复用最新 snapshot，不增加版本。
 - 新 Claim、supersede、冲突变化或 schema 迁移时创建递增版本。
 - checkpoint 不得被 ProfileProjector 当作 Claim 来源。
+
+## v0.5 外部岗位与经验来源增量
+
+实现状态：Design Accepted / Pending Implementation。
+
+### Raw-before-parse
+
+外部网页/接口响应的处理顺序必须为：
+
+```text
+response bytes
+  → content hash
+  → immutable BlobStore
+  → EvidenceArtifact
+  → SourceDocument receipt
+  → DocumentExtraction / Fragment
+  → Normalized Record
+  → Claim
+  → RoleProfile
+```
+
+- 没有 `raw_artifact_id` 的 source document 不得进入解析。
+- 搜索列表页、详情页和经验帖分别归档。
+- 网页更新产生新 Artifact，不原地覆盖旧网页。
+- parser/prompt 更新从 raw Artifact 重放，不强制重新抓取。
+
+### Artifact metadata
+
+v0.5 web Artifact metadata 至少保存：
+
+```text
+source_id, channel, query_id, document_kind,
+source_url, http_status, published_at, retrieved_at,
+adapter_version, parser_version, access_status, warnings
+```
+
+不得保存：
+
+```text
+Cookie, Authorization, complete headers, cURL, API key,
+credential payload, login form data
+```
+
+### Source channel 与 Claim authority
+
+- `recruitment` Claim 可以支持岗位存在、申请、资格、职责和要求。
+- `experience` Claim 主要支持 written/interview/project/work-context signal。
+- community Fragment 不能单独支持 `role.active`、`qualification.hard`、
+  `application.url` 或 `application.deadline`。
+- predicate × source authority 由确定性 validator 校验，违规 Claim 拒绝写入。
+- 同一字段冲突时保留 Claim、authority 和时间，不按模型 confidence 静默覆盖。
+
+### 去重与统计单位
+
+- Artifact 按 owner + content hash 去重。
+- NormalizedJobPosting 和 ExperienceEvidenceRecord 有独立幂等键。
+- JobPostingCluster 合并统计单位但不删除 member records/artifacts。
+- 跨平台同一岗位在岗位族分母中只计一次。
+- 转载/重复经验帖在 signal frequency 中只计一次。
+
+### Role Snapshot
+
+- job instance subject ID：`role_instance:<job_cluster_id>`。
+- role family subject ID：`role_family:<search_scope_hash>`。
+- snapshot 保存 collection window、valid_as_of、source refs、supporting Claim 和 aggregation policy。
+- 过期/关闭状态通过新 snapshot 表达，历史证据和画像不删除。
