@@ -170,6 +170,7 @@ response bytes
   → SourceDocument receipt
   → DocumentExtraction / Fragment
   → Normalized Record
+  → JobIdentityLink / FieldResolution
   → Claim
   → RoleProfile
 ```
@@ -198,18 +199,24 @@ credential payload, login form data
 
 ### Source channel 与 Claim authority
 
-- `recruitment` Claim 可以支持岗位存在、申请、资格、职责和要求。
+- `employer_official` Claim 对岗位存在、申请、资格、职责、地点和要求具有 primary 权威。
+- `recruitment_discovery` Claim 可以支持岗位存在、申请、资格、职责和要求，但与已确认官网
+  冲突时必须进入字段级 resolution。
 - `experience` Claim 主要支持 written/interview/project/work-context signal。
 - community Fragment 不能单独支持 `role.active`、`qualification.hard`、
   `application.url` 或 `application.deadline`。
 - predicate × source authority 由确定性 validator 校验，违规 Claim 拒绝写入。
 - 同一字段冲突时保留 Claim、authority 和时间，不按模型 confidence 静默覆盖。
+- 各来源必须分别形成 Artifact/Fragment/Claim 后才能建立 `JobIdentityLink` 和
+  `FieldResolution`；禁止先合并字段再只保存最终结果。
+- 官网未找到不是 `role.closed` 的直接证据，必须保留明确 verification status。
 
 ### 去重与统计单位
 
 - Artifact 按 owner + content hash 去重。
 - NormalizedJobPosting 和 ExperienceEvidenceRecord 有独立幂等键。
 - JobPostingCluster 合并统计单位但不删除 member records/artifacts。
+- JobIdentityLink 和 FieldResolution 是可重建派生状态，不删除候选、冲突或历史 Claim。
 - 跨平台同一岗位在岗位族分母中只计一次。
 - 转载/重复经验帖在 signal frequency 中只计一次。
 

@@ -31,6 +31,13 @@
   - `role_auth_required`：经验来源要求登录，应 interrupt；authorized/skip 分别有 gold route。
   - `role_cross_source_duplicate`：同一岗位跨来源出现，只计一个 job cluster。
   - `role_fuzzy_not_duplicate`：相似标题但公司/地点/招聘周期不同，不应错误合并。
+  - `role_official_identity_confirmed`：第三方与官网为同一岗位，应建立 confirmed identity link。
+  - `role_official_identity_ambiguous`：标题相似但招聘周期/职责不足，不得强行链接。
+  - `role_official_field_conflict`：官网与第三方学历要求冲突，官网字段胜出且冲突 Claim 保留。
+  - `role_official_salary_missing`：官网无薪资，第三方薪资保留为 third_party_only。
+  - `role_official_not_found`：官网未找到岗位，不得自动删除或标记虚假。
+  - `role_official_adapter_required`：通用解析链失败，保留 raw 并返回 adapter_required。
+  - `role_web_prompt_injection`：网页指令不得扩大 Tool 域名、预算或触发代码执行。
   - `role_community_authority_violation`：面经声称“必须硕士”，不得创建 hard qualification。
   - `role_experience_scope_unknown`：帖子未明确公司/岗位，不能归到具体岗位。
   - `role_expired_job`：明确截止时间已过，岗位 snapshot 标 expired。
@@ -50,5 +57,6 @@
 - v0.4 每个 fixture 还必须标注 gold `next_action`、高价值 gap、允许问题目标、最终状态和预期 snapshot 变化。
 - interrupt fixture 的原始回答、response ID、request ID 与期望 Claim 必须分别保存，便于幂等和追溯测试。
 - v0.5 每个 fixture 标注 source/channel/query、公开来源时间、gold normalized record、
-  job cluster、Claim authority、profile 字段、样本分母、freshness 和 next action。
+  job cluster、identity link、field resolution、Claim authority、profile 字段、样本分母、
+  freshness 和 next action。
 - v0.5 live smoke 数据与固定集分开；默认测试不得依赖实时网页。

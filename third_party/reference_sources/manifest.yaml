@@ -1,0 +1,83 @@
+schema_version: v0.5
+reviewed_at: "2026-07-19"
+projects:
+  - id: boss-agent-cli
+    repository: https://github.com/can4hou6joeng4/boss-agent-cli
+    target_capability: boss_jobs
+    role: candidate_adapter_backend
+    pinned_commit: 889b855d7bbaa4775c9217080a22c1607473bd48
+    license: MIT
+    status: blocked_by_auth
+    notes: 3 个离线 schema/JSON contract 测试通过，CLI schema smoke 通过并正确返回 AUTH_REQUIRED；BOSS 登录浏览器中的来源 search/detail smoke 已通过，但该 CLI 尚未接入浏览器 credential，因此项目自身仍为 blocked_by_auth。
+
+  - id: offerclaw
+    repository: https://github.com/InuyashaYang/offerclaw
+    target_capability: nowcoder_experience
+    role: implementation_reference
+    pinned_commit: f31e5574de991e4ba0960c57451af52066491bf5
+    license: not_declared
+    status: reference_only
+    notes: Python 编译和离线去重 smoke 通过；公开搜索 smoke 返回空结果。项目仅 3 个提交且未声明许可证，不能复制或成为运行时依赖。
+
+  - id: agent-reach
+    repository: https://github.com/Panniantong/Agent-Reach
+    target_capability: source_backend_registry
+    role: architecture_reference
+    pinned_commit: 1494c2ab239e7355a77e7cceaf3271453a1f34b5
+    license: MIT
+    status: reference_only
+    notes: Python 编译通过；参考首选/备用后端、doctor 健康检查和可插拔 channel，不作为统一证据层或直接运行时依赖。
+
+  - id: mediacrawler
+    repository: https://github.com/NanmiCoder/MediaCrawler
+    target_capability: xiaohongshu_experience
+    role: implementation_reference
+    pinned_commit: 0625e01a6bc717a3fc9c96d3dac7fb8957043838
+    license: NON-COMMERCIAL-LEARNING-1.1
+    status: reference_only
+    notes: Python 编译通过；可研究真实浏览器登录态和多平台解析。许可证限制非商业学习和大规模采集，不纳入运行时依赖。
+
+  - id: xiaohongshu-mcp
+    repository: https://github.com/xpzouying/xiaohongshu-mcp
+    target_capability: xiaohongshu_experience
+    role: candidate_adapter_backend
+    pinned_commit: 5c5197d6867032130e850f1ae46070004689d6d5
+    license: not_declared
+    status: reference_only
+    notes: 提供登录、搜索和 MCP 工具，但仓库未发现许可证；当前环境缺少 Go，未完成构建，不进入运行时依赖。
+
+  - id: ever-jobs
+    repository: https://github.com/ever-jobs/ever-jobs
+    target_capability: official_ats_registry
+    role: architecture_reference
+    pinned_commit: 3606a10bea422a29a36f3727f44bdce0b28474cb
+    license: MIT
+    status: reference_only
+    notes: MIT，包含 JSON-LD JobPosting parser/tests 和大量 ATS adapter；参考 adapter registry 与字段策略，其主要来源并非中国校招平台且技术栈与本项目不同。
+
+  - id: crawl4ai
+    repository: https://github.com/unclecode/crawl4ai
+    target_capability: official_generic_fetch
+    role: candidate_library
+    pinned_commit: 7e801521428ee12509994d39151006f64055ebe3
+    license: Apache-2.0
+    status: reference_only
+    notes: Python 编译通过，但基础依赖包含 Playwright、Patchright、stealth 和伪 UA，范围过重；v0.5 不将其作为通用官网默认 transport。
+
+  - id: trafilatura
+    repository: https://github.com/adbar/trafilatura
+    target_capability: official_text_extraction
+    role: candidate_library
+    pinned_commit: 3d89493a52cc3bce735090cce9eb08182cf6e99e
+    license: Apache-2.0
+    status: candidate
+    notes: 安装和离线正文抽取 smoke 通过，但小型页面仍保留导航噪声；可作为 fallback candidate，不能替代 JSON-LD、ATS adapter 或证据定位。
+
+  - id: extruct
+    repository: https://github.com/scrapinghub/extruct
+    target_capability: official_structured_data
+    role: candidate_library
+    pinned_commit: a31daaadb82ec684b7d468d3b15734b8ae3b7265
+    license: BSD-3-Clause
+    status: adopt
+    notes: 安装成功，离线 schema.org JobPosting JSON-LD smoke 正确提取标题与城市；作为 official structured-data parser 候选准入。

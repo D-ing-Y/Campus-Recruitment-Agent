@@ -150,12 +150,16 @@ LangGraph checkpointer 是 runtime dependency，不伪装为业务 Tool：
 | Tool | 输入摘要 | 输出/副作用 |
 | --- | --- | --- |
 | `source.plan_role_queries` | SearchScope、coverage、history、budget | 版本化 RoleQueryPlan |
-| `source.collect_recruitment` | SourceQuery、credential ref | raw-first SourceCollectionBatch |
+| `source.discover_jobs` | SourceQuery、credential ref | raw-first SourceCollectionBatch |
+| `source.plan_official_verification` | JobPostingCluster、domain evidence、budget | OfficialVerificationPlan |
+| `source.verify_official_career` | OfficialVerificationPlan、credential ref | raw-first SourceCollectionBatch |
 | `source.collect_experience` | SourceQuery、credential ref | raw-first SourceCollectionBatch |
 | `source.extract_document` | raw artifact、parser version | DocumentExtraction 与 Fragment refs |
 | `source.normalize_job_posting` | recruitment fragment IDs | NormalizedJobPosting |
 | `source.normalize_experience` | experience fragment IDs | ExperienceEvidenceRecord |
 | `source.deduplicate_jobs` | normalized job IDs | JobPostingCluster |
+| `source.link_job_identity` | cluster、official job IDs、evidence refs | JobIdentityLink |
+| `source.resolve_job_fields` | confirmed identity link、Claim IDs | FieldResolution 列表 |
 | `source.deduplicate_experience` | experience record IDs | 去重统计单位 |
 | `source.import_credential` | source ID、本地 cURL 文件路径 | CredentialRef；不得返回秘密值 |
 | `source.validate_credential_ref` | source ID、credential ref | 授权状态摘要 |
@@ -164,7 +168,7 @@ LangGraph checkpointer 是 runtime dependency，不伪装为业务 Tool：
 
 | Tool | 输入摘要 | 输出/副作用 |
 | --- | --- | --- |
-| `evidence.extract_role_claims` | recruitment/experience fragments | 经过 authority validator 的 Claim |
+| `evidence.extract_role_claims` | discovery/official/experience fragments | 经过 authority validator 的 Claim |
 | `profile.project_job_instance` | cluster、active Claim IDs | 创建/复用具体岗位 snapshot |
 | `profile.aggregate_role_family` | scope、job snapshots、experience signals | 确定性岗位族 snapshot |
 | `profile.load_role` | snapshot/subject ID | 小型画像摘要与 refs |
@@ -176,7 +180,11 @@ LangGraph checkpointer 是 runtime dependency，不伪装为业务 Tool：
 - adapter 只有在 raw bytes 已成功进入 BlobStore/Artifact 后才能返回 document success。
 - live adapter 默认关闭；fixture adapter 遵守相同 raw-before-parse 路径。
 - source adapter 返回分页 cursor、auth、rate limit、source changed 和 retryable 状态。
-- `zhaopin_jobs` 与 `nowcoder_experience` 的站点细节封装在 adapter，不进入 Agent Runtime。
+- `boss_jobs`、`official_careers` 与 `nowcoder_experience` 的站点细节封装在 adapter，
+  不进入 Agent Runtime。
+- 上游 CLI、MCP 或开源爬虫只作为 adapter 后端，不能直接写 Evidence Store、State 或 Profile。
+- `official_careers` 严格遵守域名白名单、页面/深度预算和解析链。
+- 未知官网只能输出声明式 `OfficialSiteAdapterSpec` candidate；runtime 不执行 LLM 生成代码。
 
 ### 新增错误类型
 
@@ -186,6 +194,11 @@ credential_invalid
 rate_limited
 source_changed
 robots_disallowed
+official_not_found
+official_unavailable
+identity_ambiguous
+adapter_required
+policy_blocked
 network_timeout
 parse_error
 normalization_error

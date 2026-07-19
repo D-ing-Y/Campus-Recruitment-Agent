@@ -302,12 +302,17 @@ START
   → collect_and_archive_sources
   → extract_and_normalize_sources
   → deduplicate_source_records
+  → plan_official_verification
+  → collect_and_archive_official_sources
+  → link_official_job_records
+  → resolve_job_field_conflicts
   → extract_and_validate_role_claims
   → project_job_instance_profiles
   → aggregate_role_family_profile
   → assess_role_coverage
   → route_role_next_action
       ├─ search_more / change_query / change_source → plan_role_queries
+      ├─ verify_official → plan_official_verification
       ├─ await_user_auth
       │      → plan_source_auth
       │      → interrupt_for_source_auth
@@ -320,18 +325,21 @@ START
 
 来源边界：
 
-- recruitment adapter 负责岗位发现与岗位事实；
+- recruitment discovery adapter 负责第三方高召回岗位发现；
+- employer official adapter 负责候选岗位身份和字段级核验；
 - experience adapter 负责笔试、面试和实践信号；
-- 两类来源的 raw response 都先进入 Evidence Store；
+- 三类来源的 raw response 都先分别进入 Evidence Store，再建立 JobIdentityLink 和 FieldResolution；
 - Source Authority Validator 限制每个 channel 可支持的 predicate；
 - Graph State 只保存 query/source/artifact/record/profile 引用。
 
-首版 live adapter 为 `zhaopin_jobs` 与 `nowcoder_experience`，默认 CI 使用 fixture。
+首版 live adapter 为 `boss_jobs`、`official_careers` 与 `nowcoder_experience`，
+默认 CI 使用 fixture。
 需要登录时，用户在真实 Chrome 正常登录并将 Copy as cURL/Cookie 导入本地秘密存储，
 Graph 仅通过 credential ref 恢复，不接触秘密正文。
 
 RoleFamily 聚合的 prevalence、company coverage、signal frequency 和样本门槛由确定性代码计算。
 LLM 负责查询建议、结构化提取和解释，不能直接合并岗位、修改分母或突破搜索预算。
+未知官网只允许产生声明式 adapter spec 候选；运行时禁止生成并执行新爬虫代码。
 
 ## 7. 统一证据管线
 
@@ -342,13 +350,15 @@ collect/upload
   → split into fragments
   → structured claim extraction
   → claim validation
+  → identity link / field resolution（跨来源岗位）
   → profile projection
   → profile sufficiency evaluation
 ```
 
 规则：
 
-- 招聘平台和企业官网是岗位存在、职责和硬性要求的主要证据。
+- 招聘平台和企业官网是岗位存在、职责和硬性要求的主要证据；官网在已确认同一岗位后
+  具有字段级 primary 权威，但不会覆盖或删除第三方 Claim。
 - 社区来源用于笔面试、薪资、氛围和实践信号，必须保留较低或独立置信度。
 - 原始 HTML/文本先归档再总结；解析和 prompt 变化不得强制重新采集。
 - 未知值显式保存为 unknown/null/空数组，不允许模型补齐不存在的事实。

@@ -19,3 +19,8 @@
 - live raw 招聘/社区内容默认只保存在本地，不批量提交或再分发。
 - adapter 必须遵守限速、超时、robots 和来源服务条款；禁止时结构化返回 `robots_disallowed`。
 - 用户可在授权 interrupt 中选择 `skip_source`，系统不得反复要求登录。
+- 第三方参考代码固定 commit，下载到 Git 忽略目录；未通过 license/security/smoke 门禁不得成为运行时依赖。
+- 上游 CLI/MCP/爬虫运行在受限 adapter 边界，只允许批准域名、只读动作和有界请求。
+- 网页 HTML/text 一律视为非可信数据，不能修改系统提示、Tool 权限、域名白名单或预算。
+- LLM 不得在 live run 中生成并执行 Python、JavaScript 或 shell 爬虫；声明式 adapter spec
+  必须离线 replay、测试和人工批准。

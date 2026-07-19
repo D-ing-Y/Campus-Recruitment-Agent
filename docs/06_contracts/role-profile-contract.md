@@ -1,7 +1,7 @@
 # Role Profile Contract
 
 状态：v0.5 Design Accepted / Pending Implementation
-日期：2026-07-18
+日期：2026-07-19
 
 本契约定义具体岗位画像、岗位族画像、招聘要求、经验信号和覆盖度评价。所有事实字段必须引用已验证 Claim；所有岗位族统计必须保留样本与分母。
 
@@ -277,7 +277,7 @@ unknown
 
 ```json
 {
-  "source_id": "zhaopin_jobs",
+  "source_id": "boss_jobs",
   "source_type": "recruitment_platform",
   "source_url": "https://example.com/job/1",
   "raw_artifact_id": "artifact-1",
@@ -285,6 +285,8 @@ unknown
   "retrieved_at": "2026-07-18T00:00:00+08:00",
   "authority": "allowed",
   "freshness": "current",
+  "job_identity_link_id": "identity-link-1",
+  "field_resolution_ids": ["resolution-1"],
   "supporting_claim_ids": ["claim-1"]
 }
 ```
@@ -314,7 +316,7 @@ unknown
   "collection_cost": 0.2,
   "information_value": 0.376,
   "preferred_action": "change_source",
-  "target_channel": "recruitment",
+  "target_channel": "recruitment_discovery",
   "target_source_ids": [],
   "related_query_ids": ["query-1"],
   "status": "open"
@@ -331,6 +333,8 @@ source_authority
 source_diversity
 freshness
 experience_signal
+official_verification
+identity_ambiguity
 conflict
 query_relevance
 ```
@@ -341,6 +345,7 @@ query_relevance
 search_more
 change_query
 change_source
+verify_official
 await_user_auth
 keep_unknown
 ```
@@ -365,6 +370,8 @@ importance × uncertainty × retrievability - collection_cost
     "job_sample": "partial",
     "company_diversity": "insufficient",
     "source_authority": "sufficient",
+    "official_verification": "partial",
+    "identity_links": "partial",
     "freshness": "sufficient",
     "experience_signals": "partial",
     "conflicts": "sufficient"
@@ -388,6 +395,7 @@ importance × uncertainty × retrievability - collection_cost
 search_more
 change_query
 change_source
+verify_official
 await_user_auth
 finalize_with_unknowns
 complete

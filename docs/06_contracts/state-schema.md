@@ -267,6 +267,9 @@ class RoleProfileGraphState(TypedDict, total=False):
     normalized_job_ids: list[str]
     experience_record_ids: list[str]
     job_cluster_ids: list[str]
+    official_verification_plan_ids: list[str]
+    job_identity_link_ids: list[str]
+    field_resolution_ids: list[str]
     claim_ids: list[str]
 
     # derived profiles and decisions
@@ -310,6 +313,7 @@ failed
 search_more
 change_query
 change_source
+verify_official
 await_user_auth
 finalize_with_unknowns
 complete
@@ -321,7 +325,7 @@ fail
 | 字段 | 合并方式 | 说明 |
 | --- | --- | --- |
 | `trace`、`errors`、`llm_calls`、`tool_results`、`source_run_receipts` | append | 保存每轮增量摘要 |
-| Artifact/Extraction/Fragment/Record/Cluster/Claim/Snapshot ID | stable union | 去重并保持首次顺序 |
+| Artifact/Extraction/Fragment/Record/Cluster/Verification/Identity/Resolution/Claim/Snapshot ID | stable union | 去重并保持首次顺序 |
 | `search_scope`、`budgets`、`enabled_source_ids` | initialize once | 节点不得扩大 scope、预算或来源权限 |
 | `pending_queries` | replace after consume | 完成/失败的 query 写入 history |
 | `completed_query_ids`、`skipped_source_ids` | stable union | 防止重复查询/授权 |
@@ -338,6 +342,7 @@ fail
   "max_query_rounds": 3,
   "max_queries": 12,
   "max_source_switches": 2,
+  "max_official_verifications": 20,
   "max_documents": 60,
   "max_llm_calls": 20,
   "max_tool_calls": 50
@@ -351,6 +356,7 @@ fail
   "query_rounds": 0,
   "queries": 0,
   "source_switches": 0,
+  "official_verifications": 0,
   "documents": 0,
   "llm_calls": 0,
   "tool_calls": 0

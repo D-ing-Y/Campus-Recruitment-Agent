@@ -22,3 +22,8 @@ reports/**
 !data/reports/.gitkeep
 !data/checkpoints/.gitkeep
 !reports/.gitkeep
+
+# Local upstream source references. Track only the review metadata, not vendored repositories.
+third_party/reference_sources/*
+!third_party/reference_sources/README.md
+!third_party/reference_sources/manifest.yaml

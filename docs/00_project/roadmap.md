@@ -134,24 +134,30 @@
 
 ## v0.5：岗位需求画像 Graph
 
-状态：Requirements / ADR / RFC / Contracts / Tasks / Eval Design 已完成（2026-07-18），待代码实现与验收。
+状态：Requirements / ADR / RFC / Contracts / Tasks / Eval Design 已按三段式来源链修订；
+开源候选 P0 静态/离线门禁和三个 P1 浏览器来源 smoke 已完成（2026-07-19），
+Ready for Implementation，待代码实现与 adapter 验收。
 
 版本定位：
 
 - 复用 v0.4 的 subgraph、checkpoint、预算和 interrupt 模式，构建第二个独立业务 Graph。
-- 招聘岗位页和社区经验帖使用不同 channel、schema、authority 和覆盖评价。
+- 第三方招聘发现、企业官网核验和社区经验帖使用不同 channel、schema、authority 和覆盖评价。
 - CareerIntent 决定搜索范围；CandidateProfile 不参与本版本的岗位排除或匹配。
 
 核心交付：
 
-- 招聘来源和经验帖来源分离的采集/归档契约。
-- `zhaopin_jobs` 和 `nowcoder_experience` 两个首版 live adapter；默认 CI 使用 fixture。
+- 第三方发现、企业官网核验和经验来源分离的采集/归档契约。
+- `boss_jobs`、`official_careers` 和 `nowcoder_experience` 三个首版 live adapter；
+  默认 CI 使用 fixture。
 - raw-before-parse、SourceRunReceipt、query/source/batch 幂等和字段级来源权威校验。
+- `JobIdentityLink` 与 `FieldResolution`：各来源分别证据化后再链接同一岗位并按字段消解。
+- 开源项目准入报告与本地 Git 忽略参考代码目录。
 - 具体岗位画像与岗位族画像。
 - 硬性资格、职责、核心能力、加分项、工作场景、招聘筛选信号和公司特异项分层。
 - 岗位族画像保留样本、分母、公司数、prevalence、时间窗口和 insufficient sample。
-- `role_profile` subgraph：查询规划、检索、归档、归一化、去重、画像聚合、覆盖度评价、换词/换源/停止。
-- `search_more`、`change_query`、`change_source`、`await_user_auth`、
+- `role_profile` subgraph：查询规划、发现、归档、去重、官网核验、身份链接、
+  字段消解、画像聚合、覆盖度评价、换词/换源/停止。
+- `search_more`、`change_query`、`change_source`、`verify_official`、`await_user_auth`、
   `finalize_with_unknowns`、`complete`、`fail` 动作枚举。
 - 用户正常登录与本地 Copy as cURL/Cookie 导入；Graph 只保存 credential ref。
 - 所有岗位事实保留 source URL、发布时间、获取时间和置信度。
@@ -161,15 +167,18 @@
 - Candidate/Role 匹配百分比、能力差距、岗位排序和用户目标选择。
 - RAG、向量检索、分布式存储、Multi-Agent 和自动投递。
 - 验证码绕过、攻击性反爬或全平台覆盖。
+- LLM 在运行时生成并执行新爬虫代码。
 
 完成标准：
 
 - 针对一个岗位方向生成有证据支持的岗位族画像和若干具体岗位画像。
-- 招聘和经验 raw 均先归档；100% 事实性岗位字段可回溯到允许该 predicate 的来源。
+- 第三方招聘、官网和经验 raw 均分别先归档；100% 事实性岗位字段可回溯到允许该
+  predicate 的来源及字段消解原因。
 - 跨平台重复岗位在岗位族分母中只计一次，所有来源仍保留。
 - Graph 能换词、换源和在预算内停止；样本不足时诚实输出 insufficient sample。
 - 授权来源可 interrupt/resume，Cookie/cURL 不进入 State、Evidence、trace 或 Git。
-- 两个 live adapter 分别完成本地 opt-in smoke；默认 CI 保持完全离线。
+- 三个 live adapter 分别完成本地 opt-in smoke；至少一条第三方岗位完成官网身份链接和
+  字段级核验；默认 CI 保持完全离线。
 - v0.1-v0.4 回归通过并生成实际 v0.5 eval report 后才能标记完成。
 
 设计文档：
@@ -180,6 +189,7 @@
 - `docs/05_adr/0005-separate-source-channels-and-role-profile-levels.md`
 - `docs/06_contracts/source-collection-contract.md`
 - `docs/06_contracts/role-profile-contract.md`
+- `docs/07_evaluation/v0.5-source-feasibility-report.md`
 
 ## v0.6：双画像匹配与用户决策
 

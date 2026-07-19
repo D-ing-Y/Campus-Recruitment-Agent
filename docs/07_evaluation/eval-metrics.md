@@ -81,6 +81,10 @@
 | `normalized_job_schema_valid_rate` | 岗位归一化结果通过 v0.5 schema 的比例 | 100% |
 | `job_dedup_precision` | 被合并 job pair 中 gold duplicate 的比例 | 100% 固定集 |
 | `job_dedup_recall` | gold duplicate pair 被正确聚类的比例 | 100% 固定集 |
+| `official_verification_coverage` | 进入画像的第三方 job cluster 中具有明确官网核验状态的比例 | 100% 固定集 |
+| `job_identity_link_precision` | confirmed identity link 中确为同一岗位的比例 | 100% 固定集 |
+| `field_resolution_accuracy` | 字段选择、状态和 reason 与 gold 一致的比例 | 100% 固定集 |
+| `official_not_found_false_rejection_count` | 仅因官网未找到而错误删除/关闭第三方岗位的数量 | 0 |
 | `hard_scope_exclusion_precision` | excluded_hard_scope 中确有证据违反 hard scope 的比例 | 100% |
 | `role_claim_trace_rate` | 已接受 Role Claim 可回溯有效 Fragment 的比例 | 100% |
 | `source_authority_violation_count` | 被接受但来源无权支持 predicate 的 Claim 数 | 0 |
@@ -90,7 +94,9 @@
 | `auth_interrupt_resume_success_rate` | 合法授权/跳过可恢复到正确分支的比例 | 100% |
 | `source_run_idempotency_violation_count` | 重复 query/batch 导致的重复事实对象数量 | 0 |
 | `credential_secret_leak_count` | State/trace/evidence/report/test snapshot 中秘密值命中数 | 0 |
-| `live_source_smoke_pass_count` | 实际完成并产生 receipt 的目标 live adapter 数 | 2/2 |
+| `runtime_generated_code_execution_count` | live run 中执行 LLM 生成采集代码的次数 | 0 |
+| `source_project_gate_pass_rate` | 被采用上游项目完整通过 license/security/smoke 门禁的比例 | 100% |
+| `live_source_smoke_pass_count` | 实际完成并产生 receipt 的目标 live adapter 数 | 3/3 |
 | `max_search_loop_termination_rate` | 达到搜索硬预算后正确终止的比例 | 100% |
 
 说明：

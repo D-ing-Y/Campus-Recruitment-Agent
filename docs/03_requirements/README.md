@@ -20,7 +20,8 @@
 
 - v0.3：Accepted / Implemented。
 - v0.4：Requirements / ADR / RFC / Contracts / Tasks、实现、测试和 Eval 已完成，Implemented（2026-07-18）。
-- v0.5：Requirements / ADR / RFC / Contracts / Tasks 已确认，Ready for Implementation（2026-07-18）。
+- v0.5：Requirements / ADR / RFC / Contracts / Tasks、来源候选 P0 静态/离线门禁和
+  三个 P1 浏览器来源 smoke 已完成，Ready for Implementation（2026-07-19）。
 
 每份需求文档必须说明：
 

@@ -18,3 +18,9 @@
 - 引入 live source 的版本已区分离线 CI 与 opt-in live smoke，并记录真实来源、时间、结果和限制。
 - 外部内容遵守 raw-before-parse；来源 authority、freshness、去重分母和 credential redaction 均有测试。
 - 如果文档要求的 live smoke 未实际通过，版本不得以 fixture 结果替代并标记 Implemented。
+- 第三方岗位发现、企业官网核验和社区经验来源均有独立的 adapter、raw Artifact、
+  SourceRunReceipt 和 opt-in live smoke 结果。
+- 进入画像的第三方岗位具有明确官网核验状态；官网未找到、不可访问或身份模糊不被
+  自动解释为岗位虚假。
+- 引入开源采集项目时已固定 repository/commit/license，完成安全与 smoke 门禁；
+  未声明许可证或许可证不兼容的代码仅可作为设计参考。

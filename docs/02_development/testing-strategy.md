@@ -58,28 +58,34 @@
 
 - SearchScope、SourceQuery、SourceDocument、NormalizedJobPosting 和 ExperienceEvidenceRecord。
 - RoleProfileGraphState reducer、query fingerprint、budget/counter。
-- recruitment/experience adapter contract 和 source capability。
+- recruitment discovery/official verification/experience adapter contract 和 source capability。
 - HTML/JSON/text extraction locator 与 raw-before-parse guard。
 - hard scope、source authority 和 Claim validator。
 - exact/fuzzy/cross-source job dedup 与转载经验去重。
+- OfficialVerificationPlan、JobIdentityLink、FieldResolution 和 AdapterSpec validator。
 - prevalence、company coverage、signal frequency、freshness 和 sample status。
 - query planner、coverage evaluator、route policy 和授权 request/response redaction。
 
 ### 集成测试
 
 - fixture recruitment raw→job record→Claim→job instance profile。
+- fixture third-party cluster→official raw→identity link→field resolution→job instance profile。
 - fixture experience raw→signal Claim，且不能创建 hard requirement。
 - 多岗位→去重 cluster→RoleFamilyProfile，计数和分母正确。
-- pagination 选择 `search_more`，低相关选择 `change_query`，authority 缺口选择 `change_source`。
+- pagination 选择 `search_more`，低相关选择 `change_query`，authority 缺口选择
+  `change_source`，官网覆盖缺口选择 `verify_official`。
 - auth required→interrupt→credential ref resume；skip 后不重复请求。
 - SQLite checkpoint 跨 Graph 实例从 collection/auth 边界恢复。
 - 重复 source batch/query 不重复创建 Artifact、Record、Claim 或 snapshot。
 - source changed、rate limited、empty、parse/normalization/LLM/storage/checkpoint 错误安全回退。
+- official not found/unavailable、identity ambiguous、adapter required 和网页 Prompt Injection 安全回退。
+- live runtime 不执行 LLM 生成代码。
 
 ### Live smoke
 
 - live smoke 不进入默认 CI，必须由用户显式启用。
-- `zhaopin_jobs` 与 `nowcoder_experience` 各执行一个小范围查询。
+- `boss_jobs`、`official_careers` 与 `nowcoder_experience` 各执行一个小范围查询；
+  至少一条第三方岗位完成官网字段级核验。
 - 验证 raw Artifact、SourceRunReceipt、credential redaction 和限速。
 - 如果来源临时不可用，记录真实失败并保持版本 Partial，不使用 fixture 冒充 live 成功。
 
