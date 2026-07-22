@@ -84,7 +84,7 @@
 ### Live smoke
 
 - live smoke 不进入默认 CI，必须由用户显式启用。
-- `boss_jobs`、`official_careers` 与 `nowcoder_experience` 各执行一个小范围查询；
+- `zhaopin_jobs`、企业官网 adapter 与 `nowcoder_experience` 各执行一个小范围查询；
   至少一条第三方岗位完成官网字段级核验。
 - 验证 raw Artifact、SourceRunReceipt、credential redaction 和限速。
 - 如果来源临时不可用，记录真实失败并保持版本 Partial，不使用 fixture 冒充 live 成功。

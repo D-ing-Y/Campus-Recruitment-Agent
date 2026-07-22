@@ -6,11 +6,15 @@
 
 ## 当前阶段
 
-v0.4 候选人画像 Graph 已于 2026-07-18 完成代码、测试和 Eval 验收，当前代码版本为 0.4.0。
+v0.4 候选人画像 Graph 已于 2026-07-18 完成代码、测试和 Eval 验收。
 
-v0.5 岗位需求画像 Graph 的 Requirements、ADR、RFC、跨模块 Contracts、实现任务和 Eval
-设计已按三段式来源链完成修订；开源候选 P0 静态/离线门禁和 BOSS、牛客、企业官网
-三个 P1 浏览器来源 smoke 已于 2026-07-19 完成，当前状态为 Ready for Implementation。
+v0.5 岗位需求画像 Graph 已完成代码、fixture、离线 adapter、RoleProfile Graph、测试和 Eval；
+当前代码版本为 `0.5.0`。140 项全量测试全部通过，其中 v0.5 新增 72 项，v0.1-v0.4
+的 68 项回归全部通过。2026-07-21 实现后 Live Smoke 中 DeepSeek、牛客、企业官网传输和真实
+auth interrupt/resume 已通过。2026-07-22 决定停止 BOSS 集成并将核心第三方招聘来源切换为
+智联招聘；`zhaopin_jobs` 单页 raw-first live smoke 和 20 条真实页面重放解析已经通过。
+真实智联候选到美团官网同岗已生成 `confirmed` JobIdentityLink 和字段级 FieldResolution，
+v0.5 状态为 Implemented / Accepted。
 
 v0.1/v0.2 保留为 Runtime 与 LLM 基座，v0.3 提供统一证据层、领域契约、版本化画像快照和证据质量评估；v0.4 已将这些能力接入第一个可循环、可中断、可恢复的候选人画像 LangGraph subgraph。
 
@@ -51,13 +55,12 @@ v0.4 已实现：
 - 真实 Tool 统一通过 `ToolRegistry`，checkpoint 使用官方 SQLite saver。
 - 回答与纠正先归档为 Artifact/Fragment/Claim，再重建画像；重复 resume 幂等。
 
-v0.5 已按最新来源验证架构完成设计修订、P0 来源可行性门禁和 P1 浏览器来源 smoke，
-待代码实现与 adapter 验收：
+v0.5 已按最新来源验证架构完成离线实现与验收：
 
 - recruitment discovery、employer official verification 与 experience 分离的
   SourceAdapter 和 raw-before-parse 证据链。
-- `boss_jobs`、`official_careers` 与 `nowcoder_experience` 首版 live adapter，
-  默认 CI 使用离线 fixture。
+- `zhaopin_jobs`、`official_careers`、`official_careers_meituan` 与 `nowcoder_experience` opt-in live adapter；
+  live 默认关闭，CI 使用相同 raw-first 路径的离线 fixture。
 - 第三方岗位去重后再做官网核验；两侧原始证据分别保存，通过 JobIdentityLink 和
   FieldResolution 形成字段级 resolved view。
 - 具体岗位画像与带样本/分母的岗位族画像。
@@ -65,8 +68,10 @@ v0.5 已按最新来源验证架构完成设计修订、P0 来源可行性门禁
 - 招聘事实与社区笔面试信号的字段级来源权威校验。
 - 跨来源岗位去重、经验帖去重、时效标签和 SourceRunReceipt。
 - 用户正常登录与本地 cURL/Cookie 导入；秘密值不进入 State、Evidence、trace 或 Git。
-- 开源采集项目先完成 license/security/smoke 准入；当前 `extruct` 通过离线
-  structured-data 门禁，BOSS 与牛客已完成浏览器来源可行性验证；LLM 不在运行时生成并执行爬虫代码。
+- 开源采集项目先完成 license/security/smoke 准入；JSON-LD、声明式官网 adapter spec、
+  同域预算和运行时禁止执行 LLM 生成代码均已有测试覆盖。
+- 72 项 v0.5 schema、adapter、raw-before-parse、官网核验、authority、画像聚合、路由、
+  auth resume、SQLite checkpoint 和 Eval 测试。
 
 v0.5 不实现双画像匹配、学习计划、RAG、分布式存储、Multi-Agent、Web UI 或自动投递。默认测试不访问真实招聘网站，不需要登录或真实 API key。
 
@@ -92,6 +97,19 @@ pip install -e ".[dev]"
 ```
 
 如果本机没有 `python` 命令，可使用 `python3` 创建虚拟环境。
+
+### 本地 Chrome 登录态装配
+
+先在真实 Chrome 中正常登录，然后在项目根目录显式执行：
+
+```bash
+.venv/bin/campus-agent auth import-chrome --source zhaopin
+.venv/bin/campus-agent auth import-chrome --source nowcoder
+```
+
+命令只读取 `.zhaopin.com` 或 `.nowcoder.com` 的 Cookie，并将对应的
+`local-secret://<source>/default` 安全覆盖写入 `data/cache/credentials/`。该目录权限为
+`700`，凭据文件权限为 `600`，且已被 Git 忽略。终端不会输出 Cookie 值。
 
 ## 运行 v0.2 CLI
 
@@ -145,6 +163,5 @@ pytest
 
 v0.3 验收基线为 45 项测试全部通过。v0.4 全量验收为 68 项测试全部通过，其中 v0.1-v0.3 的 45 项回归全部保留通过；指标和限制见 `docs/07_evaluation/v0.4-eval-report.md`。
 
-v0.5 当前完成设计文档、来源候选 P0 静态/离线门禁和三项 P1 浏览器来源 smoke。
-代码实现后的三个 adapter opt-in live smoke、实际测试数量和离线指标仍需写入
-`docs/07_evaluation/v0.5-eval-report.md`；在此之前不得标记为 Implemented。
+v0.5 离线验收为 72/72，通过后全量为 140/140。实际指标、Live Smoke 和真实 confirmed
+官网身份链接结果见 `docs/07_evaluation/v0.5-eval-report.md`。

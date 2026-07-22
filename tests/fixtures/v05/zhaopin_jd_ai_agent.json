@@ -1,0 +1,16 @@
+{
+  "source_url": "https://www.zhaopin.com/jobdetail/fixture-jd-ai-agent.htm",
+  "job_id": "jd-ai-agent-2027",
+  "company": "京东科技",
+  "role_title": "AI Agent开发工程师",
+  "role_family": "ai_agent_engineering",
+  "city": "成都",
+  "graduation_year": "2027",
+  "recruitment_type": "autumn_campus",
+  "salary_min": 20,
+  "salary_max": 25,
+  "salary_unit": "K/month",
+  "job_description": "负责 AI Agent 应用研发、bad case 分析和效果评测。",
+  "requirements": "熟悉 Python；了解大模型工具调用与长上下文优化。",
+  "document_kind": "job_detail"
+}

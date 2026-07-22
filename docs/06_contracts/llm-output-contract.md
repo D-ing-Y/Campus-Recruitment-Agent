@@ -145,7 +145,7 @@ candidate_claim_extractor_v2 / schema v0.4
 
 ## v0.5 Role Profile Structured Outputs
 
-实现状态：Design Accepted / Pending Implementation。
+实现状态：版本化 prompt、structured planner/evaluator、strict schema 与 deterministic fallback 已实现；默认 Eval 使用离线 deterministic baseline。
 
 v0.5 新增若干类结构化输出。所有输出继续使用 `parse_structured_output()`、JSON-only、
 Pydantic、有限重试、版本化 cache/trace，并由确定性 validator 裁决。

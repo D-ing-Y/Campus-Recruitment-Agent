@@ -1,7 +1,7 @@
 # Campus Job Agent 总体架构
 
-版本：v0.5 设计基线
-日期：2026-07-18
+版本：v0.5 离线实现基线
+日期：2026-07-20
 
 ## 1. 项目定位
 
@@ -332,7 +332,7 @@ START
 - Source Authority Validator 限制每个 channel 可支持的 predicate；
 - Graph State 只保存 query/source/artifact/record/profile 引用。
 
-首版 live adapter 为 `boss_jobs`、`official_careers` 与 `nowcoder_experience`，
+live adapter 为 `zhaopin_jobs`、`official_careers`、`official_careers_meituan` 与 `nowcoder_experience`，
 默认 CI 使用 fixture。
 需要登录时，用户在真实 Chrome 正常登录并将 Copy as cURL/Cookie 导入本地秘密存储，
 Graph 仅通过 credential ref 恢复，不接触秘密正文。
@@ -340,6 +340,12 @@ Graph 仅通过 credential ref 恢复，不接触秘密正文。
 RoleFamily 聚合的 prevalence、company coverage、signal frequency 和样本门槛由确定性代码计算。
 LLM 负责查询建议、结构化提取和解释，不能直接合并岗位、修改分母或突破搜索预算。
 未知官网只允许产生声明式 adapter spec 候选；运行时禁止生成并执行新爬虫代码。
+
+实现状态：上述 subgraph 已位于 `src/campus_job_agent/workflows/role_profile/`；三类 adapter、
+raw-first 归档、归一化/去重、官网身份链接与字段消解、画像投影和聚合位于
+`sources/` 与 `tools/role_profile.py`。2026-07-22 验收为 v0.5 72/72、全量 140/140；
+DeepSeek、智联、牛客、官网传输和真实 auth resume 已通过。BOSS 已因持续风控退出运行时；
+智联候选到美团官网同岗的 confirmed 身份链接与字段裁决已通过。
 
 ## 7. 统一证据管线
 

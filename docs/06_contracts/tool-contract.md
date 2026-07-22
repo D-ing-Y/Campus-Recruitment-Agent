@@ -143,7 +143,7 @@ LangGraph checkpointer 是 runtime dependency，不伪装为业务 Tool：
 
 ## v0.5 Source 与 Role Profile Tool
 
-实现状态：Design Accepted / Pending Implementation。
+实现状态：已完成离线实现；三个 live adapter 默认关闭，opt-in smoke 待安全 credential ref。
 
 ### Source Tool
 
@@ -180,7 +180,7 @@ LangGraph checkpointer 是 runtime dependency，不伪装为业务 Tool：
 - adapter 只有在 raw bytes 已成功进入 BlobStore/Artifact 后才能返回 document success。
 - live adapter 默认关闭；fixture adapter 遵守相同 raw-before-parse 路径。
 - source adapter 返回分页 cursor、auth、rate limit、source changed 和 retryable 状态。
-- `boss_jobs`、`official_careers` 与 `nowcoder_experience` 的站点细节封装在 adapter，
+- `zhaopin_jobs`、`official_careers` 与 `nowcoder_experience` 的站点细节封装在 adapter，
   不进入 Agent Runtime。
 - 上游 CLI、MCP 或开源爬虫只作为 adapter 后端，不能直接写 Evidence Store、State 或 Profile。
 - `official_careers` 严格遵守域名白名单、页面/深度预算和解析链。

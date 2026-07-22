@@ -1,14 +1,23 @@
 schema_version: v0.5
-reviewed_at: "2026-07-19"
+reviewed_at: "2026-07-22"
 projects:
+  - id: boss-zhipin-scraper
+    repository: https://github.com/eatmoreduck/boss-zhipin-scraper
+    target_capability: boss_jobs
+    role: candidate_adapter_backend
+    pinned_commit: d150a2cea945c5c40966d5c65f41b68b8b7ef46d
+    license: MIT
+    status: rejected
+    notes: v2.1.0 可安装，两个 CLI 入口可运行，Python 编译和 76 个离线测试通过；真实 CDP 检查成功连接 Chrome 150，但首次搜索探测返回 BOSS code 37 并正确停止。其列表响应在页面 JS 内先投影再落盘，不满足 raw-before-parse；且包含 visibility override、模拟滚动/鼠标等降低自动化可见性的行为，不符合本项目不规避风控的 Tool 边界，不能原样依赖。可独立参考风控分类、隔离 profile 和字段映射。
+
   - id: boss-agent-cli
     repository: https://github.com/can4hou6joeng4/boss-agent-cli
     target_capability: boss_jobs
     role: candidate_adapter_backend
     pinned_commit: 889b855d7bbaa4775c9217080a22c1607473bd48
     license: MIT
-    status: blocked_by_auth
-    notes: 3 个离线 schema/JSON contract 测试通过，CLI schema smoke 通过并正确返回 AUTH_REQUIRED；BOSS 登录浏览器中的来源 search/detail smoke 已通过，但该 CLI 尚未接入浏览器 credential，因此项目自身仍为 blocked_by_auth。
+    status: rejected
+    notes: 3 个离线 schema/JSON contract 测试通过，CLI schema smoke 通过并正确返回 AUTH_REQUIRED；2026-07-22 BOSS 因持续风控退出运行时，智联改用本项目 raw-first adapter，因此该 CLI 不再作为候选 backend。
 
   - id: offerclaw
     repository: https://github.com/InuyashaYang/offerclaw

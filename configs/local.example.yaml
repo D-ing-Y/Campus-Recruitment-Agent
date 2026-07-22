@@ -13,3 +13,19 @@ llm:
 storage:
   sqlite_path: data/runs/local.db
   evidence_dir: data/evidence
+  credential_dir: data/cache/credentials
+
+sources:
+  # CI and ordinary local tests remain fully offline. Enable a live adapter
+  # only after normal browser login and explicit `campus-agent auth import-chrome`.
+  zhaopin_jobs:
+    live_enabled: false
+    credential_ref: ""
+    rate_limit_per_minute: 6
+  official_careers:
+    live_enabled: false
+    rate_limit_per_minute: 6
+  nowcoder_experience:
+    live_enabled: false
+    credential_ref: ""
+    rate_limit_per_minute: 6

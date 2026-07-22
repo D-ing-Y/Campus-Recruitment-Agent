@@ -18,7 +18,7 @@
 | v0.2 | 已完成 | LLM Provider 与结构化输出 | Provider、JSON/Pydantic、重试、缓存、LLM trace |
 | v0.3 | 已完成 | 统一证据层与领域契约 | Evidence Store、Claim、Provenance、画像契约、能力本体 |
 | v0.4 | 已完成 | 候选人画像 Graph | 文档摄取、画像构建、充分性评价、定向提问、interrupt/resume |
-| v0.5 | 设计完成 / 待实现 | 岗位需求画像 Graph | 招聘/面经证据、岗位族与具体岗位画像、检索循环 |
+| v0.5 | 已完成 | 岗位需求画像 Graph | 招聘/官网/面经证据、岗位族与具体岗位画像、检索循环 |
 | v0.6 | 计划中 | 双画像匹配与用户决策 | 四类差距、可解释匹配、偏好调整、回退与重检索 |
 | v0.7 | 计划中 | 准备计划与反馈闭环 | 能力路线、练习/笔面试反馈、画像更新、动态重排 |
 | v0.8 | 计划中 | Hybrid RAG 与长期记忆 | 稀疏+稠密检索、metadata filter、rerank、引用回答 |
@@ -134,9 +134,11 @@
 
 ## v0.5：岗位需求画像 Graph
 
-状态：Requirements / ADR / RFC / Contracts / Tasks / Eval Design 已按三段式来源链修订；
-开源候选 P0 静态/离线门禁和三个 P1 浏览器来源 smoke 已完成（2026-07-19），
-Ready for Implementation，待代码实现与 adapter 验收。
+状态：已完成（2026-07-22）。v0.5 新增 72 项测试，全量 140 项通过；
+DeepSeek、智联、牛客、企业官网传输和真实 auth resume 已通过。2026-07-22 停止 BOSS 集成并切换
+核心第三方来源为智联招聘；智联单页 raw-first live smoke 和真实页面重放已通过；
+智联美团岗位 `CC383625320J40873999709` 与美团官网岗位 `4613923553` 已生成 confirmed
+身份链接及 40 条字段裁决，状态为 Implemented / Accepted。
 
 版本定位：
 
@@ -147,7 +149,7 @@ Ready for Implementation，待代码实现与 adapter 验收。
 核心交付：
 
 - 第三方发现、企业官网核验和经验来源分离的采集/归档契约。
-- `boss_jobs`、`official_careers` 和 `nowcoder_experience` 三个首版 live adapter；
+- `zhaopin_jobs`、`official_careers` 和 `nowcoder_experience` 三个首版 live adapter；
   默认 CI 使用 fixture。
 - raw-before-parse、SourceRunReceipt、query/source/batch 幂等和字段级来源权威校验。
 - `JobIdentityLink` 与 `FieldResolution`：各来源分别证据化后再链接同一岗位并按字段消解。

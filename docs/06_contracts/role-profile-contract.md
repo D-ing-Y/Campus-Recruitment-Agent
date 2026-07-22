@@ -1,7 +1,7 @@
 # Role Profile Contract
 
-状态：v0.5 Design Accepted / Pending Implementation
-日期：2026-07-19
+状态：v0.5 Accepted
+日期：2026-07-20
 
 本契约定义具体岗位画像、岗位族画像、招聘要求、经验信号和覆盖度评价。所有事实字段必须引用已验证 Claim；所有岗位族统计必须保留样本与分母。
 
@@ -277,7 +277,7 @@ unknown
 
 ```json
 {
-  "source_id": "boss_jobs",
+  "source_id": "zhaopin_jobs",
   "source_type": "recruitment_platform",
   "source_url": "https://example.com/job/1",
   "raw_artifact_id": "artifact-1",

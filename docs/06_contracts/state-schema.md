@@ -226,7 +226,7 @@ fail
 
 ## v0.5 RoleProfileGraphState
 
-实现状态：Design Accepted / Pending Implementation。
+实现状态：已完成离线实现与 SQLite checkpoint/auth resume 验收；live source resume 待授权。
 
 关联：
 

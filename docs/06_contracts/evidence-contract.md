@@ -156,7 +156,7 @@ v0.3 实现中的 `ProfileSnapshot` 是 Candidate/CareerIntent/Role 的统一持
 
 ## v0.5 外部岗位与经验来源增量
 
-实现状态：Design Accepted / Pending Implementation。
+实现状态：v0.5 raw-before-parse、外部来源 metadata、authority validator 与 RoleSnapshot 已完成离线实现；live smoke 待授权。
 
 ### Raw-before-parse
 

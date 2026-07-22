@@ -1,0 +1,19 @@
+{
+  "source_url": "https://www.nowcoder.com/feed/main/detail/fixture-jd-agent",
+  "platform": "nowcoder",
+  "content_type": "interview_post",
+  "title": "京东科技 AI 全栈 Agent 一面面经（脱敏）",
+  "author_ref": "anonymous",
+  "company": "京东科技",
+  "role_title": "AI 全栈 Agent 研发",
+  "role_family": "ai_agent_engineering",
+  "scope_level": "company_role",
+  "stage": "first_interview",
+  "signals": {
+    "interview": ["讨论 MySQL 慢查询、Redis 一致性、Kafka 消息积压和突发流量处理"],
+    "project_preference": ["追问 Agent bad case、评测、长上下文和工具数量优化"],
+    "tech_stack": ["MySQL", "Redis", "Kafka", "Agent evaluation"]
+  },
+  "summary": "脱敏的一面实践信号，不支持岗位存在、学历、薪资、地点或截止时间。",
+  "document_kind": "experience_post"
+}

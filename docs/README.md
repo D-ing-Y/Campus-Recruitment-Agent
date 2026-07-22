@@ -2,7 +2,7 @@
 
 本目录是项目开发的事实来源。所有代码开发前，必须先在这里明确需求、设计、接口契约和验收标准。
 
-当前项目从 v0.3 起采用“统一证据层 + 候选人画像 + 求职意图 + 岗位需求画像 + 反馈闭环”的架构。v0.4 候选人画像 subgraph 已于 2026-07-18 完成代码、测试和 Eval 验收；v0.5 岗位需求画像 Graph 的设计文档、来源候选 P0 静态/离线门禁和三个 P1 浏览器来源 smoke 已完成，状态为 Ready for Implementation。v0.1-v0.4 文档作为已完成版本的历史记录保留，后续变化通过新版本 requirements、RFC 和 ADR 描述。
+当前项目从 v0.3 起采用“统一证据层 + 候选人画像 + 求职意图 + 岗位需求画像 + 反馈闭环”的架构。v0.4 候选人画像 subgraph 与 v0.5 岗位需求画像 Graph 均已完成验收；v0.5 为 72 项测试、全量为 140 项测试，DeepSeek、智联、牛客、企业官网、auth resume 及真实 confirmed 官网身份链接均通过。v0.1-v0.4 文档作为已完成版本的历史记录保留，后续变化通过新版本 requirements、RFC 和 ADR 描述。
 
 ## 目录说明
 
@@ -31,10 +31,10 @@
   -> 提交代码
 ```
 
-当前 v0.5 已完成流程中的需求、RFC/ADR、任务拆解、contracts、eval 设计、开源候选
-P0 门禁和 BOSS 发现、牛客经验、企业官网核验三个 P1 浏览器来源 smoke。下一步由
-VSCode 实现，随后执行离线/集成测试和三个 adapter opt-in live smoke，生成
-`v0.5-eval-report.md` 后才可将版本状态收口为 Implemented。
+当前 v0.5 已完成需求、RFC/ADR、任务拆解、contracts、代码实现、离线/集成测试、
+eval 报告和实现后 opt-in live 验收。2026-07-22 起 BOSS 仅保留历史决策证据，核心招聘
+发现来源改为智联招聘；智联、美团官网和牛客 raw-first 采集均已验证，智联候选到美团官网
+同岗已形成 confirmed JobIdentityLink 与字段级 FieldResolution。版本状态已收口为 Implemented / Accepted。
 
 ## Codex 协作边界
 

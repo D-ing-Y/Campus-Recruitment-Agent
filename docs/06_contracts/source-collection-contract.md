@@ -1,7 +1,7 @@
 # Source Collection Contract
 
-状态：v0.5 Design Accepted / Pending Implementation
-日期：2026-07-19
+状态：v0.5 Accepted
+日期：2026-07-20
 
 本契约定义第三方招聘发现、企业官网核验与社区经验来源的查询、采集、原始归档、
 归一化、身份链接、字段消解、去重和运行记录。三类来源共享 transport/归档基础设施，
@@ -81,10 +81,10 @@ authority 是字段级策略，不是来源的单一总分。同一来源可对�
 
 ```json
 {
-  "source_id": "boss_jobs",
+  "source_id": "zhaopin_jobs",
   "channel": "recruitment_discovery",
   "source_type": "recruitment_platform",
-  "adapter_version": "boss_jobs_v1",
+  "adapter_version": "zhaopin_jobs_v1",
   "supports_keyword": true,
   "supports_location": true,
   "supports_company": false,
@@ -104,7 +104,7 @@ capability 由 adapter 声明，QueryPlanner 不得生成 source 不支持的过
   "query_id": "query-1",
   "schema_version": "v0.5",
   "channel": "recruitment_discovery",
-  "source_id": "boss_jobs",
+  "source_id": "zhaopin_jobs",
   "keywords": ["AI Agent", "LLM应用"],
   "location": "成都",
   "company": null,
@@ -157,7 +157,7 @@ SourceAdapter 成功返回的每个 document 必须已经归档：
 {
   "source_document_id": "source-doc-1",
   "schema_version": "v0.5",
-  "source_id": "boss_jobs",
+  "source_id": "zhaopin_jobs",
   "channel": "recruitment_discovery",
   "query_id": "query-1",
   "source_url": "https://example.com/job/1",
@@ -210,7 +210,7 @@ failed
 {
   "batch_id": "batch-1",
   "schema_version": "v0.5",
-  "source_id": "boss_jobs",
+  "source_id": "zhaopin_jobs",
   "channel": "recruitment_discovery",
   "query_id": "query-1",
   "cursor": null,
@@ -235,9 +235,9 @@ batch 幂等键包含 source/query fingerprint/cursor/adapter version。相同 b
   "source_run_id": "source-run-1",
   "schema_version": "v0.5",
   "run_id": "role-run-1",
-  "source_id": "boss_jobs",
+  "source_id": "zhaopin_jobs",
   "channel": "recruitment_discovery",
-  "adapter_version": "boss_jobs_v1",
+  "adapter_version": "zhaopin_jobs_v1",
   "query_ids": ["query-1"],
   "received_count": 10,
   "archived_count": 10,
@@ -282,7 +282,7 @@ receipt 不得保存 Cookie、Authorization、完整 headers、cURL 或凭据路
   "application_deadline": null,
   "application_url": "https://example.com/apply/1",
   "source_url": "https://example.com/job/1",
-  "source_id": "boss_jobs",
+  "source_id": "zhaopin_jobs",
   "source_type": "recruitment_platform",
   "source_date": null,
   "retrieved_at": "2026-07-18T00:00:00+08:00",
@@ -385,7 +385,7 @@ unknown
   "merge_method": "exact_normalized_key",
   "confidence": 1.0,
   "conflicts": [],
-  "source_ids": ["boss_jobs", "official_careers"]
+  "source_ids": ["zhaopin_jobs", "official_careers"]
 }
 ```
 
