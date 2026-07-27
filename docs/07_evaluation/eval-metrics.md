@@ -32,7 +32,8 @@
 
 - `hard_constraint_accuracy`
 - `gap_label_accuracy`
-- `match_calibration`
+- `coverage_calculation_accuracy`
+- `unknown_as_failure_count`
 - `recommendation_coverage`
 - `plan_evidence_trace_rate`
 
@@ -105,3 +106,29 @@
 - live smoke 只证明 adapter/归档/授权链路在验收时可运行，不代表长期稳定或完整覆盖。
 - source 临时不可用时报告真实失败，不把 fixture 计入 `live_source_smoke_pass_count`。
 - RoleCoverage 评价岗位画像证据，不评价候选人与岗位匹配程度。
+
+## v0.6 Profile Matching 与用户决策指标
+
+| 指标 | 定义 | 文档验收目标 |
+| --- | --- | ---: |
+| `hard_constraint_accuracy` | qualification item 与 overall status 和 gold 一致的比例 | 100% L0/L1 固定集 |
+| `coverage_calculation_accuracy` | core/bonus 分子、分母、unknown weight 与 gold 完全一致的比例 | 100% |
+| `gap_label_accuracy` | 四类 GapType 与 gold 一致的比例 | ≥ 95%，关键边界集 100% |
+| `unknown_as_failure_count` | unknown/unmapped/conflicted 被错误判为 failed/capability gap 的数量 | 0 |
+| `assessment_evidence_trace_rate` | 明确 pass/fail/satisfied/insufficient 可回溯双方有效 Claim 的比例 | 100% |
+| `deterministic_output_stability_rate` | 相同输入/policy 重放得到相同 canonical assessment 的比例 | 100% |
+| `preference_update_isolation_rate` | intent 更新未创建/修改 Candidate Claim 的比例 | 100% |
+| `same_scope_update_no_research_rate` | SearchScope 不变时正确只 rematch 的比例 | 100% |
+| `search_scope_change_reroute_accuracy` | scope 变化时正确产生 role research directive 的比例 | 100% |
+| `stale_assessment_invalidation_rate` | 输入 snapshot 更新后旧结果正确 stale/superseded 的比例 | 100% |
+| `decision_interrupt_resume_success_rate` | 合法选择/暂缓/拒绝可跨进程恢复的比例 | 100% |
+| `decision_idempotency_violation_count` | 重复 response 造成的重复 decision/intent/directive 数量 | 0 |
+| `offer_probability_claim_count` | 输出中出现无依据 Offer/录取/面试概率的数量 | 0 |
+| `llm_fact_mutation_accept_count` | 非法 LLM 数字/状态/GapType 被系统接受的数量 | 0 |
+| `max_match_loop_termination_rate` | 达到 hard budget 后正确停止的比例 | 100% |
+
+说明：
+
+- coverage 必须与 eligible/total/uncertain weight 一起评价，不能只比较最终小数。
+- 默认指标使用 L0/L1 固定集；可选 DeepSeek explanation smoke 单独报告。
+- v0.6 不定义 `match_calibration`，因为版本不输出成功概率或可校准的 Offer score。

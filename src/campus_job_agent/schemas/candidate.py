@@ -89,6 +89,8 @@ class CandidateProfile(BaseModel):
     responsibility_boundaries: list[ResponsibilityBoundary] = Field(
         default_factory=list
     )
+    qualifications: dict[str, Any] = Field(default_factory=dict)
+    qualification_claim_ids: dict[str, list[str]] = Field(default_factory=dict)
     unknowns: list[str] = Field(default_factory=list)
     conflicts: list[dict[str, Any]] = Field(default_factory=list)
     evidence_coverage: EvidenceCoverage = Field(default_factory=EvidenceCoverage)

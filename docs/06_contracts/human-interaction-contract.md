@@ -1,7 +1,7 @@
 # Human Interaction Contract
 
-状态：v0.4 Implemented
-日期：2026-07-17
+状态：v0.4/v0.5/v0.6 Implemented / Accepted
+日期：2026-07-22
 
 本契约统一 LangGraph `interrupt()` 与 resume 的结构化载荷。v0.4 用于候选人画像提问、补充材料和可选画像复核，后续版本可复用。
 
@@ -230,3 +230,86 @@ skip_source
 - `skip_source` 将 source ID 写入 skipped set，不得重复中断请求。
 - 错误 ref/request/thread/user/action 时 Evidence Store 零写入。
 - Source authorization 不是 Evidence Claim，不进入 Candidate/Role Profile。
+
+## 12. v0.6 Comparison Review
+
+v0.6 增加 `review_comparison`，复用既有 identity、resume、checkpoint、幂等和隐私规则。
+
+### Request
+
+```json
+{
+  "request_id": "hir-comparison-1",
+  "schema_version": "v0.6",
+  "thread_id": "matching-thread-1",
+  "run_id": "matching-run-1",
+  "user_id": "user-1",
+  "interaction_type": "review_comparison",
+  "reason": "请审阅岗位比较结果并选择下一步",
+  "comparison_set_id": "comparison-1",
+  "input_snapshot_refs": {
+    "candidate_profile_snapshot_id": "candidate-snapshot-1",
+    "career_intent_snapshot_id": "intent-snapshot-1",
+    "job_instance_profile_snapshot_ids": ["role-job-1"]
+  },
+  "target_summaries": [
+    {
+      "job_instance_profile_snapshot_id": "role-job-1",
+      "gap_assessment_id": "gap-assessment-1",
+      "recommended_tier": "needs_clarification"
+    }
+  ],
+  "allowed_target_ids": ["role-job-1"],
+  "allowed_actions": [
+    "select_targets", "defer_targets", "reject_targets",
+    "revise_candidate", "revise_intent", "refresh_role",
+    "confirm_and_finish", "cancel"
+  ],
+  "warnings": ["coverage_is_not_offer_probability"],
+  "created_at": "2026-07-22T00:00:00+08:00"
+}
+```
+
+request 不内嵌完整 CandidateProfile、RoleProfile、用户材料或网页正文。展示层通过 owner 校验后的
+repository 读取必要摘要。
+
+### Response
+
+```json
+{
+  "response_id": "response-comparison-1",
+  "schema_version": "v0.6",
+  "request_id": "hir-comparison-1",
+  "thread_id": "matching-thread-1",
+  "user_id": "user-1",
+  "action": "select_targets",
+  "target_decisions": [
+    {
+      "job_instance_profile_snapshot_id": "role-job-1",
+      "status": "selected",
+      "reason_codes": ["evidence_coverage_acceptable"],
+      "note": null
+    }
+  ],
+  "candidate_revision": null,
+  "intent_revision": null,
+  "role_refresh_target_ids": [],
+  "submitted_at": "2026-07-22T00:05:00+08:00"
+}
+```
+
+载荷规则：
+
+- select/defer/reject 至少包含一个对应状态的 target decision。
+- `revise_candidate` 只生成交给 v0.4 的 correction/补证请求，不直接修改画像字段。
+- `revise_intent` 只允许 CareerIntent 字段 allowlist，并创建新 intent snapshot。
+- `refresh_role` 的 target ID 必须属于当前 request。
+- `confirm_and_finish` 不创建目标决策，只确认用户已完成本轮审阅。
+- 任一输入 snapshot 已 stale 时拒绝 target decision，并返回新的审阅/刷新要求。
+
+### 原子性与幂等
+
+- target decision batch 必须全部校验后原子写入。
+- intent revision、impact assessment 和 directive 必须在同一业务事务或可恢复 saga 边界内。
+- 相同 response 重放不得重复创建 decision、intent snapshot 或 directive。
+- 候选人 revision 的回答证据化继续遵守本契约第 5-8 节。

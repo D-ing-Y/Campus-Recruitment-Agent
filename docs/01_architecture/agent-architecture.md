@@ -1,7 +1,7 @@
 # Campus Job Agent 总体架构
 
-版本：v0.5 离线实现基线
-日期：2026-07-20
+版本：v0.6 实现验收基线
+日期：2026-07-25
 
 ## 1. 项目定位
 
@@ -204,6 +204,15 @@ v0.5 进一步要求：
 
 匹配分数表示“岗位要求的证据覆盖度”，不表示 Offer 概率。
 
+v0.6 进一步将其拆为：
+
+- hard qualification status：资格是否明确通过、失败或未知；
+- core/bonus evidence coverage：已知可评估能力要求中，当前证据覆盖的分子和分母；
+- preference compatibility：CareerIntent 的 hard/negotiable 冲突；
+- epistemic uncertainty：候选人、岗位、映射或时效仍未知的部分。
+
+系统不发布掩盖上述维度的单一综合分。unknown 不等于失败，coverage 不表示 Offer 概率。
+
 ## 6. LangGraph 父图
 
 ```text
@@ -223,7 +232,9 @@ match_profiles
   ↓
 human_decision_interrupt
   ├─ revise candidate evidence → candidate_profile_subgraph
-  ├─ revise intent → role_profile_subgraph
+  ├─ revise intent → intent impact
+  │                   ├─ same SearchScope → match_profiles
+  │                   └─ changed SearchScope → role_profile_subgraph
   └─ select targets → preparation_subgraph
                           ↓
                      feedback_subgraph
@@ -346,6 +357,38 @@ raw-first 归档、归一化/去重、官网身份链接与字段消解、画像
 `sources/` 与 `tools/role_profile.py`。2026-07-22 验收为 v0.5 72/72、全量 140/140；
 DeepSeek、智联、牛客、官网传输和真实 auth resume 已通过。BOSS 已因持续风控退出运行时；
 智联候选到美团官网同岗的 confirmed 身份链接与字段裁决已通过。
+
+### 6.5 v0.6 Profile Matching Subgraph
+
+v0.6 在 v1.0 Parent Graph 之前实现独立、可测试的 matching subgraph：
+
+```text
+candidate snapshot + intent snapshot + job snapshots
+  → validate versions/ownership/freshness
+  → evaluate hard qualifications
+  → align capability requirements
+  → compute deterministic coverage
+  → evaluate preferences/uncertainty
+  → build GapAssessment + ComparisonSet
+  → explain deterministic facts
+  → review_comparison interrupt
+      ├─ select/defer/reject → TargetDecision
+      ├─ candidate correction → candidate_profile_required
+      ├─ same-scope intent update → rematch_required
+      ├─ SearchScope update → role_research_required
+      └─ stale role → role_refresh_required
+```
+
+该 subgraph 不直接修改 CandidateProfile/RoleProfile，也不直接调用 v0.4/v0.5。跨边界动作通过
+`RebuildDirective` 返回给 application service；v1.0 Parent Graph 再消费这些 directive。
+
+比较与决策对象采用不可变版本：任何输入 snapshot 或 policy 变化都会生成新 assessment/comparison，
+旧结果标记 stale/superseded。用户选择保存在独立 TargetDecision 中，不反向改写画像。
+
+实现状态：`src/campus_job_agent/workflows/profile_matching/` 已完成。2026-07-25 验收为
+v0.6 新增 82/82、全量 222/222；SQLite comparison review restart、重复 response、
+同 scope rematch、SearchScope 重检索、stale role refresh 和非法 LLM fallback 均通过。
+DeepSeek `deepseek-v4-flash` MatchExplanation structured-output smoke 通过。
 
 ## 7. 统一证据管线
 

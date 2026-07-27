@@ -46,6 +46,23 @@
   - `role_source_batch_duplicate`：相同 batch 重放，不重复写入。
   - `role_checkpoint_restart`：重建 Graph 后从 collection/auth 边界恢复。
   - `role_raw_before_parse_failure`：raw 写入失败时 parser 不得执行。
+- v0.6：双画像匹配与用户决策固定数据集：
+  - `match_hard_pass_partial_coverage`：硬性资格通过，核心能力只有部分证据覆盖。
+  - `match_hard_fail_with_evidence`：双方事实可比较且明确违反硬性资格，应 failed 并引用双方 Claim。
+  - `match_hard_unknown_not_fail`：候选人资格字段缺失，应 unknown 而非 failed。
+  - `match_capability_gap_confirmed`：候选人已确认等级低于要求，应 capability gap。
+  - `match_evidence_gap_not_capability_gap`：声称具备但职责/等级证据不足，应 evidence gap。
+  - `match_unmapped_requirement_uncertainty`：岗位 raw capability 无 ontology mapping，应 uncertainty。
+  - `match_negotiable_preference_conflict`：普通偏好冲突，不影响 hard status/coverage。
+  - `match_hard_preference_conflict`：用户 hard preference 冲突，阻塞推荐但不伪装资格失败。
+  - `match_same_scope_intent_rematch`：普通偏好变化，scope hash 不变，只 rematch。
+  - `match_search_scope_change_role_research`：城市/岗位等 scope 变化，产生 role research directive。
+  - `match_candidate_revision_reroute`：用户纠正候选人事实，产生 candidate profile directive。
+  - `match_stale_role_refresh`：岗位过期/身份存疑，产生 role refresh directive。
+  - `match_multi_job_stable_order`：输入顺序变化后仍得到相同字典序结果。
+  - `match_decision_resume_duplicate`：相同选择 response 重放，不重复创建 decision。
+  - `match_checkpoint_restart`：重建 Graph 后从 comparison review interrupt 恢复。
+  - `match_llm_invalid_fact_fallback`：模型修改数字/状态时被拒绝并使用模板。
 - v0.8：带 relevance judgement、无答案问题和 citation gold 的检索集。
 - v1.1：重复消息、worker 崩溃、对象写入失败和数据库冲突场景。
 
@@ -60,3 +77,7 @@
   job cluster、identity link、field resolution、Claim authority、profile 字段、样本分母、
   freshness 和 next action。
 - v0.5 live smoke 数据与固定集分开；默认测试不得依赖实时网页。
+- v0.6 每个 fixture 标注 exact input snapshot、qualification/requirement/preference item、
+  coverage 分子/分母/uncertain、GapType、stable order、允许用户动作和预期 directive。
+- v0.6 explanation gold 主要校验 fact/citation/action 边界，不要求固定自然语言措辞；
+  DeepSeek smoke 不进入默认测试分母。

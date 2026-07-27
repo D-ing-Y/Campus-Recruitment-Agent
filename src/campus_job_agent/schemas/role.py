@@ -88,7 +88,13 @@ class JobInstanceRoleProfile(BaseModel):
     role_title: str
     role_family: str
     company: str
+    industry: str | None = None
+    company_type: str | None = None
     locations: list[str] = Field(default_factory=list)
+    work_mode: str | None = None
+    salary_min: int | None = Field(default=None, ge=0)
+    salary_max: int | None = Field(default=None, ge=0)
+    salary_unit: str | None = None
     recruitment_type: str = "unknown"
     graduation_year: str = "unknown"
     source_status: str = "unknown"

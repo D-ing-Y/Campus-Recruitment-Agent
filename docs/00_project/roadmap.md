@@ -19,7 +19,7 @@
 | v0.3 | 已完成 | 统一证据层与领域契约 | Evidence Store、Claim、Provenance、画像契约、能力本体 |
 | v0.4 | 已完成 | 候选人画像 Graph | 文档摄取、画像构建、充分性评价、定向提问、interrupt/resume |
 | v0.5 | 已完成 | 岗位需求画像 Graph | 招聘/官网/面经证据、岗位族与具体岗位画像、检索循环 |
-| v0.6 | 计划中 | 双画像匹配与用户决策 | 四类差距、可解释匹配、偏好调整、回退与重检索 |
+| v0.6 | 已完成 | 双画像匹配与用户决策 | 四类差距、可解释匹配、偏好调整、回退与重检索 |
 | v0.7 | 计划中 | 准备计划与反馈闭环 | 能力路线、练习/笔面试反馈、画像更新、动态重排 |
 | v0.8 | 计划中 | Hybrid RAG 与长期记忆 | 稀疏+稠密检索、metadata filter、rerank、引用回答 |
 | v1.0 | 计划中 | 单 Agent 端到端产品 | 父图、subgraph、checkpoint、interrupt、完整 eval |
@@ -195,17 +195,33 @@ DeepSeek、智联、牛客、企业官网传输和真实 auth resume 已通过�
 
 ## v0.6：双画像匹配与用户决策
 
+状态：已完成（2026-07-25）。Requirements / RFC / ADR / Contracts、代码、82 项新增测试、
+222 项全量回归、离线 Eval 与 DeepSeek MatchExplanation smoke 均已验收。
+
 核心交付：
 
 - 硬性条件校验与能力覆盖度分离。
 - 能力差距、证据差距、偏好冲突和认知不确定性四类结果。
 - 由确定性代码计算的可解释覆盖度，LLM 负责证据解释而不直接拍分。
 - 用户确认、画像纠正、目标选择和偏好调整 interrupt。
-- 偏好变化只更新 `CareerIntent`，并触发岗位重检索，不错误修改候选人能力。
+- 偏好变化只更新 `CareerIntent`，不错误修改候选人能力。
+- 仅 SearchScope 变化触发岗位重检索；普通可协商偏好变化只重算比较。
+- 比较结果固定引用 Candidate、Intent 和 Role snapshot；输入更新后旧结果失效，不原地覆盖。
+- matching subgraph 通过 RebuildDirective 路由 v0.4/v0.5，不提前实现 v1.0 Parent Graph。
 
 完成标准：
 
-- 用户调整目标后，Graph 能回退并重建相关岗位画像，再次输出带证据的比较结果。
+- 用户调整普通偏好后可直接重算；调整目标范围后能请求重建相关岗位画像，并再次输出带证据的比较结果。
+- unknown 不被误判为能力不足，覆盖度不被表达为 Offer 概率。
+
+实际交付：
+
+- `src/campus_job_agent/workflows/profile_matching/` 独立 subgraph、deterministic policy、
+  explanation validator/fallback 与 SQLite repository。
+- v0.6 schema、CareerIntent/legacy Gap 迁移、不可变 assessment/comparison/decision/directive。
+- `review_comparison` interrupt、SQLite 重启恢复、原子 decision batch 与重复 response 幂等。
+- 同 scope intent rematch、SearchScope change role research、candidate/role refresh directive。
+- 16 案例固定集全部达到文档门槛；新增 82 项测试，全量 222 项通过。
 
 ## v0.7：准备计划与反馈闭环
 

@@ -9,12 +9,18 @@
 v0.4 候选人画像 Graph 已于 2026-07-18 完成代码、测试和 Eval 验收。
 
 v0.5 岗位需求画像 Graph 已完成代码、fixture、离线 adapter、RoleProfile Graph、测试和 Eval；
-当前代码版本为 `0.5.0`。140 项全量测试全部通过，其中 v0.5 新增 72 项，v0.1-v0.4
+其 140 项验收基线全部保留，其中 v0.5 新增 72 项，v0.1-v0.4
 的 68 项回归全部通过。2026-07-21 实现后 Live Smoke 中 DeepSeek、牛客、企业官网传输和真实
 auth interrupt/resume 已通过。2026-07-22 决定停止 BOSS 集成并将核心第三方招聘来源切换为
 智联招聘；`zhaopin_jobs` 单页 raw-first live smoke 和 20 条真实页面重放解析已经通过。
 真实智联候选到美团官网同岗已生成 `confirmed` JobIdentityLink 和字段级 FieldResolution，
 v0.5 状态为 Implemented / Accepted。
+
+v0.6 双画像匹配与用户决策已于 2026-07-25 完成实现与验收，当前代码版本为 `0.6.0`。
+新增 82 项 v0.6 测试，全量 222 项通过，v0.1-v0.5 的 140 项回归全部保留。实现分离硬性
+资格、能力证据覆盖、偏好冲突和未知项；所有判定、权重、覆盖、四类 Gap、排序和路由由
+确定性代码计算，LLM 只解释，用户负责最终岗位选择。DeepSeek `deepseek-v4-flash`
+MatchExplanation structured-output smoke 已通过且未触发 fallback。
 
 v0.1/v0.2 保留为 Runtime 与 LLM 基座，v0.3 提供统一证据层、领域契约、版本化画像快照和证据质量评估；v0.4 已将这些能力接入第一个可循环、可中断、可恢复的候选人画像 LangGraph subgraph。
 
@@ -73,7 +79,20 @@ v0.5 已按最新来源验证架构完成离线实现与验收：
 - 72 项 v0.5 schema、adapter、raw-before-parse、官网核验、authority、画像聚合、路由、
   auth resume、SQLite checkpoint 和 Eval 测试。
 
-v0.5 不实现双画像匹配、学习计划、RAG、分布式存储、Multi-Agent、Web UI 或自动投递。默认测试不访问真实招聘网站，不需要登录或真实 API key。
+v0.6 已实现：
+
+- `profile_matching` LangGraph subgraph 与 SQLite checkpoint/restart。
+- Candidate/Intent/Job snapshot 所有权、版本、freshness 和失效校验。
+- qualification comparator、exact/transfer/unmapped 能力对齐和等级比较。
+- core/bonus `CoverageBreakdown`，同时展示 covered、eligible、total 与 uncertain weight。
+- capability/evidence/preference/epistemic 四类 Gap 与稳定字典序 `ComparisonSet`。
+- `review_comparison` interrupt 及 select/defer/reject、候选人纠正、意图调整和岗位刷新。
+- 同 SearchScope 的意图变化只 rematch；范围变化输出 role research directive。
+- LLM fact/citation/action/数字/概率声明 validator 与确定性 explanation fallback。
+- 不可变 assessment/comparison/decision/directive repository、原子 decision batch 和重复响应幂等。
+- 离线 16 案例固定集与 v0.6 全部指标验收。
+
+v0.6 不实现学习计划、RAG、分布式存储、Multi-Agent、Web UI 或自动投递。默认测试不访问真实招聘网站，不需要登录或真实 API key。
 
 后续路线会实际实现 LangGraph 高级编排、Hybrid RAG、分布式存储和必要的 Sub-Agent；每项技术必须对应真实业务问题、简单基线和量化验收，而不是仅作为技术展示。
 
@@ -165,3 +184,6 @@ v0.3 验收基线为 45 项测试全部通过。v0.4 全量验收为 68 项测�
 
 v0.5 离线验收为 72/72，通过后全量为 140/140。实际指标、Live Smoke 和真实 confirmed
 官网身份链接结果见 `docs/07_evaluation/v0.5-eval-report.md`。
+
+v0.6 离线验收为 82/82，通过后全量为 222/222；v0.1-v0.5 的 140 项回归全部通过。
+实际指标、恢复/幂等测试和可选 DeepSeek smoke 见 `docs/07_evaluation/v0.6-eval-report.md`。

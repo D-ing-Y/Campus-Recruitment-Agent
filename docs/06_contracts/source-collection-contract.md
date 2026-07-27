@@ -63,6 +63,7 @@ authority 是字段级策略，不是来源的单一总分。同一来源可对�
   "recruitment_type": "autumn_campus",
   "industries": [],
   "companies": [],
+  "company_types": [],
   "hard_constraints": [],
   "preferred_languages": ["zh-CN"],
   "created_at": "2026-07-18T00:00:00+08:00"
@@ -76,6 +77,8 @@ authority 是字段级策略，不是来源的单一总分。同一来源可对�
 - 每个 SearchScope 只对应一个 canonical target role family；多个方向使用独立 Graph run。
 - CandidateProfile capability 不进入 SearchScope。
 - SearchScope 在单次 run 中不可由 LLM 自行扩大。
+- fingerprint 只覆盖规范化检索语义，不包含 `scope_id`、`created_at` 或
+  `career_intent_snapshot_id`；因此同范围的新 CareerIntent snapshot 不会误触发重检索。
 
 ## 3. SourceCapabilities
 

@@ -1,0 +1,18 @@
+[
+  {"name":"match_hard_pass_partial_coverage","gold_hard_status":"passed","predicted_hard_status":"passed","coverage_expected":true,"coverage_exact":true,"gold_gap_types":["epistemic_uncertainty"],"predicted_gap_types":["epistemic_uncertainty"],"explicit_outcome_count":2,"traced_explicit_outcome_count":2,"stability_expected":true,"stable":true},
+  {"name":"match_hard_fail_with_evidence","gold_hard_status":"failed","predicted_hard_status":"failed","coverage_expected":true,"coverage_exact":true,"explicit_outcome_count":1,"traced_explicit_outcome_count":1},
+  {"name":"match_hard_unknown_not_fail","gold_hard_status":"unknown","predicted_hard_status":"unknown","unknown_as_failure_count":0},
+  {"name":"match_capability_gap_confirmed","gold_gap_types":["capability_gap"],"predicted_gap_types":["capability_gap"],"explicit_outcome_count":1,"traced_explicit_outcome_count":1},
+  {"name":"match_evidence_gap_not_capability_gap","gold_gap_types":["evidence_gap"],"predicted_gap_types":["evidence_gap"],"unknown_as_failure_count":0},
+  {"name":"match_unmapped_requirement_uncertainty","gold_gap_types":["epistemic_uncertainty"],"predicted_gap_types":["epistemic_uncertainty"],"unknown_as_failure_count":0},
+  {"name":"match_negotiable_preference_conflict","gold_gap_types":["preference_conflict"],"predicted_gap_types":["preference_conflict"]},
+  {"name":"match_hard_preference_conflict","gold_gap_types":["preference_conflict"],"predicted_gap_types":["preference_conflict"]},
+  {"name":"match_same_scope_intent_rematch","preference_update_expected":true,"preference_isolated":true,"same_scope_expected":true,"avoided_research":true},
+  {"name":"match_search_scope_change_role_research","preference_update_expected":true,"preference_isolated":true,"scope_change_expected":true,"role_research_rerouted":true},
+  {"name":"match_candidate_revision_reroute","stability_expected":true,"stable":true},
+  {"name":"match_stale_role_refresh","gold_gap_types":["epistemic_uncertainty"],"predicted_gap_types":["epistemic_uncertainty"],"stale_invalidation_expected":true,"stale_invalidated":true},
+  {"name":"match_multi_job_stable_order","stability_expected":true,"stable":true},
+  {"name":"match_decision_resume_duplicate","decision_resume_expected":true,"decision_resumed":true,"idempotency_violations":0},
+  {"name":"match_checkpoint_restart","decision_resume_expected":true,"decision_resumed":true},
+  {"name":"match_llm_invalid_fact_fallback","llm_fact_mutations_accepted":0,"offer_probability_claims":0,"max_loop_expected":true,"max_loop_terminated":true}
+]

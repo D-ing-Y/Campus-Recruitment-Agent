@@ -9,19 +9,23 @@
 - `v0.3-evidence-domain-foundation.md`
 - `v0.4-candidate-profile-graph.md`
 - `v0.5-role-profile-graph.md`
+- `v0.6-profile-matching-and-user-decision.md`
 
 实现任务文档与需求文档使用相同版本号，例如：
 
 - `v0.3-implementation-tasks.md`
 - `v0.4-implementation-tasks.md`
 - `v0.5-implementation-tasks.md`
+- `v0.6-implementation-tasks.md`
 
 当前活动版本：
 
 - v0.3：Accepted / Implemented。
 - v0.4：Requirements / ADR / RFC / Contracts / Tasks、实现、测试和 Eval 已完成，Implemented（2026-07-18）。
-- v0.5：Requirements / ADR / RFC / Contracts / Tasks、来源候选 P0 静态/离线门禁和
-  三个 P1 浏览器来源 smoke 已完成，Ready for Implementation（2026-07-19）。
+- v0.5：Requirements / ADR / RFC / Contracts / Tasks、实现、测试、Eval 和 Live Smoke
+  已完成，Implemented / Accepted（2026-07-22）。
+- v0.6：Requirements / ADR / RFC / Matching/Decision Contracts / Tasks、实现、测试、
+  Eval 与 DeepSeek MatchExplanation smoke 已完成，Implemented / Accepted（2026-07-25）。
 
 每份需求文档必须说明：
 

@@ -38,7 +38,13 @@
 - Question Plan：把高价值 Information Gap 转换为有限、可回答、可跳过且不重复的问题集合。
 - Profile Correction：用户对画像字段的纠正请求；必须转换为新 Claim 并关联被替代 Claim，不能直接覆盖画像。
 - Information Value：用于选择下一步收集动作的排序信号，综合缺口重要性、不确定性、可回答性和证据成本。
-- Gap Assessment：双画像比较结果，包括能力差距、证据差距、偏好冲突和认知不确定性。
+- Gap Assessment：固定引用 Candidate、Intent 和具体 Role snapshot 的双画像比较结果，包括资格状态、能力证据覆盖、偏好判断，以及能力差距、证据差距、偏好冲突和认知不确定性。
+- Qualification Assessment：对岗位单项硬性资格与候选人事实进行确定性比较的结果；unknown 不等于 failed。
+- Requirement Assessment：岗位能力要求与候选人能力/证据的逐项对齐结果，保存 mapping、等级、权重、双方 Claim 和 reason code。
+- Evidence Coverage：当前证据对可评估岗位能力要求的覆盖，必须同时展示 covered、eligible、total 和 uncertain weight；不表示 Offer 概率。
+- Comparison Set：多个具体岗位 GapAssessment 的不可变集合，按资格、偏好、覆盖、unknown 和 stable ID 做可解释排序。
+- Target Decision：用户对具体岗位作出的 selected/deferred/rejected 决策；独立于 CareerIntent 和画像事实。
+- Rebuild Directive：matching subgraph 请求候选人重建、岗位重检索/刷新或重新匹配的结构化跨图指令，本身不直接修改画像。
 - Memory：跨任务保留的事实、偏好和历史状态；不得用未追溯的聊天摘要替代证据。
 - RAG：Retrieval-Augmented Generation，通过检索真实证据增强模型输出。
 - Hybrid RAG：结合稀疏/全文检索、稠密向量检索、metadata filter 和 reranker 的检索方案。

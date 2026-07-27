@@ -253,3 +253,61 @@ role_coverage_v1 / schema v0.5
 
 cache key 包含 source/query/artifact/fragment hash、prompt/schema/adapter version 和 scope hash；
 不得缓存 credential、完整 headers 或 cURL。
+
+## v0.6 Match Explanation Structured Output
+
+v0.6 的 qualification、capability mapping、等级判断、weight、coverage、GapType、severity、
+ranking 和 Graph route 均由确定性代码计算。LLM 只接收 `DeterministicComparisonFacts` 并输出
+通过 `MatchExplanation` schema 校验的用户可读解释。
+
+### 输入边界
+
+- ComparisonSet ID、GapAssessment ID 和 job profile 摘要；
+- 已编号 fact index；
+- 已校验的 Claim 摘要/ID；
+- 覆盖度 breakdown 的分子、分母、unknown；
+- allowed action 枚举和“coverage 不是 Offer 概率”警告；
+- 不包含完整简历、完整网页、Cookie 或无关私人上下文。
+
+### 输出示例
+
+```json
+{
+  "comparison_set_id": "comparison-1",
+  "job_explanations": [
+    {
+      "job_profile_id": "role-job-1",
+      "summary": "硬性资格仍有一项未知；已知核心要求覆盖 3/4 权重。",
+      "fact_ids": ["fact-hard-unknown", "fact-core-coverage"],
+      "claim_ids": ["candidate-claim-1", "role-claim-1"],
+      "suggested_actions": ["review", "provide_candidate_evidence"]
+    }
+  ],
+  "warnings": ["coverage_is_not_offer_probability"]
+}
+```
+
+### 禁止与校验
+
+模型不得：
+
+- 新增或修改 qualification/requirement/preference outcome；
+- 修改数字、weight、分母、GapType、severity、tier 或排序；
+- 输出 Offer、录取或面试通过概率；
+- 引用 fact index/Claim set 外的事实；
+- 输出 allowed actions 外的动作；
+- 建议直接修改 CandidateProfile 或 RoleProfile。
+
+validator 必须逐项解析 summary 中的结构化数字，确认可由 fact index 支持；fact/citation/action
+越界时拒绝。一次结构化重试仍失败后使用 deterministic template，不中断比较主流程。
+
+### 建议版本
+
+```text
+match_explanation_v1 / schema v0.6
+intent_revision_parser_v1 / schema v0.6
+```
+
+`intent_revision_parser` 只能把用户文本转换为待确认 patch，不能写入 CareerIntent；字段 allowlist、
+旧/新 scope diff 和回退路由由代码验证。cache key 包含 comparison/input canonical hash、
+prompt/schema/policy version 和 fact index hash。

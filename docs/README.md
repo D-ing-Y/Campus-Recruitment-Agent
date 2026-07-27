@@ -2,7 +2,7 @@
 
 本目录是项目开发的事实来源。所有代码开发前，必须先在这里明确需求、设计、接口契约和验收标准。
 
-当前项目从 v0.3 起采用“统一证据层 + 候选人画像 + 求职意图 + 岗位需求画像 + 反馈闭环”的架构。v0.4 候选人画像 subgraph 与 v0.5 岗位需求画像 Graph 均已完成验收；v0.5 为 72 项测试、全量为 140 项测试，DeepSeek、智联、牛客、企业官网、auth resume 及真实 confirmed 官网身份链接均通过。v0.1-v0.4 文档作为已完成版本的历史记录保留，后续变化通过新版本 requirements、RFC 和 ADR 描述。
+当前项目从 v0.3 起采用“统一证据层 + 候选人画像 + 求职意图 + 岗位需求画像 + 反馈闭环”的架构。v0.4 候选人画像 subgraph、v0.5 岗位需求画像 Graph 与 v0.6 双画像匹配 Graph 均已完成验收。v0.6 新增 82 项测试、全量 222 项通过，v0.1-v0.5 的 140 项回归全部保留；离线固定集与 DeepSeek MatchExplanation smoke 均通过。已完成版本文档作为历史记录保留，后续变化通过新版本 requirements、RFC 和 ADR 描述。
 
 ## 目录说明
 
@@ -35,6 +35,12 @@
 eval 报告和实现后 opt-in live 验收。2026-07-22 起 BOSS 仅保留历史决策证据，核心招聘
 发现来源改为智联招聘；智联、美团官网和牛客 raw-first 采集均已验证，智联候选到美团官网
 同岗已形成 confirmed JobIdentityLink 与字段级 FieldResolution。版本状态已收口为 Implemented / Accepted。
+
+v0.6 已完成实现与验收：硬性资格、能力证据覆盖、偏好兼容和认知不确定性分开表达；
+确定性代码负责所有判定与数字，LLM 只解释；用户通过 interrupt 选择目标或请求纠正。
+普通偏好变化只 rematch，只有 SearchScope 变化才请求 v0.5 重检索。实现任务、固定集和
+实际指标见 `docs/03_requirements/v0.6-implementation-tasks.md` 与
+`docs/07_evaluation/v0.6-eval-report.md`。
 
 ## Codex 协作边界
 

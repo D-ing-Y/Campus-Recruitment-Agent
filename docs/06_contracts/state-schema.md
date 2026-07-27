@@ -226,7 +226,7 @@ fail
 
 ## v0.5 RoleProfileGraphState
 
-实现状态：已完成离线实现与 SQLite checkpoint/auth resume 验收；live source resume 待授权。
+实现状态：Implemented / Accepted；SQLite checkpoint/auth resume 与 live source 验收已完成。
 
 关联：
 
@@ -372,6 +372,122 @@ fail
 - 用户在 Graph 外正常登录和导入凭据；Graph 恢复时只验证 ref。
 - checkpointer 在 compile 时注入，Evidence/Source Repository 与 checkpoint 分库。
 - source batch、query 和授权节点均需幂等，以支持 checkpoint 重放。
+
+## v0.6 ProfileMatchingGraphState
+
+实现状态：Implemented / Accepted；SQLite checkpoint、比较审阅恢复、幂等决策和预算停止已通过验收。
+
+关联：
+
+- `docs/03_requirements/v0.6-profile-matching-and-user-decision.md`
+- `docs/04_rfc/0006-profile-matching-and-user-decision.md`
+- `docs/06_contracts/profile-matching-contract.md`
+- `docs/06_contracts/target-decision-contract.md`
+
+```python
+class ProfileMatchingGraphState(TypedDict, total=False):
+    # identity and lifecycle
+    run_id: str
+    thread_id: str
+    user_id: str
+    status: str
+    match_round: int
+
+    # immutable input references for current round
+    input_set_id: str
+    candidate_profile_snapshot_id: str
+    career_intent_snapshot_id: str
+    job_instance_profile_snapshot_ids: list[str]
+    role_family_profile_snapshot_ids: list[str]
+
+    # deterministic comparison references
+    qualification_assessment_ids: list[str]
+    requirement_assessment_ids: list[str]
+    preference_assessment_ids: list[str]
+    gap_assessment_ids: list[str]
+    comparison_set_id: str | None
+    explanation_ids: list[str]
+
+    # user decision and reroute
+    pending_interaction: dict | None
+    resume_input: dict | None
+    processed_response_ids: list[str]
+    target_decision_ids: list[str]
+    intent_impact_assessment: dict | None
+    rebuild_directive_id: str | None
+    next_action: str | None
+
+    # controls and observability
+    budgets: dict
+    counters: dict
+    tool_results: list[dict]
+    llm_calls: list[dict]
+    trace: list[dict]
+    errors: list[dict]
+    report: dict | None
+```
+
+### 状态枚举
+
+`status`：
+
+```text
+initialized
+running
+interrupted
+completed
+completed_with_unknowns
+reroute_required
+cancelled
+failed
+```
+
+`next_action`：
+
+```text
+review_user
+persist_decisions
+candidate_profile_required
+rematch_required
+role_research_required
+role_refresh_required
+complete
+complete_with_unknowns
+cancel
+fail
+```
+
+### Reducer
+
+| 字段 | 合并方式 | 说明 |
+| --- | --- | --- |
+| `trace`、`errors`、`llm_calls`、`tool_results` | append | 节点只返回本轮增量 |
+| assessment/explanation/decision/response ID | stable union | 去重并保留首次顺序 |
+| current round snapshot refs、`input_set_id` | initialize once per round | rematch 必须显式开始新 round |
+| `budgets` | initialize once | 节点和模型不得提高预算 |
+| `comparison_set_id`、impact、directive、`next_action`、`report` | replace | 历史对象保存在 repository |
+| `pending_interaction`、`resume_input` | replace/clear | 同时最多一个 request；归档后清正文 |
+| `counters`、`match_round` | deterministic increment | 达到上限后停止 |
+
+### MatchingBudget
+
+```json
+{
+  "max_match_rounds": 3,
+  "max_explanation_calls": 10,
+  "max_decision_interrupts": 3,
+  "max_targets": 20
+}
+```
+
+### Checkpoint 与失效
+
+- checkpointer 在 compile 时注入，thread ID 与 state 一致。
+- current round 的 snapshot refs 不能在节点内静默替换。
+- rematch 创建新 `input_set_id` 并增加 round；旧 ComparisonSet 标 superseded/stale。
+- role/candidate rebuild directive 以 `reroute_required` 终止，不在 v0.6 内调用其他 subgraph。
+- 相同 response 重放通过 `processed_response_ids` 和 repository 幂等键去重。
+- checkpoint 成功不代表 assessment current；恢复后仍须校验输入 snapshot 的 stale 状态。
 
 ## v1.0 ParentState 目标形态
 

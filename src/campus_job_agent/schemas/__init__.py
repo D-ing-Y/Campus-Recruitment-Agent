@@ -30,9 +30,35 @@ from campus_job_agent.schemas.evidence import (
     ProfileSnapshot,
     Provenance,
 )
-from campus_job_agent.schemas.gap import GapAssessment, GapItem
+from campus_job_agent.schemas.gap import GapAssessment, GapItem, migrate_legacy_gap_assessment
 from campus_job_agent.schemas.goal import ParsedGoal, PlanTask, SearchGoal
-from campus_job_agent.schemas.intent import CareerIntent
+from campus_job_agent.schemas.intent import CareerIntent, IntentConstraint, migrate_legacy_career_intent
+from campus_job_agent.schemas.matching import (
+    ComparisonEntry,
+    ComparisonSet,
+    CoverageBreakdown,
+    CoverageContribution,
+    JobMatchExplanation,
+    MatchExplanation,
+    MatchingInputSet,
+    PreferenceAssessment,
+    QualificationAssessment,
+    RequirementAssessment,
+)
+from campus_job_agent.schemas.decision import (
+    ComparisonReviewRequest,
+    ComparisonReviewResponse,
+    IntentImpactAssessment,
+    IntentRevision,
+    RebuildDirective,
+    TargetDecision,
+    TargetDecisionInput,
+)
+from campus_job_agent.schemas.matching_graph import (
+    MatchingBudget,
+    MatchingCounter,
+    ProfileMatchingGraphState,
+)
 from campus_job_agent.schemas.llm import (
     LLMCallRecord,
     LLMConfig,
@@ -127,6 +153,8 @@ __all__ = [
     "DocumentExtraction",
     "ExtractionUnit",
     "CareerIntent",
+    "IntentConstraint",
+    "migrate_legacy_career_intent",
     "RoleProfile",
     "RoleRequirement",
     "HiringSignal",
@@ -156,4 +184,25 @@ __all__ = [
     "RoleProfileGraphState",
     "GapAssessment",
     "GapItem",
+    "migrate_legacy_gap_assessment",
+    "MatchingInputSet",
+    "QualificationAssessment",
+    "RequirementAssessment",
+    "CoverageContribution",
+    "CoverageBreakdown",
+    "PreferenceAssessment",
+    "ComparisonEntry",
+    "ComparisonSet",
+    "JobMatchExplanation",
+    "MatchExplanation",
+    "TargetDecisionInput",
+    "TargetDecision",
+    "IntentRevision",
+    "IntentImpactAssessment",
+    "RebuildDirective",
+    "ComparisonReviewRequest",
+    "ComparisonReviewResponse",
+    "MatchingBudget",
+    "MatchingCounter",
+    "ProfileMatchingGraphState",
 ]

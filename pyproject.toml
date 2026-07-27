@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "campus-job-agent"
-version = "0.5.0"
-description = "Evidence-driven candidate and role profile Graphs for campus job intelligence."
+version = "0.6.0"
+description = "Evidence-driven candidate, role and explainable matching Graphs for campus job intelligence."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

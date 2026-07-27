@@ -53,6 +53,7 @@ class SearchScope(BaseModel):
     recruitment_type: Literal["autumn_campus", "spring_campus", "internship", "unknown"]
     industries: list[str] = Field(default_factory=list)
     companies: list[str] = Field(default_factory=list)
+    company_types: list[str] = Field(default_factory=list)
     hard_constraints: list[dict[str, Any]] = Field(default_factory=list)
     preferred_languages: list[str] = Field(default_factory=lambda: ["zh-CN"])
     created_at: datetime = Field(default_factory=utc_now)
@@ -66,7 +67,16 @@ class SearchScope(BaseModel):
         return value
 
     def fingerprint(self) -> str:
-        return canonical_hash("search-scope", self.model_dump(mode="json", exclude={"scope_id", "created_at"}))
+        # Snapshot identity is provenance, not discovery scope. Including it
+        # would incorrectly force role research for every preference-only
+        # CareerIntent revision.
+        return canonical_hash(
+            "search-scope",
+            self.model_dump(
+                mode="json",
+                exclude={"scope_id", "created_at", "career_intent_snapshot_id"},
+            ),
+        )
 
 
 class SourceCapabilities(BaseModel):

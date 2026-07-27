@@ -143,7 +143,7 @@ LangGraph checkpointer 是 runtime dependency，不伪装为业务 Tool：
 
 ## v0.5 Source 与 Role Profile Tool
 
-实现状态：已完成离线实现；三个 live adapter 默认关闭，opt-in smoke 待安全 credential ref。
+实现状态：Implemented / Accepted；live adapter 默认关闭，opt-in smoke 与真实官网链接验收已完成。
 
 ### Source Tool
 
@@ -211,3 +211,50 @@ authority_violation
 - import tool 从调用方授权的本地路径读取，并写入 Git 忽略的 credential store。
 - ToolResult 只能返回 ref、source、类型、验证时间和错误摘要。
 - trace、checkpoint、Artifact metadata 和 report 不得记录秘密正文。
+
+## v0.6 Profile Matching Service/Tool
+
+实现状态：Implemented / Accepted。
+
+matching 中的纯计算器可实现为 domain service；若由 Graph 调用并需要统一 trace，则注册为下列
+Tool。无论实现形式如何，都必须遵守相同输入、输出和确定性规则。
+
+| Tool/Service | 输入摘要 | 输出/副作用 |
+| --- | --- | --- |
+| `matching.load_input_set` | owner、candidate/intent/role snapshot IDs | 校验并创建/复用 MatchingInputSet |
+| `matching.evaluate_qualifications` | input set、job snapshot | QualificationAssessment 列表 |
+| `matching.align_requirements` | candidate/job snapshot、ontology version | RequirementAssessment 列表 |
+| `matching.compute_coverage` | requirement assessments、weight policy | core/bonus CoverageBreakdown |
+| `matching.evaluate_preferences` | intent/job snapshot | PreferenceAssessment 列表 |
+| `matching.project_gap_assessment` | 确定性 item refs | 创建/复用 GapAssessment |
+| `matching.build_comparison` | ordered assessment refs、ranking policy | 创建/复用 ComparisonSet |
+| `matching.explain_comparison` | deterministic fact index | validated MatchExplanation 或模板 fallback |
+| `decision.save_targets` | validated review response | 原子创建/复用 TargetDecision batch |
+| `intent.revise` | previous intent、confirmed patch | 创建/复用 CareerIntent snapshot |
+| `intent.assess_impact` | old/new intent、scope policy | IntentImpactAssessment |
+| `matching.create_rebuild_directive` | comparison、reason、input refs | 创建/复用 RebuildDirective |
+
+调用边界：
+
+- evaluator 只读取 snapshot/repository，不访问招聘网站或本地凭据。
+- 所有明确判定返回双方 Claim refs 和 policy version。
+- LLM explanation Tool 不得拥有 assessment/comparison repository 的修改权限。
+- target decision batch 必须全部校验后原子写入。
+- intent service 不得创建 Candidate Claim；directive service 不得修改 Candidate/Role Profile。
+- ToolResult 只返回 ID、计数、状态和错误摘要，不复制完整简历、JD 或用户 note。
+
+新增错误类型：
+
+```text
+snapshot_not_found
+snapshot_owner_mismatch
+snapshot_schema_unsupported
+snapshot_stale
+comparison_stale
+unsupported_qualification_operator
+unmapped_capability
+invalid_fact_reference
+llm_fact_mutation
+invalid_decision_target
+search_scope_impact_conflict
+```
