@@ -489,6 +489,181 @@ fail
 - 相同 response 重放通过 `processed_response_ids` 和 repository 幂等键去重。
 - checkpoint 成功不代表 assessment current；恢复后仍须校验输入 snapshot 的 stale 状态。
 
+## v0.7 PreparationPlanGraphState
+
+实现状态：Implemented / Accepted（v0.7）。
+
+```python
+class PreparationPlanGraphState(TypedDict, total=False):
+    run_id: str
+    thread_id: str
+    user_id: str
+    status: str
+
+    input_set_id: str
+    target_decision_ids: list[str]
+    candidate_profile_snapshot_id: str
+    career_intent_snapshot_id: str
+    comparison_set_id: str
+    gap_assessment_ids: list[str]
+    job_instance_profile_snapshot_ids: list[str]
+    role_family_profile_snapshot_ids: list[str]
+    constraints_id: str
+
+    objective_ids: list[str]
+    activity_ids: list[str]
+    priority_factor_ids: list[str]
+    package_id: str | None
+    learning_plan_id: str | None
+
+    pending_interaction: dict | None
+    resume_input: dict | None
+    processed_response_ids: list[str]
+    next_action: str | None
+
+    budgets: dict
+    counters: dict
+    tool_results: list[dict]
+    llm_calls: list[dict]
+    trace: list[dict]
+    errors: list[dict]
+    report: dict | None
+```
+
+`status`：
+
+```text
+initialized
+running
+interrupted
+completed
+partial
+blocked
+deferred
+reroute_required
+cancelled
+failed
+```
+
+`next_action`：
+
+```text
+review_user
+revise_constraints
+revise_activities
+target_selection_required
+rematch_required
+complete
+partial
+blocked
+defer
+cancel
+fail
+```
+
+## v0.7 FeedbackGraphState
+
+```python
+class FeedbackGraphState(TypedDict, total=False):
+    run_id: str
+    thread_id: str
+    user_id: str
+    status: str
+    allowed_path_roots: list[str]
+
+    plan_id: str | None
+    activity_id: str | None
+    target_job_profile_ids: list[str]
+    feedback_input: dict | None
+    feedback_event_id: str | None
+    raw_artifact_ids: list[str]
+    fragment_ids: list[str]
+
+    observation_ids: list[str]
+    diagnosis_ids: list[str]
+    attribution_ids: list[str]
+    feedback_claim_ids: list[str]
+    progress_event_ids: list[str]
+    impact_assessment_id: str | None
+    directive_ids: list[str]
+    resolved_snapshot_refs: dict[str, list[str]]
+
+    pending_interaction: dict | None
+    resume_input: dict | None
+    processed_response_ids: list[str]
+    next_action: str | None
+
+    budgets: dict
+    counters: dict
+    tool_results: list[dict]
+    llm_calls: list[dict]
+    trace: list[dict]
+    errors: list[dict]
+    report: dict | None
+```
+
+`status`：
+
+```text
+initialized
+running
+interrupted
+completed
+completed_with_unknowns
+awaiting_rebuild
+reroute_required
+cancelled
+failed
+```
+
+`next_action`：
+
+```text
+confirm_attribution
+persist_progress
+candidate_profile_rebuild_required
+role_instance_refresh_required
+role_family_aggregation_candidate
+intent_review_required
+rematch_required
+replan_required
+await_external_rebuild
+complete
+complete_with_unknowns
+cancel
+fail
+```
+
+### v0.7 Reducer
+
+| 字段 | 合并方式 | 说明 |
+| --- | --- | --- |
+| `trace`、`errors`、`llm_calls`、`tool_results` | append | 节点只返回本轮增量 |
+| objective/activity/factor/observation/diagnosis/attribution/Claim/progress/directive/response ID | stable union | 去重并保留首次顺序 |
+| input refs、allowed path roots、budgets | initialize once | 新 plan/rebuild round 显式创建新 run/input |
+| package、plan、event、impact、next action、report | replace | 历史完整对象在 repository |
+| pending interaction、resume/feedback input | replace then clear | 成功归档后清除正文 |
+| resolved refs | merge by directive ID | 仅接受与 pending directive 匹配的 resolution |
+| counters | deterministic increment | 不允许模型提高预算 |
+
+### v0.7 Budgets
+
+```json
+{
+  "max_plan_rounds": 3,
+  "max_activities": 30,
+  "max_llm_calls": 12,
+  "max_plan_interrupts": 3,
+  "max_feedback_items": 20,
+  "max_feedback_interrupts": 3
+}
+```
+
+- Preparation 和 Feedback 使用独立 thread/checkpoint，不共享 pending interaction。
+- `awaiting_rebuild` 可跨进程恢复；重复恢复不能重复发 directive。
+- checkpoint 不作为 plan/profile/feedback 事实来源。
+- 输入 snapshot 更新后必须重新校验 plan staleness。
+
 ## v1.0 ParentState 目标形态
 
 ```python

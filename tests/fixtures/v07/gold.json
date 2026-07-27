@@ -1,0 +1,26 @@
+{
+  "schema_version": "v0.7",
+  "cases": [
+    {"case_id": "plan_selected_target_quick_evidence_win", "checks": ["preparation_priority_accuracy", "preparation_evidence_trace_rate"]},
+    {"case_id": "plan_core_capability_gap", "checks": ["preparation_priority_accuracy", "minimum_package_rule_accuracy"]},
+    {"case_id": "plan_unaddressable_hard_blocker", "checks": ["unaddressable_blocker_visibility_rate", "minimum_package_rule_accuracy"]},
+    {"case_id": "plan_multi_target_transfer_value", "checks": ["preparation_priority_accuracy"]},
+    {"case_id": "plan_bonus_deprioritized", "checks": ["preparation_priority_accuracy", "minimum_package_rule_accuracy"]},
+    {"case_id": "plan_capacity_insufficient_partial", "checks": ["minimum_package_rule_accuracy", "schedule_capacity_feasibility_rate"]},
+    {"case_id": "plan_dependency_cycle_rejected", "checks": ["dependency_valid_rate"]},
+    {"case_id": "plan_stale_matching_input", "checks": ["minimum_package_rule_accuracy"]},
+    {"case_id": "plan_no_selected_target", "checks": ["minimum_package_rule_accuracy"]},
+    {"case_id": "plan_review_constraints_revision", "checks": ["plan_interrupt_resume_success_rate", "deterministic_schedule_stability_rate", "max_loop_termination_rate"]},
+    {"case_id": "feedback_task_progress_only", "scope": "plan_task", "checks": ["raw_before_feedback_interpret_rate", "observation_diagnosis_separation_rate", "feedback_impact_route_accuracy"], "zero_counts": ["task_completion_capability_upgrade_count"]},
+    {"case_id": "feedback_explicit_evaluator_candidate_signal", "scope": "candidate_capability", "checks": ["raw_before_feedback_interpret_rate", "feedback_scope_accuracy", "feedback_claim_trace_rate", "feedback_impact_route_accuracy"]},
+    {"case_id": "feedback_rejection_without_diagnosis", "scope": "unknown", "checks": ["observation_diagnosis_separation_rate"], "zero_counts": ["rejection_causality_hallucination_count"]},
+    {"case_id": "feedback_job_specific_hiring_signal", "scope": "job_instance", "checks": ["feedback_scope_accuracy", "feedback_impact_route_accuracy"]},
+    {"case_id": "feedback_single_event_no_family_mutation", "scope": "role_family_candidate", "checks": ["feedback_scope_accuracy"], "zero_counts": ["single_event_role_family_mutation_count"]},
+    {"case_id": "feedback_user_rejects_attribution", "scope": "unknown", "checks": ["feedback_impact_route_accuracy"]},
+    {"case_id": "feedback_profile_update_replan", "scope": "candidate_capability", "checks": ["feedback_replan_chain_success_rate", "feedback_claim_trace_rate"]},
+    {"case_id": "feedback_stale_plan_superseded", "checks": ["feedback_replan_chain_success_rate"]},
+    {"case_id": "feedback_duplicate_event_resume", "checks": ["raw_before_feedback_interpret_rate"], "zero_counts": ["feedback_idempotency_violation_count"]},
+    {"case_id": "feedback_checkpoint_restart", "checks": ["plan_interrupt_resume_success_rate"]},
+    {"case_id": "feedback_llm_causality_fallback", "checks": ["observation_diagnosis_separation_rate", "max_loop_termination_rate"], "zero_counts": ["llm_priority_or_causality_mutation_accept_count"]}
+  ]
+}

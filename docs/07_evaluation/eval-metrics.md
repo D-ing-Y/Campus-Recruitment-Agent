@@ -132,3 +132,34 @@
 - coverage 必须与 eligible/total/uncertain weight 一起评价，不能只比较最终小数。
 - 默认指标使用 L0/L1 固定集；可选 DeepSeek explanation smoke 单独报告。
 - v0.6 不定义 `match_calibration`，因为版本不输出成功概率或可校准的 Offer score。
+
+## v0.7 Preparation Plan 与 Feedback 指标
+
+| 指标 | 定义 | 文档验收目标 |
+| --- | --- | ---: |
+| `preparation_priority_accuracy` | activity priority band/order 与 gold 一致的比例 | 100% L0/L1 固定集 |
+| `minimum_package_rule_accuracy` | included/deferred/unaddressable/status 与 policy gold 一致的比例 | 100% |
+| `schedule_capacity_feasibility_rate` | schedule 满足 horizon/daily/weekly/deadline 的比例 | 100% |
+| `dependency_valid_rate` | 发布 plan 中 dependency DAG 合法且顺序满足的比例 | 100% |
+| `unaddressable_blocker_visibility_rate` | 不可处理 hard blocker 被展示并触发 target review 的比例 | 100% |
+| `preparation_evidence_trace_rate` | objective/activity 可追溯 gap/requirement/signal/Claim 的比例 | 100% |
+| `deterministic_schedule_stability_rate` | 相同输入/policy 重放 schedule hash 一致的比例 | 100% |
+| `plan_interrupt_resume_success_rate` | plan review 可跨进程恢复的比例 | 100% |
+| `raw_before_feedback_interpret_rate` | 被解释 feedback 中 raw Artifact 先存在的比例 | 100% |
+| `feedback_scope_accuracy` | attribution scope 与 gold 一致的比例 | ≥ 95%，关键边界集 100% |
+| `observation_diagnosis_separation_rate` | observation 无推断且 diagnosis 引用 observation 的比例 | 100% |
+| `rejection_causality_hallucination_count` | 无明确评价 rejection 被错误归因能力的数量 | 0 |
+| `task_completion_capability_upgrade_count` | 仅完成任务导致能力等级升级的数量 | 0 |
+| `single_event_role_family_mutation_count` | 单次 feedback 直接修改 family profile 的数量 | 0 |
+| `feedback_impact_route_accuracy` | progress/rebuild/refresh/rematch/replan route 与 gold 一致的比例 | 100% |
+| `feedback_claim_trace_rate` | accepted feedback Claim 可回溯 Fragment 的比例 | 100% |
+| `feedback_replan_chain_success_rate` | feedback→snapshot→rematch→new plan 固定闭环成功比例 | 100% |
+| `feedback_idempotency_violation_count` | 重复 event/response/resolution 产生重复对象数量 | 0 |
+| `llm_priority_or_causality_mutation_accept_count` | 非法 LLM priority/因果输出被接受的数量 | 0 |
+| `max_loop_termination_rate` | plan/feedback 达到 hard budget 正确终止的比例 | 100% |
+
+说明：
+
+- plan 的 priority/package/schedule 不评价 Offer 成功概率。
+- feedback scope accuracy 必须单列 candidate/job/company/family/intent/unknown 混淆矩阵。
+- 默认 L0/L1 离线指标与可选 DeepSeek structured-output smoke 分开报告。

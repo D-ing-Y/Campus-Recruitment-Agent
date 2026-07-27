@@ -93,6 +93,14 @@
 
 - v0.1-v0.4 全量测试必须继续通过；当前进入 v0.5 前基线为 68/68。
 
+## v0.7 测试重点
+
+- Preparation：P0-P4 真值表、最小包、申请材料、DAG、容量/截止日期、稳定排期与 review 恢复。
+- Feedback：raw-before-interpret、observation/diagnosis/outcome、authority/scope、Claim 与 directive 路由。
+- 闭环：任务完成不升级能力、无解释拒绝不造因、单事件不改岗位族，以及 snapshot→rematch→replan saga。
+- 恢复与安全：两个 subgraph 的 SQLite checkpoint、重复响应/事件、owner/path、raw-write failure 和预算终止。
+- 验收基线：v0.7 新增 116 项、全量 338 项、v0.1-v0.6 回归 222 项；默认全部离线。
+
 ## 后续专项评估
 
 - LangGraph：v0.4 起评估 conditional route accuracy、loop count、interrupt/resume、checkpoint recovery。

@@ -94,6 +94,19 @@ CandidateProfile、CareerIntent、RoleProfile 和 GapAssessment 中的事实性�
 
 v0.3 实现中的 `ProfileSnapshot` 是 Candidate/CareerIntent/Role 的统一持久化外壳，使用 `(subject_id, profile_type, version)` 唯一约束，并保存 `supporting_claim_ids`。`CandidateProfileProjector` 只投影通过 `ClaimValidator` 并已持久化的 Claim。
 
+## v0.7 Feedback Evidence 增量
+
+- 练习、笔试、面试、申请结果、评价文件和用户复盘均先保存 EvidenceArtifact。
+- FeedbackEvent 只引用 Artifact/Fragment，不替代 Evidence Store。
+- Observation Claim 必须逐字/逐字段可定位到 Fragment。
+- Diagnosis 是 inference，必须引用 Observation、confidence、alternative explanations 和 limitations。
+- 用户确认 diagnosis 不提升原 source authority。
+- application/interview rejection 无明确评价时只保存 outcome observation，不创建能力原因 Claim。
+- task progress 与 capability evidence 分离；完成任务本身不创建 capability-level Claim。
+- job/company feedback 只能形成 scope 明确的 signal；role-family 结论仍需 v0.5 聚合门槛。
+- feedback Claim 使用 `claim_type=feedback_signal`，纠正/撤回使用 supersedes/status，不删除历史。
+- 完整私人反馈正文不进入 State、trace、report 或 LLM cache。
+
 ## Web 与社区证据
 
 - 岗位存在、职责、城市和硬性条件优先使用企业或招聘平台原始岗位页。

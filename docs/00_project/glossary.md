@@ -45,6 +45,16 @@
 - Comparison Set：多个具体岗位 GapAssessment 的不可变集合，按资格、偏好、覆盖、unknown 和 stable ID 做可解释排序。
 - Target Decision：用户对具体岗位作出的 selected/deferred/rejected 决策；独立于 CareerIntent 和画像事实。
 - Rebuild Directive：matching subgraph 请求候选人重建、岗位重检索/刷新或重新匹配的结构化跨图指令，本身不直接修改画像。
+- Preparation Objective：从 selected target 的 gap、requirement、qualification、application asset 或 hiring signal 派生的准备目标。
+- Preparation Activity：有完成定义、验证方式、工时、依赖、截止日期和证据引用的计划执行单元；完成不等于能力自动升级。
+- Minimum Preparation Package：在用户容量和截止日期内由版本化 policy 选择的最小准备活动集合；status 不表示 Offer readiness。
+- Priority Factors：用于活动 P0-P4 分层和稳定排序的可审计因素，不合成为成功概率。
+- Learning Plan：固定引用目标、画像、差距、时间约束和 policy 的不可变准备计划版本，保存活动、排期、进度和 supersede 链。
+- Feedback Event：练习、笔试、面试、申请 outcome 或复盘的事件外壳；原始内容先进入 Evidence Store。
+- Feedback Observation：反馈材料明确表达的行为、问题、分数、评论或结果，不包含新增因果推断。
+- Feedback Diagnosis：从一个或多个 Observation 提出的显式推断，必须保存 alternative explanations、limitations、confidence 和确认状态。
+- Feedback Attribution：把 observation/diagnosis 绑定到 plan、candidate、job、company、role-family candidate、intent 或 unknown scope 的可审计归因。
+- Feedback Directive：FeedbackGraph 请求画像重建、岗位刷新、意图审阅、重新匹配或计划重排的 typed 跨图指令。
 - Memory：跨任务保留的事实、偏好和历史状态；不得用未追溯的聊天摘要替代证据。
 - RAG：Retrieval-Augmented Generation，通过检索真实证据增强模型输出。
 - Hybrid RAG：结合稀疏/全文检索、稠密向量检索、metadata filter 和 reranker 的检索方案。

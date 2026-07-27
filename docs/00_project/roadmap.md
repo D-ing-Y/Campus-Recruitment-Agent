@@ -20,7 +20,7 @@
 | v0.4 | 已完成 | 候选人画像 Graph | 文档摄取、画像构建、充分性评价、定向提问、interrupt/resume |
 | v0.5 | 已完成 | 岗位需求画像 Graph | 招聘/官网/面经证据、岗位族与具体岗位画像、检索循环 |
 | v0.6 | 已完成 | 双画像匹配与用户决策 | 四类差距、可解释匹配、偏好调整、回退与重检索 |
-| v0.7 | 计划中 | 准备计划与反馈闭环 | 能力路线、练习/笔面试反馈、画像更新、动态重排 |
+| v0.7 | 已完成 | 准备计划与反馈闭环 | 最小准备包、容量排期、反馈证据、画像更新、动态重排 |
 | v0.8 | 计划中 | Hybrid RAG 与长期记忆 | 稀疏+稠密检索、metadata filter、rerank、引用回答 |
 | v1.0 | 计划中 | 单 Agent 端到端产品 | 父图、subgraph、checkpoint、interrupt、完整 eval |
 | v1.1 | 计划中 | 分布式存储与异步执行 | PostgreSQL、对象存储、向量存储、队列、幂等与恢复 |
@@ -225,17 +225,26 @@ DeepSeek、智联、牛客、企业官网传输和真实 auth resume 已通过�
 
 ## v0.7：准备计划与反馈闭环
 
+状态：已完成（2026-07-27）。Requirements / RFC / ADR / Contracts、代码、116 项新增测试、
+21 案例离线固定集和全量 338 项回归均已验收，状态为 Implemented / Accepted。
+
 核心交付：
 
 - 基于岗位重要性、差距、面试频率、迁移价值、可提升性和时间成本生成准备优先级。
-- 最低可投递/可面试能力包，不追求画像 100% 相等。
+- 最小准备包覆盖当前窗口内高价值事项，不追求画像 100% 相等，也不声称完成后必然可投递/通过面试。
 - 练习、笔试、面试反馈作为证据事件进入系统。
 - 诊断反馈影响候选人画像、具体岗位画像、岗位族画像或学习计划。
 - 防止一次面试反馈过度改写岗位族模型。
+- PreparationPlanGraph 使用确定性 priority band、依赖 DAG 和容量/截止日期排期。
+- FeedbackGraph 先 raw-before-interpret，再分离 observation、diagnosis、attribution 和 impact。
+- 无明确评价的 rejection 不推断能力原因；任务完成不自动升级能力。
+- 跨画像变化通过 directive/resume，resolved snapshot 后重新匹配并生成新计划版本。
 
 完成标准：
 
-- 一次反馈能够产生有依据的画像版本变化和学习计划重排。
+- selected target 能生成可追溯、容量可行且诚实展示 deferred/blocker 的最小准备包。
+- 一次明确反馈能够产生有依据的画像版本变化、重新匹配和学习计划重排。
+- 单次反馈不能直接修改 RoleFamilyProfile 的 common/frequent 结论。
 
 ## v0.8：Hybrid RAG 与长期记忆
 

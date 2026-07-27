@@ -1,7 +1,7 @@
 # Campus Job Agent 总体架构
 
-版本：v0.6 实现验收基线
-日期：2026-07-25
+版本：v0.7 实现验收基线
+日期：2026-07-27
 
 ## 1. 项目定位
 
@@ -213,6 +213,21 @@ v0.6 进一步将其拆为：
 
 系统不发布掩盖上述维度的单一综合分。unknown 不等于失败，coverage 不表示 Offer 概率。
 
+### 5.8 LearningPlan 与 FeedbackEvent
+
+`LearningPlan` 固定引用 selected TargetDecision、Candidate/Intent/Role/Gap snapshot、用户时间约束
+和 planning policy，保存：
+
+- PreparationObjective、PreparationActivity 和完成定义；
+- 可审计 PriorityFactors 与 P0-P4 band；
+- MinimumPreparationPackage、deferred/unaddressable 项；
+- 依赖 DAG、容量/截止日期可行 schedule；
+- progress、stale/supersede 和版本链。
+
+`FeedbackEvent` 是练习、笔试、面试、申请 outcome 或用户复盘的事件外壳。原始内容仍先进入
+Evidence Store；FeedbackObservation 只表达原文，FeedbackDiagnosis 显式表示推断，
+FeedbackAttribution 保存作用域与确认，FeedbackImpactAssessment 决定 typed directive。
+
 ## 6. LangGraph 父图
 
 ```text
@@ -389,6 +404,40 @@ candidate snapshot + intent snapshot + job snapshots
 v0.6 新增 82/82、全量 222/222；SQLite comparison review restart、重复 response、
 同 scope rematch、SearchScope 重检索、stale role refresh 和非法 LLM fallback 均通过。
 DeepSeek `deepseek-v4-flash` MatchExplanation structured-output smoke 通过。
+
+### 6.6 v0.7 Preparation 与 Feedback Subgraphs
+
+```text
+selected targets + snapshots + preparation constraints
+  → PreparationPlanGraph
+      → objectives
+      → activity candidates
+      → deterministic priority/package/schedule
+      → review_preparation_plan interrupt
+      → versioned LearningPlan
+
+feedback raw input
+  → FeedbackGraph
+      → archive Artifact/Fragment
+      → Observation / Diagnosis / Attribution
+      → confirm_feedback_attribution interrupt
+      → feedback Claims + Impact
+      → typed directives
+      → external rebuild/rematch refs
+      → PreparationPlanGraph replan
+```
+
+两个 subgraph 不直接覆盖 CandidateProfile、RoleProfile、CareerIntent 或 ComparisonSet。FeedbackGraph
+输出 candidate/role/intent/rematch/replan directive；application service 在既有边界完成重建后返回
+resolved refs。v0.7 用本地 saga 验证一次 feedback→snapshot→rematch→replan，v1.0 再由 Parent Graph
+统一编排。
+
+Preparation priority/package/schedule 全部由确定性 policy 计算。LLM 只建议活动拆解和反馈诊断候选；
+无解释 rejection 不产生能力原因，单次反馈不直接改变 RoleFamilyProfile。
+
+实现状态：`workflows/preparation_plan/` 与 `workflows/feedback/` 已完成。2026-07-27 验收为
+v0.7 新增 116/116、全量 338/338，包含 SQLite restart、重复 response/event、raw-write
+failure guard、最大循环终止，以及 feedback→Candidate snapshot→rematch→replan 本地 saga。
 
 ## 7. 统一证据管线
 

@@ -2,7 +2,7 @@
 
 本目录是项目开发的事实来源。所有代码开发前，必须先在这里明确需求、设计、接口契约和验收标准。
 
-当前项目从 v0.3 起采用“统一证据层 + 候选人画像 + 求职意图 + 岗位需求画像 + 反馈闭环”的架构。v0.4 候选人画像 subgraph、v0.5 岗位需求画像 Graph 与 v0.6 双画像匹配 Graph 均已完成验收。v0.6 新增 82 项测试、全量 222 项通过，v0.1-v0.5 的 140 项回归全部保留；离线固定集与 DeepSeek MatchExplanation smoke 均通过。已完成版本文档作为历史记录保留，后续变化通过新版本 requirements、RFC 和 ADR 描述。
+当前项目从 v0.3 起采用“统一证据层 + 候选人画像 + 求职意图 + 岗位需求画像 + 反馈闭环”的架构。v0.4 候选人画像 subgraph、v0.5 岗位需求画像 Graph、v0.6 双画像匹配 Graph 与 v0.7 Preparation/Feedback Subgraphs 均已完成验收。v0.7 新增 116 项测试、全量 338 项通过，v0.1-v0.6 的 222 项回归全部保留；21 案例离线固定集达到全部门槛。已完成版本文档作为历史记录保留，后续变化通过新版本 requirements、RFC 和 ADR 描述。
 
 ## 目录说明
 
@@ -41,6 +41,11 @@ v0.6 已完成实现与验收：硬性资格、能力证据覆盖、偏好兼容
 普通偏好变化只 rematch，只有 SearchScope 变化才请求 v0.5 重检索。实现任务、固定集和
 实际指标见 `docs/03_requirements/v0.6-implementation-tasks.md` 与
 `docs/07_evaluation/v0.6-eval-report.md`。
+
+v0.7 已完成实现与验收：selected target 生成带依赖、容量和截止日期约束的最小准备包；反馈先
+raw-before-interpret，再分离 observation、diagnosis 和 impact。无解释拒绝不推断能力原因，
+单次反馈不改岗位族；跨域变化通过 typed directive 和后继 snapshot refs 恢复。实现任务与实际
+指标见 `docs/03_requirements/v0.7-implementation-tasks.md` 和 `docs/07_evaluation/v0.7-eval-report.md`。
 
 ## Codex 协作边界
 

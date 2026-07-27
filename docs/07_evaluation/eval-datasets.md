@@ -63,6 +63,28 @@
   - `match_decision_resume_duplicate`：相同选择 response 重放，不重复创建 decision。
   - `match_checkpoint_restart`：重建 Graph 后从 comparison review interrupt 恢复。
   - `match_llm_invalid_fact_fallback`：模型修改数字/状态时被拒绝并使用模板。
+- v0.7：准备计划与反馈闭环固定数据集：
+  - `plan_selected_target_quick_evidence_win`：selected target 的核心 evidence gap，低成本补证优先。
+  - `plan_core_capability_gap`：可提升核心能力差距进入 P1 并生成可验证活动。
+  - `plan_unaddressable_hard_blocker`：不可改变资格进入 target review，不生成虚假学习任务。
+  - `plan_multi_target_transfer_value`：同一活动服务多个 selected target，应提高 band 内顺序。
+  - `plan_bonus_deprioritized`：bonus gap 在容量有限时 deferred。
+  - `plan_capacity_insufficient_partial`：容量不足，package partial 并保留 deferred reason。
+  - `plan_dependency_cycle_rejected`：循环依赖阻止 plan publish。
+  - `plan_stale_matching_input`：Comparison/Gap stale 时请求 rematch，不使用旧结果排期。
+  - `plan_no_selected_target`：无 selected decision 时 target_selection_required。
+  - `plan_review_constraints_revision`：用户修改 weekly hours 后创建新 constraints/plan。
+  - `feedback_task_progress_only`：完成任务只更新 progress，不升级能力。
+  - `feedback_explicit_evaluator_candidate_signal`：明确 evaluator 评论形成 candidate feedback Claim/directive。
+  - `feedback_rejection_without_diagnosis`：拒绝但无解释，只保存 outcome。
+  - `feedback_job_specific_hiring_signal`：具体岗位提问形成 job signal，不提升 family。
+  - `feedback_single_event_no_family_mutation`：单次 feedback 只能形成 aggregation candidate。
+  - `feedback_user_rejects_attribution`：用户拒绝 diagnosis，observation 保留但不触发 profile rebuild。
+  - `feedback_profile_update_replan`：反馈→candidate snapshot→rematch→plan reorder 完整版本链。
+  - `feedback_stale_plan_superseded`：新输入产生新 plan，旧 plan stale/superseded。
+  - `feedback_duplicate_event_resume`：相同 event/response 重放零重复写入。
+  - `feedback_checkpoint_restart`：重建 FeedbackGraph 后从 attribution/rebuild 边界恢复。
+  - `feedback_llm_causality_fallback`：模型输出无依据因果被拒绝并保留 observation/unknown。
 - v0.8：带 relevance judgement、无答案问题和 citation gold 的检索集。
 - v1.1：重复消息、worker 崩溃、对象写入失败和数据库冲突场景。
 
@@ -81,3 +103,8 @@
   coverage 分子/分母/uncertain、GapType、stable order、允许用户动作和预期 directive。
 - v0.6 explanation gold 主要校验 fact/citation/action 边界，不要求固定自然语言措辞；
   DeepSeek smoke 不进入默认测试分母。
+- v0.7 plan fixture 标注 exact decision/snapshot/constraints、objective、activity、priority factors、
+  package、DAG、schedule 和 deferred reason。
+- v0.7 feedback fixture 标注 raw content hash、observation、diagnosis/no-diagnosis、scope、authority、
+  confirmation、Claim、impact、directive、resolved refs 和 plan version chain。
+- 私人真实面试内容属于 L3，不进入 Git；L1 使用最小匿名反馈片段。

@@ -311,3 +311,43 @@ intent_revision_parser_v1 / schema v0.6
 `intent_revision_parser` 只能把用户文本转换为待确认 patch，不能写入 CareerIntent；字段 allowlist、
 旧/新 scope diff 和回退路由由代码验证。cache key 包含 comparison/input canonical hash、
 prompt/schema/policy version 和 fact index hash。
+
+## v0.7 Preparation 与 Feedback Structured Outputs
+
+### Preparation Activity Candidate
+
+LLM 输入只包含 validated planning facts、允许 activity type、constraints 和 supporting refs。输出只允许：
+
+- activity type/title/description；
+- expected outputs/completion criteria/verification method；
+- estimated effort candidate、splittable 和 dependency candidate；
+- 输入集合内 target/gap/signal/claim refs。
+
+模型不得输出 priority band/factors、package status、schedule、能力提升结论、成功概率或未批准外部资源。
+Validator 拒绝越界引用、循环依赖、非法工时、无法验证完成条件和虚构 URL。失败后使用 deterministic
+activity template。
+
+### Feedback Observation / Diagnosis Candidate
+
+Observation 必须逐条引用输入 Fragment，只描述原文行为、问题、分数、评论或 outcome。Diagnosis：
+
+- 必须引用 Observation；
+- 显式标记 inference；
+- 包含 subject scope、confidence、alternative explanations 和 limitations；
+- 不得把 rejection/no offer 直接归因为能力；
+- 不得把 task completion 解释为 mastered；
+- 不得把单次问题提升为 role-family frequent/common signal；
+- 不得提升 self-report authority。
+
+最终 attribution、Claim acceptance、impact 和 route 由代码/用户确认决定。
+
+### 建议版本
+
+```text
+preparation_activity_v1 / schema v0.7
+feedback_observation_v1 / schema v0.7
+feedback_diagnosis_v1 / schema v0.7
+```
+
+cache key 包含 input/event/fragment canonical hash、prompt/schema/policy version。不得缓存完整私人面试
+记录、未脱敏文件或 checkpoint resume 正文。

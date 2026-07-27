@@ -22,6 +22,11 @@ v0.6 双画像匹配与用户决策已于 2026-07-25 完成实现与验收，当
 确定性代码计算，LLM 只解释，用户负责最终岗位选择。DeepSeek `deepseek-v4-flash`
 MatchExplanation structured-output smoke 已通过且未触发 fallback。
 
+v0.7 准备计划与反馈闭环已于 2026-07-27 完成实现与验收，当前代码版本为 `0.7.0`。
+新增 116 项 v0.7 测试，全量 338 项通过，v0.1-v0.6 的 222 项回归全部保留。PreparationPlanGraph
+负责确定性优先级、最小准备包与容量排期；FeedbackGraph 负责 raw-first 反馈、归因门禁、
+Claim/Impact/Directive，并以本地 saga 验证 feedback→snapshot→rematch→replan 版本链。
+
 v0.1/v0.2 保留为 Runtime 与 LLM 基座，v0.3 提供统一证据层、领域契约、版本化画像快照和证据质量评估；v0.4 已将这些能力接入第一个可循环、可中断、可恢复的候选人画像 LangGraph subgraph。
 
 项目从 v0.3 起定位为“证据驱动的双画像求职 Agent”：原始材料进入统一证据层，系统构建候选人画像、求职意图和岗位需求画像，通过 LangGraph 完成画像充分性评价、岗位检索、差距分析、人工决策、准备计划和反馈更新。
@@ -92,7 +97,18 @@ v0.6 已实现：
 - 不可变 assessment/comparison/decision/directive repository、原子 decision batch 和重复响应幂等。
 - 离线 16 案例固定集与 v0.6 全部指标验收。
 
-v0.6 不实现学习计划、RAG、分布式存储、Multi-Agent、Web UI 或自动投递。默认测试不访问真实招聘网站，不需要登录或真实 API key。
+v0.7 已实现：
+
+- `preparation_plan` LangGraph subgraph、不可变输入/计划对象、P0-P4 因子与稳定排期。
+- 必要申请材料、核心差距、有证据的招聘练习与 unknown 的最小准备包；不可处理资格显式复核。
+- `review_preparation_plan` interrupt、约束修订、活动排除/改写、SQLite 恢复与重复响应幂等。
+- `feedback` raw Artifact/Fragment 优先摄取，observation/diagnosis/outcome 分离和来源 authority 门禁。
+- `confirm_feedback_attribution` interrupt、feedback Claim、PlanProgressEvent、Impact 与 typed directive。
+- 后继 snapshot/comparison/plan 回执校验，以及 candidate feedback 到 rematch/replan 的本地 saga。
+- 21 案例固定集、全部 v0.7 指标、116 项新增测试与 338 项全量回归。
+
+v0.7 不实现 RAG、外部课程搜索、分布式存储、Multi-Agent、Web UI、自动投递或 v1.0 Parent Graph。
+默认测试不访问真实招聘网站，不需要登录或真实 API key。
 
 后续路线会实际实现 LangGraph 高级编排、Hybrid RAG、分布式存储和必要的 Sub-Agent；每项技术必须对应真实业务问题、简单基线和量化验收，而不是仅作为技术展示。
 
@@ -187,3 +203,6 @@ v0.5 离线验收为 72/72，通过后全量为 140/140。实际指标、Live Sm
 
 v0.6 离线验收为 82/82，通过后全量为 222/222；v0.1-v0.5 的 140 项回归全部通过。
 实际指标、恢复/幂等测试和可选 DeepSeek smoke 见 `docs/07_evaluation/v0.6-eval-report.md`。
+
+v0.7 离线验收为 116/116，通过后全量为 338/338；v0.1-v0.6 的 222 项回归全部通过。
+实际指标、恢复/幂等测试和未执行的可选 DeepSeek smoke 见 `docs/07_evaluation/v0.7-eval-report.md`。

@@ -17,3 +17,6 @@ __all__ = [
     "CandidateProfileEvalCase", "CandidateProfileEvalReport", "evaluate_candidate_profile",
     "ProfileMatchingEvalCase", "ProfileMatchingEvalReport", "evaluate_profile_matching",
 ]
+from campus_job_agent.evals.preparation_feedback import V07EvalCaseResult, aggregate_v07_metrics
+
+__all__ = ["V07EvalCaseResult", "aggregate_v07_metrics"]

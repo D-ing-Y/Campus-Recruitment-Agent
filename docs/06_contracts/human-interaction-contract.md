@@ -1,6 +1,6 @@
 # Human Interaction Contract
 
-状态：v0.4/v0.5/v0.6 Implemented / Accepted
+状态：v0.4-v0.7 Implemented / Accepted
 日期：2026-07-22
 
 本契约统一 LangGraph `interrupt()` 与 resume 的结构化载荷。v0.4 用于候选人画像提问、补充材料和可选画像复核，后续版本可复用。
@@ -313,3 +313,92 @@ repository 读取必要摘要。
 - intent revision、impact assessment 和 directive 必须在同一业务事务或可恢复 saga 边界内。
 - 相同 response 重放不得重复创建 decision、intent snapshot 或 directive。
 - 候选人 revision 的回答证据化继续遵守本契约第 5-8 节。
+
+## 13. v0.7 Preparation Plan Review
+
+新增 `review_preparation_plan`：
+
+```json
+{
+  "request_id": "hir-plan-1",
+  "schema_version": "v0.7",
+  "thread_id": "prep-thread-1",
+  "run_id": "prep-run-1",
+  "user_id": "user-1",
+  "interaction_type": "review_preparation_plan",
+  "reason": "请确认准备计划的时间约束和活动安排",
+  "input_set_id": "prep-input-1",
+  "learning_plan_id": "learning-plan-1",
+  "package_id": "package-1",
+  "constraints_id": "prep-constraints-1",
+  "allowed_activity_ids": ["activity-1"],
+  "allowed_actions": [
+    "accept_plan", "revise_constraints", "exclude_activities",
+    "request_activity_revision", "defer_plan", "cancel"
+  ],
+  "warnings": ["priority_is_not_success_probability"],
+  "created_at": "2026-07-27T00:00:00+08:00"
+}
+```
+
+Response：
+
+```json
+{
+  "response_id": "response-plan-1",
+  "schema_version": "v0.7",
+  "request_id": "hir-plan-1",
+  "thread_id": "prep-thread-1",
+  "user_id": "user-1",
+  "action": "revise_constraints",
+  "constraints_patch": {"weekly_hours": 10},
+  "activity_ids": [],
+  "activity_revision_requests": [],
+  "submitted_at": "2026-07-27T00:05:00+08:00"
+}
+```
+
+- constraints patch 使用 allowlist，创建新 constraints。
+- exclude/revision 只能引用 request 中 activity。
+- response 不能修改 priority factors、gap、role requirement 或 target decision。
+- 相同 response 重放不得重复创建 constraints/plan。
+
+## 14. v0.7 Feedback Attribution Confirmation
+
+新增 `confirm_feedback_attribution`。Request 固定引用 feedback event、observation、diagnosis 和
+attribution ID，展示最小 evidence excerpt、source authority、alternative explanations、limitations
+及预期影响。
+
+allowed actions：
+
+```text
+confirm_attributions
+relabel_scope
+reject_diagnoses
+mark_unknown
+cancel
+```
+
+Response：
+
+```json
+{
+  "response_id": "response-attribution-1",
+  "schema_version": "v0.7",
+  "request_id": "hir-attribution-1",
+  "thread_id": "feedback-thread-1",
+  "user_id": "user-1",
+  "action": "relabel_scope",
+  "attribution_ids": ["attribution-1"],
+  "diagnosis_ids": ["diagnosis-1"],
+  "scope_relabels": [
+    {"attribution_id": "attribution-1", "subject_scope": "unknown", "subject_ref": null}
+  ],
+  "submitted_at": "2026-08-03T10:20:00+08:00"
+}
+```
+
+- response 只能引用 request 中 IDs 和 allowed scope。
+- 用户确认不改变原 source authority。
+- 校验失败时 Claim、Impact、Directive 零写入。
+- feedback 原文已在 Graph 输入阶段归档；checkpoint 成功处理后清除 response 正文。

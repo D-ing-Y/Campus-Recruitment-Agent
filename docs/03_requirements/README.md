@@ -10,6 +10,7 @@
 - `v0.4-candidate-profile-graph.md`
 - `v0.5-role-profile-graph.md`
 - `v0.6-profile-matching-and-user-decision.md`
+- `v0.7-preparation-plan-and-feedback-loop.md`
 
 实现任务文档与需求文档使用相同版本号，例如：
 
@@ -17,6 +18,7 @@
 - `v0.4-implementation-tasks.md`
 - `v0.5-implementation-tasks.md`
 - `v0.6-implementation-tasks.md`
+- `v0.7-implementation-tasks.md`
 
 当前活动版本：
 
@@ -26,6 +28,8 @@
   已完成，Implemented / Accepted（2026-07-22）。
 - v0.6：Requirements / ADR / RFC / Matching/Decision Contracts / Tasks、实现、测试、
   Eval 与 DeepSeek MatchExplanation smoke 已完成，Implemented / Accepted（2026-07-25）。
+- v0.7：Requirements / ADR / RFC / Preparation/Feedback Contracts / Tasks、实现、测试和
+  Eval 已完成，Implemented / Accepted（2026-07-27）。
 
 每份需求文档必须说明：
 

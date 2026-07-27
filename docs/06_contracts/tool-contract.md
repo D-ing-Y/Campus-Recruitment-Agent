@@ -258,3 +258,51 @@ llm_fact_mutation
 invalid_decision_target
 search_scope_impact_conflict
 ```
+
+## v0.7 Preparation 与 Feedback Tool/Service
+
+| Tool/Service | 输入摘要 | 输出/副作用 |
+| --- | --- | --- |
+| `preparation.load_input_set` | selected decisions、snapshot refs、constraints | 校验并创建 PreparationInputSet |
+| `preparation.derive_objectives` | gap/role/signal refs | PreparationObjective 列表 |
+| `preparation.generate_activities` | objectives、constraints | validated activity candidates |
+| `preparation.compute_priority` | activities、planning facts、policy | PriorityFactors |
+| `preparation.build_package` | objectives/activities/factors/capacity | MinimumPreparationPackage |
+| `preparation.schedule` | package、DAG、calendar constraints | deterministic sessions/deferred reasons |
+| `preparation.save_plan` | validated plan object graph | transactional publish/reuse LearningPlan |
+| `feedback.ingest` | owner、text/file/structured input | raw-first Artifact/Fragment/Event |
+| `feedback.extract_observations` | archived fragment IDs | validated Observation candidates |
+| `feedback.propose_diagnoses` | observation IDs、allowed scopes | Diagnosis candidates |
+| `feedback.archive_claims` | confirmed attributions | feedback_signal Claims |
+| `feedback.assess_impact` | accepted attributions/progress | deterministic impact |
+| `feedback.create_directives` | impact、current refs | typed FeedbackDirective |
+| `feedback.resolve_directive` | directive、new snapshot refs/receipt | validated resolution |
+| `plan.save_progress` | plan/activity/event refs | idempotent PlanProgressEvent |
+
+边界：
+
+- plan services 不写 Candidate/Role/Intent/Comparison repository。
+- feedback ingestion 必须 raw-first；raw write 失败时 extractor 不执行。
+- LLM services 无 priority/schedule/profile/directive repository 写权限。
+- progress service 不能创建 capability-level Claim。
+- role family feedback 只能创建 aggregation candidate，不能直接写 family snapshot。
+- directive resolution 验证后继版本、owner、subject 和 directive type。
+- ToolResult 只返回 ID、count、status 和错误摘要，不复制完整反馈或用户文件。
+
+新增错误类型：
+
+```text
+target_selection_required
+preparation_input_stale
+invalid_activity_reference
+dependency_cycle
+schedule_infeasible
+unaddressable_blocker
+feedback_raw_archive_failed
+feedback_scope_invalid
+feedback_authority_violation
+feedback_causality_violation
+feedback_attribution_unconfirmed
+single_event_family_mutation_blocked
+directive_resolution_invalid
+```
