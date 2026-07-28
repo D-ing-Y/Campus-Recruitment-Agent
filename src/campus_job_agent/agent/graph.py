@@ -1,5 +1,6 @@
-"""LangGraph workflow for the Mini Agent Runtime."""
+"""LangGraph workflow for the legacy Mini Agent Runtime."""
 
+from pathlib import Path
 from time import perf_counter
 
 from langgraph.graph import END, START, StateGraph
@@ -49,9 +50,9 @@ def build_graph(registry: ToolRegistry | None = None):
     return graph.compile()
 
 
-def run_agent(user_input: str) -> AgentState:
+def run_agent(user_input: str, *, data_root: str | Path | None = None) -> AgentState:
     app = build_graph()
-    return app.invoke(create_initial_state(user_input))
+    return app.invoke(create_initial_state(user_input, data_root=data_root))
 
 
 def _parse_goal_node(state: AgentState) -> dict:
@@ -119,7 +120,9 @@ def _write_report_node(state: AgentState) -> dict:
     started = perf_counter()
     input_summary = summarize_state(state)
     run_id = state["run_id"]
-    report_path = f"data/reports/{run_id}.md"
+    output_dir = Path(state["output_dir"])
+    data_root = output_dir.parents[1]
+    report_path = str(data_root / "reports" / f"{run_id}.md")
 
     try:
         output_summary = summarize_update({"report_path": report_path})

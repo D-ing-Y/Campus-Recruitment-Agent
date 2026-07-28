@@ -71,6 +71,7 @@ def test_nowcoder_import_and_validation_preserve_cookie_type(tmp_path):
 def test_cli_prints_reference_but_never_cookie(monkeypatch, tmp_path, capsys):
     real_import = LocalCredentialStore.import_chrome
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("CAMPUS_AGENT_DATA_ROOT", str(tmp_path / "data"))
 
     def fake_import(self, **kwargs):
         return real_import(LocalCredentialStore(tmp_path / "target"),
@@ -91,6 +92,7 @@ def test_cli_prints_reference_but_never_cookie(monkeypatch, tmp_path, capsys):
 def test_cli_accepts_zhaopin_source_alias(monkeypatch, tmp_path, capsys):
     real_import = LocalCredentialStore.import_chrome
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("CAMPUS_AGENT_DATA_ROOT", str(tmp_path / "data"))
 
     def fake_import(self, **kwargs):
         assert kwargs["source_id"] == "zhaopin_jobs"

@@ -21,6 +21,7 @@
 | v0.5 | 已完成 | 岗位需求画像 Graph | 招聘/官网/面经证据、岗位族与具体岗位画像、检索循环 |
 | v0.6 | 已完成 | 双画像匹配与用户决策 | 四类差距、可解释匹配、偏好调整、回退与重检索 |
 | v0.7 | 已完成 | 准备计划与反馈闭环 | 最小准备包、容量排期、反馈证据、画像更新、动态重排 |
+| v0.7.1 | 待实现 | 子图纵向闭环与 CLI 加固 | 正式 CLI、真实节点事件、真实案例验收、typed handoff 连通 |
 | v0.8 | 计划中 | Hybrid RAG 与长期记忆 | 稀疏+稠密检索、metadata filter、rerank、引用回答 |
 | v1.0 | 计划中 | 单 Agent 端到端产品 | 父图、subgraph、checkpoint、interrupt、完整 eval |
 | v1.1 | 计划中 | 分布式存储与异步执行 | PostgreSQL、对象存储、向量存储、队列、幂等与恢复 |
@@ -245,6 +246,45 @@ DeepSeek、智联、牛客、企业官网传输和真实 auth resume 已通过�
 - selected target 能生成可追溯、容量可行且诚实展示 deferred/blocker 的最小准备包。
 - 一次明确反馈能够产生有依据的画像版本变化、重新匹配和学习计划重排。
 - 单次反馈不能直接修改 RoleFamilyProfile 的 common/frequent 结论。
+
+## v0.7.1：子 Workflow 纵向闭环与 CLI 加固
+
+状态：Ready for Implementation（2026-07-28）。Requirements / RFC / ADR / CLI-Run Contract、
+实现任务和 Eval plan 已确认；尚无 v0.7.1 代码或验收报告。
+
+版本定位：
+
+- 建立正式 `campus-agent` 交互式/one-shot/JSON 入口和 cwd-independent 生产装配层；
+- 建立 RunSession、节点事件、错误、LLM receipt、artifact index、inspect 和稳定退出码；
+- 依次完成 Candidate、CareerIntent、Role、Matching、Preparation、Feedback 的九层纵向验收；
+- Candidate 使用真实 PDF/README/DeepSeek，Role 不使用本地 JD并执行 opt-in live source；
+- 通过显式 application service/typed handoff 单步连接相邻子图；
+- 修复名义节点与真实执行边界不一致、固定成功 trace 和预填式 Eval 遮蔽语义失败的问题。
+
+本版本不实现：
+
+- v1.0 LangGraph Parent Graph 或自动循环执行全部子图；
+- v0.8 Hybrid RAG；
+- Web、分布式、自动投递、Multi-Agent 或风险控制绕过。
+
+完成标准：
+
+- 每个 Workflow 的契约、证据、模型、Validator、投影/策略、持久化、Graph、CLI/可观测和 Eval
+  九层均有实际证据；
+- 同一 CLI Session 可由真实材料走到目标选择和计划，并在一次反馈后完成 successor snapshot、
+  rematch 和 replan；
+- interrupt 可跨进程恢复，重复输入/响应/handoff 零重复写，失败可定位到具体节点和对象；
+- 实际结果写入 `docs/07_evaluation/v0.7.1-eval-report.md` 后才可标记 Implemented / Accepted。
+
+设计文档：
+
+- `docs/09_versions/v0.7.1/README.md`
+- `docs/03_requirements/v0.7.1-vertical-workflow-closure-and-cli.md`
+- `docs/03_requirements/v0.7.1-implementation-tasks.md`
+- `docs/04_rfc/0008-cli-observability-and-vertical-workflow-closure.md`
+- `docs/05_adr/0008-adopt-cli-first-observable-workflow-hardening.md`
+- `docs/06_contracts/cli-run-observability-contract.md`
+- `docs/07_evaluation/v0.7.1-eval-plan.md`
 
 ## v0.8：Hybrid RAG 与长期记忆
 

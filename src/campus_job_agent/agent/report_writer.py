@@ -23,7 +23,8 @@ REPORT_SECTIONS = [
 def write_runtime_outputs(state: AgentState) -> str:
     run_id = state["run_id"]
     output_dir = Path(state.get("output_dir", f"data/runs/{run_id}"))
-    report_path = Path(state.get("report_path") or f"data/reports/{run_id}.md")
+    default_data_root = output_dir.parents[1] if len(output_dir.parents) >= 2 else Path("data").resolve()
+    report_path = Path(state.get("report_path") or default_data_root / "reports" / f"{run_id}.md")
 
     output_dir.mkdir(parents=True, exist_ok=True)
     report_path.parent.mkdir(parents=True, exist_ok=True)

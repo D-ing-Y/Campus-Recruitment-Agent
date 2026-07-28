@@ -16,6 +16,10 @@ class ToolRegistry:
     def get(self, tool_name: str) -> Tool | None:
         return self._tools.get(tool_name)
 
+    def values(self) -> tuple[Tool, ...]:
+        """Expose registered tools to production composition roots without mutation."""
+        return tuple(self._tools.values())
+
     def run(self, tool_name: str, args: dict[str, Any]) -> ToolResult:
         tool = self.get(tool_name)
         if tool is None:

@@ -11,6 +11,7 @@
 - `v0.5-role-profile-graph.md`
 - `v0.6-profile-matching-and-user-decision.md`
 - `v0.7-preparation-plan-and-feedback-loop.md`
+- `v0.7.1-vertical-workflow-closure-and-cli.md`
 
 实现任务文档与需求文档使用相同版本号，例如：
 
@@ -19,6 +20,7 @@
 - `v0.5-implementation-tasks.md`
 - `v0.6-implementation-tasks.md`
 - `v0.7-implementation-tasks.md`
+- `v0.7.1-implementation-tasks.md`
 
 当前活动版本：
 
@@ -30,6 +32,8 @@
   Eval 与 DeepSeek MatchExplanation smoke 已完成，Implemented / Accepted（2026-07-25）。
 - v0.7：Requirements / ADR / RFC / Preparation/Feedback Contracts / Tasks、实现、测试和
   Eval 已完成，Implemented / Accepted（2026-07-27）。
+- v0.7.1：Requirements / ADR / RFC / CLI-Run Contract / Tasks / Eval Plan 已确认，
+  Ready for Implementation（2026-07-28）；代码、真实 smoke 与 Eval report 尚未开始。
 
 每份需求文档必须说明：
 

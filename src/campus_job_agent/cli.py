@@ -1,96 +1,433 @@
-"""Command-line entrypoint for local agent and credential operations."""
+"""Single production CLI for the observable runtime and legacy compatibility."""
 
 from __future__ import annotations
 
 import argparse
+import json
+import sys
 from pathlib import Path
+from typing import Any
+from uuid import uuid4
 
 
-DEFAULT_CREDENTIAL_ROOT = Path("data") / "cache" / "credentials"
+class CLIArgumentError(ValueError):
+    pass
+
+
+class _Parser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        raise CLIArgumentError(message)
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="campus-agent")
-    commands = parser.add_subparsers(dest="command", required=True)
+    parser = _Parser(prog="campus-agent")
+    parser.add_argument("--json", action="store_true", dest="json_output", help="emit one JSON document")
+    parser.add_argument("--data-root", type=Path, help="explicit cwd-independent data root")
+    commands = parser.add_subparsers(dest="command")
 
-    run_parser = commands.add_parser("run")
-    run_parser.add_argument("user_input")
+    commands.add_parser("doctor", help="check runtime paths and dependencies without exposing secrets")
 
-    auth_parser = commands.add_parser("auth", help="manage local source credentials")
-    auth_commands = auth_parser.add_subparsers(dest="auth_command", required=True)
-    chrome_parser = auth_commands.add_parser(
-        "import-chrome", help="import domain-scoped cookies from the local Chrome profile"
+    session = commands.add_parser("session", help="manage lightweight RunSession navigation")
+    session_commands = session.add_subparsers(dest="session_command", required=True)
+    start = session_commands.add_parser("start")
+    start.add_argument("--user-id", default="local-user")
+    start.add_argument("--idempotency-key")
+    status = session_commands.add_parser("status")
+    status.add_argument("session_id")
+    resume = session_commands.add_parser("resume")
+    resume.add_argument("session_id")
+    resume.add_argument("--expected-version", type=int)
+    history = session_commands.add_parser("history")
+    history.add_argument("session_id")
+    history.add_argument("--user-id")
+
+    inspect = commands.add_parser("inspect", help="inspect stable run and repository contracts")
+    inspect_commands = inspect.add_subparsers(dest="inspect_command", required=True)
+    run = inspect_commands.add_parser("run")
+    run.add_argument("run_id")
+    node = inspect_commands.add_parser("node")
+    node.add_argument("run_id")
+    node.add_argument("--node")
+    llm = inspect_commands.add_parser("llm")
+    llm.add_argument("run_id")
+    evidence = inspect_commands.add_parser("evidence")
+    evidence.add_argument("object_id")
+    claims = inspect_commands.add_parser("claims")
+    claims.add_argument("subject_id")
+    profile = inspect_commands.add_parser("profile")
+    profile.add_argument("snapshot_id")
+    handoff = inspect_commands.add_parser("handoff")
+    handoff.add_argument("handoff_id", nargs="?")
+    handoff.add_argument("--run-id")
+    handoff.add_argument("--session-id")
+
+    legacy = commands.add_parser(
+        "run",
+        help="legacy-mini-runtime: mock job search compatibility only; not the formal business workflow",
+        description="legacy-mini-runtime (mock job search only; not Candidate/Role/Matching/Preparation/Feedback)",
     )
-    chrome_parser.add_argument(
-        "--source",
-        required=True,
-        choices=("zhaopin", "zhaopin_jobs", "nowcoder", "nowcoder_experience"),
-    )
-    chrome_parser.add_argument("--name", default="default")
-    chrome_parser.add_argument("--profile", help="optional Chrome Cookies database path")
-    chrome_parser.add_argument(
-        "--credential-root", type=Path, default=DEFAULT_CREDENTIAL_ROOT
-    )
+    legacy.add_argument("user_input")
+
+    auth = commands.add_parser("auth", help="manage local source credentials")
+    auth_commands = auth.add_subparsers(dest="auth_command", required=True)
+    chrome = auth_commands.add_parser("import-chrome")
+    chrome.add_argument("--source", required=True, choices=("zhaopin", "zhaopin_jobs", "nowcoder", "nowcoder_experience"))
+    chrome.add_argument("--name", default="default")
+    chrome.add_argument("--profile")
+    chrome.add_argument("--credential-root", type=Path)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = _build_parser().parse_args(argv)
-    if args.command == "auth" and args.auth_command == "import-chrome":
-        return _import_chrome(args)
-    if args.command == "run":
-        return _run_agent(args.user_input)
-    return 1
-
-
-def _import_chrome(args: argparse.Namespace) -> int:
-    from campus_job_agent.sources import LocalCredentialStore
-
-    source_id = {
-        "zhaopin": "zhaopin_jobs",
-        "zhaopin_jobs": "zhaopin_jobs",
-        "nowcoder": "nowcoder_experience",
-        "nowcoder_experience": "nowcoder_experience",
-    }[args.source]
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    json_mode = "--json" in raw_argv
+    if not raw_argv:
+        return _interactive_guide(json_mode=False)
     try:
-        ref = LocalCredentialStore(args.credential_root).import_chrome(
-            source_id=source_id,
-            name=args.name,
-            cookie_file=args.profile,
+        args = _build_parser().parse_args(raw_argv)
+        if args.command is None:
+            return _interactive_guide(json_mode=args.json_output)
+        return _dispatch(args)
+    except CLIArgumentError as exc:
+        return _emit_error("invalid_input", str(exc), 2, json_mode=json_mode,
+                           recovery_hint="run campus-agent --help and correct the command arguments")
+    except SystemExit:
+        raise
+    except Exception as exc:
+        return _handle_error(exc, json_mode=json_mode)
+
+
+def _dispatch(args: argparse.Namespace) -> int:
+    from campus_job_agent.runtime import RuntimeFactory
+
+    owner_id = getattr(args, "user_id", None) or "local-user"
+    runtime = RuntimeFactory(data_root=args.data_root).build(owner_id=owner_id)
+    if args.command == "doctor":
+        checks = runtime.doctor()
+        status = "completed" if (
+            all(checks["writable"].values())
+            and checks["sqlite_checkpointer"]["available"]
+            and checks["llm"]["configuration_complete"]
+        ) else "partial"
+        return _emit({
+            "schema_version": "v0.7.1", "command": "doctor", "status": status,
+            "checks": checks, "next_action": "session.start" if status == "completed" else "fix_doctor_failures",
+            "warnings": [] if status == "completed" else ["runtime_dependency_incomplete"], "errors": [],
+        }, json_mode=args.json_output)
+    if args.command == "session":
+        return _session(runtime, args)
+    if args.command == "inspect":
+        return _inspect(runtime, args)
+    if args.command == "run":
+        return _legacy_run(runtime, args)
+    if args.command == "auth":
+        return _import_chrome(runtime, args)
+    raise CLIArgumentError("unknown command")
+
+
+def _session(runtime: Any, args: argparse.Namespace) -> int:
+    from campus_job_agent.runtime import NodeObserver
+
+    command = f"session.{args.session_command}"
+    if args.session_command == "status":
+        session = runtime.session_service.status(args.session_id)
+        return _emit(_session_payload(command, session), json_mode=args.json_output)
+    if args.session_command == "history":
+        if args.user_id is not None:
+            runtime.session_repository.get(args.session_id, user_id=args.user_id)
+        history = runtime.session_service.history(args.session_id)
+        session = runtime.session_service.status(args.session_id)
+        payload = _session_payload(command, session)
+        payload["history"] = history
+        return _emit(payload, json_mode=args.json_output)
+
+    if args.session_command == "start":
+        session = runtime.session_service.start(
+            user_id=args.user_id, idempotency_key=args.idempotency_key
+        )
+        parent_run_id = session.latest_run_id
+    else:
+        session = runtime.session_service.status(args.session_id)
+        parent_run_id = session.latest_run_id
+
+    thread_id = f"thread-{uuid4()}"
+    manifest = runtime.artifact_writer.initialize_run(
+        session_id=session.session_id, thread_id=thread_id, workflow="runtime",
+        command=command, parent_run_id=parent_run_id,
+        input_refs={"session_id": session.session_id},
+    )
+    try:
+        with NodeObserver(runtime.artifact_writer, manifest, "persist_session") as observed:
+            if args.session_command == "start":
+                updated = session if session.latest_run_id else runtime.session_repository.update_navigation(
+                    session.session_id, expected_version=session.session_version,
+                    operation="run_linked", latest_run_id=manifest.run_id,
+                )
+                next_action = "candidate.build"
+            else:
+                updated = runtime.session_service.resume(
+                    session.session_id, expected_version=args.expected_version,
+                    latest_run_id=manifest.run_id,
+                )
+                next_action = _next_action(updated.current_stage)
+            observed.finish(
+                output_refs={"session_id": updated.session_id},
+                counts={"session_version": updated.session_version}, route=next_action,
+            )
+        safe_state = {
+            "session_id": updated.session_id, "session_version": updated.session_version,
+            "status": updated.status, "current_stage": updated.current_stage,
+            "current_refs": updated.current_refs, "pending_request": updated.pending_request,
+            "pending_handoff_ids": updated.pending_handoff_ids, "latest_run_id": updated.latest_run_id,
+        }
+        runtime.artifact_writer.write_state(manifest.run_id, safe_state)
+        runtime.artifact_writer.write_report(
+            manifest.run_id,
+            f"# Session command\n\n- session_id: `{updated.session_id}`\n- status: `{updated.status}`\n- next action: `{next_action}`\n",
+        )
+        terminal = runtime.artifact_writer.finish_run(
+            manifest.run_id, status="completed", next_action=next_action,
+            output_refs={"session_id": updated.session_id},
         )
     except Exception as exc:
-        # Import failures are deliberately sanitized by the store and never contain cookies.
-        print("status: failed")
-        print(f"error: {exc}")
-        return 1
-    print("status: success")
-    print(f"source_id: {ref.source_id}")
-    print(f"credential_ref: {ref.credential_ref}")
-    print(f"credential_root: {Path(args.credential_root).resolve()}")
-    return 0
+        try:
+            runtime.artifact_writer.finish_run(
+                manifest.run_id, status="failed", next_action="inspect.run",
+                reason_codes=["internal_error"],
+            )
+        except Exception:
+            pass
+        raise exc
+    payload = _session_payload(command, updated)
+    payload.update({
+        "run_id": manifest.run_id, "thread_id": thread_id, "next_action": next_action,
+        "artifact_paths": terminal.artifact_paths,
+    })
+    return _emit(payload, json_mode=args.json_output)
 
 
-def _run_agent(user_input: str) -> int:
+def _inspect(runtime: Any, args: argparse.Namespace) -> int:
+    from campus_job_agent.runtime import redact
+
+    command = f"inspect.{args.inspect_command}"
+    result: Any
+    artifact_paths: dict[str, str] = {}
+    if args.inspect_command == "run":
+        manifest = runtime.artifact_writer.load_manifest(args.run_id)
+        result = {
+            "manifest": manifest.model_dump(mode="json"),
+            "errors": runtime.artifact_writer.read_jsonl(args.run_id, "errors"),
+            "pending_interaction": manifest.pending_request_id,
+            "pending_handoffs": manifest.pending_handoff_ids,
+        }
+        artifact_paths = manifest.artifact_paths
+    elif args.inspect_command == "node":
+        events = runtime.artifact_writer.read_jsonl(args.run_id, "events")
+        result = [item for item in events if item.get("node") and (not args.node or item.get("node") == args.node)]
+        artifact_paths = runtime.artifact_writer.load_manifest(args.run_id).artifact_paths
+    elif args.inspect_command == "llm":
+        result = runtime.artifact_writer.read_jsonl(args.run_id, "llm_calls")
+        artifact_paths = runtime.artifact_writer.load_manifest(args.run_id).artifact_paths
+    elif args.inspect_command == "evidence":
+        artifact = runtime.evidence_repository.get_artifact(args.object_id)
+        fragment = runtime.evidence_repository.get_fragment(args.object_id)
+        if artifact is None and fragment is None:
+            raise KeyError(f"evidence object not found: {args.object_id}")
+        value = artifact or fragment
+        data = value.model_dump(mode="json")
+        data.pop("text", None)
+        result = redact(data)
+    elif args.inspect_command == "claims":
+        result = [
+            {
+                "claim_id": item.claim_id, "subject_id": item.subject_id,
+                "predicate": item.predicate, "claim_type": item.claim_type,
+                "evidence_fragment_ids": item.evidence_fragment_ids,
+                "confidence": item.confidence, "schema_version": item.schema_version,
+                "status": item.status,
+            }
+            for item in runtime.evidence_repository.list_claims(args.subject_id)
+        ]
+    elif args.inspect_command == "profile":
+        profile = runtime.profile_repository.get_profile(args.snapshot_id)
+        if profile is None:
+            raise KeyError(f"profile not found: {args.snapshot_id}")
+        result = {
+            "snapshot_id": profile.snapshot_id, "subject_id": profile.subject_id,
+            "profile_type": profile.profile_type, "version": profile.version,
+            "schema_version": profile.schema_version, "supporting_claim_ids": profile.supporting_claim_ids,
+            "created_at": profile.created_at.isoformat(),
+            "profile_fields": sorted(profile.profile_data),
+        }
+    else:
+        if args.run_id:
+            result = runtime.artifact_writer.read_jsonl(args.run_id, "handoffs")
+            artifact_paths = runtime.artifact_writer.load_manifest(args.run_id).artifact_paths
+        elif args.handoff_id:
+            result = runtime.session_repository.get_handoff(args.handoff_id).model_dump(mode="json")
+        else:
+            result = [
+                item.model_dump(mode="json")
+                for item in runtime.session_repository.list_handoffs(session_id=args.session_id)
+            ]
+    payload = {
+        "schema_version": "v0.7.1", "command": command, "status": "completed",
+        "result": redact(result), "artifact_paths": artifact_paths,
+        "next_action": None, "warnings": [], "errors": [],
+    }
+    return _emit(payload, json_mode=args.json_output)
+
+
+def _legacy_run(runtime: Any, args: argparse.Namespace) -> int:
     from campus_job_agent.agent import run_agent
 
-    try:
-        state = run_agent(user_input)
-    except Exception as exc:
-        print("status: failed")
-        print(f"error: {exc}")
-        return 1
-    run_id = state["run_id"]
+    state = run_agent(args.user_input, data_root=runtime.paths.data_root)
     verification = state.get("verification", {})
-    status = "success" if verification.get("passed") else "failed"
-    print(f"run_id: {run_id}")
-    print(f"status: {status}")
-    print(f"report_path: {state.get('report_path')}")
-    print(f"trace_path: data/runs/{run_id}/trace.json")
-    if state.get("llm_calls") is not None:
-        print(f"llm_calls_path: data/runs/{run_id}/llm_calls.json")
-    if status == "failed" and state.get("errors"):
-        print(f"errors: {state['errors']}")
-    return 0 if status == "success" else 1
+    status = "completed" if verification.get("passed") else "failed"
+    exit_code = 0 if status == "completed" else 6
+    errors = state.get("errors", []) if status == "failed" else []
+    llm_error_types = {
+        str(item.get("error_type"))
+        for item in state.get("llm_calls", [])
+        if item.get("error_type")
+    }
+    llm_error_types.update(
+        str(item.get("error_type"))
+        for item in errors
+        if item.get("node") == "parse_goal" and item.get("error_type")
+    )
+    if status == "failed" and llm_error_types.intersection(
+        {"provider_error", "network_timeout", "rate_limited", "auth_required"}
+    ):
+        exit_code = 4
+        errors = [{
+            "error_type": "external_dependency",
+            "message": "legacy-mini-runtime LLM provider unavailable",
+            "recovery_hint": "inspect the safe LLM receipt and retry the provider",
+        }, *errors]
+    payload = {
+        "schema_version": "v0.7.1", "command": "run", "workflow": "legacy-mini-runtime",
+        "run_id": state["run_id"], "session_id": None, "status": status,
+        "next_action": "session.start", "output_refs": {}, "pending_request": None,
+        "artifact_paths": {
+            "report": state.get("report_path"),
+            "trace": str(runtime.paths.run_root / state["run_id"] / "trace.json"),
+            "llm_calls": str(runtime.paths.run_root / state["run_id"] / "llm_calls.json"),
+        },
+        "warnings": ["not_formal_business_workflow", "mock_job_search_only"],
+        "errors": errors,
+    }
+    return _emit(payload, json_mode=args.json_output, exit_code=exit_code)
+
+
+def _import_chrome(runtime: Any, args: argparse.Namespace) -> int:
+    source_id = {"zhaopin": "zhaopin_jobs", "nowcoder": "nowcoder_experience"}.get(args.source, args.source)
+    store = runtime.credential_resolver
+    if args.credential_root:
+        from campus_job_agent.sources import LocalCredentialStore
+        store = LocalCredentialStore(args.credential_root)
+    ref = store.import_chrome(source_id=source_id, name=args.name, cookie_file=args.profile)
+    return _emit({
+        "schema_version": "v0.7.1", "command": "auth.import-chrome", "status": "completed",
+        "source_id": ref.source_id, "credential_ref": ref.credential_ref,
+        "credential_root": str(store.root.resolve()), "next_action": None,
+        "warnings": [], "errors": [],
+    }, json_mode=args.json_output)
+
+
+def _session_payload(command: str, session: Any) -> dict[str, Any]:
+    return {
+        "schema_version": "v0.7.1", "command": command,
+        "run_id": session.latest_run_id, "session_id": session.session_id,
+        "session_version": session.session_version, "status": session.status,
+        "current_stage": session.current_stage, "current_refs": session.current_refs,
+        "pending_request": session.pending_request,
+        "pending_handoff_ids": session.pending_handoff_ids,
+        "next_action": _next_action(session.current_stage),
+        "artifact_paths": {}, "warnings": [], "errors": [],
+    }
+
+
+def _next_action(stage: str) -> str:
+    return {
+        "candidate": "candidate.build", "intent": "intent.create", "role": "role.research",
+        "matching": "match.run", "preparation": "plan.build", "feedback": "feedback.add",
+    }.get(stage, "session.status")
+
+
+def _interactive_guide(*, json_mode: bool) -> int:
+    payload = {
+        "schema_version": "v0.7.1", "command": "guide", "status": "completed",
+        "message": "Start with `campus-agent session start`; then use session status and inspect commands.",
+        "next_action": "session.start", "warnings": ["wp1_business_commands_not_started"], "errors": [],
+    }
+    return _emit(payload, json_mode=json_mode)
+
+
+def _emit(payload: dict[str, Any], *, json_mode: bool, exit_code: int = 0) -> int:
+    if json_mode:
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+    else:
+        for key in (
+            "workflow", "run_id", "session_id", "status", "current_stage", "next_action",
+            "source_id", "credential_ref", "credential_root",
+        ):
+            if key in payload and payload[key] is not None:
+                print(f"{key}: {payload[key]}")
+        if payload.get("message"):
+            print(payload["message"])
+        if payload.get("warnings"):
+            print("warnings: " + ", ".join(payload["warnings"]))
+        if payload.get("artifact_paths"):
+            print("artifact_paths: " + json.dumps(payload["artifact_paths"], ensure_ascii=False))
+        if payload.get("checks"):
+            print(json.dumps(payload["checks"], ensure_ascii=False, indent=2))
+        if "result" in payload:
+            print(json.dumps(payload["result"], ensure_ascii=False, indent=2))
+        if "history" in payload:
+            print(json.dumps(payload["history"], ensure_ascii=False, indent=2))
+    return exit_code
+
+
+def _emit_error(error_type: str, message: str, exit_code: int, *, json_mode: bool,
+                recovery_hint: str) -> int:
+    payload = {
+        "schema_version": "v0.7.1", "command": "error", "status": "failed",
+        "next_action": recovery_hint, "warnings": [],
+        "errors": [{"error_type": error_type, "message": message, "recovery_hint": recovery_hint}],
+    }
+    if json_mode:
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+    else:
+        print("status: failed", file=sys.stderr)
+        print(f"error_type: {error_type}", file=sys.stderr)
+        print(f"error: {message}", file=sys.stderr)
+        print(f"recovery_hint: {recovery_hint}", file=sys.stderr)
+    return exit_code
+
+
+def _handle_error(exc: Exception, *, json_mode: bool) -> int:
+    from campus_job_agent.llm import LLMConfigError, LLMProviderError, StructuredOutputError
+    from campus_job_agent.runtime import ArtifactWriteError, SessionError
+
+    if isinstance(exc, CLIArgumentError):
+        return _emit_error("invalid_input", str(exc), 2, json_mode=json_mode, recovery_hint="check command arguments")
+    if isinstance(exc, SessionError):
+        return _emit_error(exc.error_type, str(exc), 3, json_mode=json_mode, recovery_hint="inspect session refs and retry with the current version")
+    if isinstance(exc, KeyError):
+        return _emit_error("not_found", str(exc).strip("'"), 3, json_mode=json_mode, recovery_hint="verify the object ID and data root")
+    if isinstance(exc, LLMConfigError):
+        return _emit_error("invalid_input", str(exc), 2, json_mode=json_mode, recovery_hint="run campus-agent doctor and configure the provider")
+    if isinstance(exc, LLMProviderError) or (
+        isinstance(exc, StructuredOutputError)
+        and exc.error_type in {"provider_error", "network_timeout", "rate_limited", "auth_required"}
+    ):
+        return _emit_error("external_dependency", str(exc), 4, json_mode=json_mode, recovery_hint="inspect the provider status and retry safely")
+    if isinstance(exc, StructuredOutputError):
+        return _emit_error("contract_violation", str(exc), 3, json_mode=json_mode, recovery_hint="inspect the safe LLM receipt and contract versions")
+    if isinstance(exc, ArtifactWriteError) or isinstance(exc, OSError):
+        return _emit_error("storage_failure", str(exc), 5, json_mode=json_mode, recovery_hint="check data-root permissions and inspect the run")
+    return _emit_error("internal_error", str(exc), 6, json_mode=json_mode, recovery_hint="run campus-agent doctor and inspect the latest run")
 
 
 if __name__ == "__main__":

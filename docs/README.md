@@ -2,7 +2,7 @@
 
 本目录是项目开发的事实来源。所有代码开发前，必须先在这里明确需求、设计、接口契约和验收标准。
 
-当前项目从 v0.3 起采用“统一证据层 + 候选人画像 + 求职意图 + 岗位需求画像 + 反馈闭环”的架构。v0.4 候选人画像 subgraph、v0.5 岗位需求画像 Graph、v0.6 双画像匹配 Graph 与 v0.7 Preparation/Feedback Subgraphs 均已完成验收。v0.7 新增 116 项测试、全量 338 项通过，v0.1-v0.6 的 222 项回归全部保留；21 案例离线固定集达到全部门槛。已完成版本文档作为历史记录保留，后续变化通过新版本 requirements、RFC 和 ADR 描述。
+当前项目从 v0.3 起采用“统一证据层 + 候选人画像 + 求职意图 + 岗位需求画像 + 反馈闭环”的架构。v0.4 候选人画像 subgraph、v0.5 岗位需求画像 Graph、v0.6 双画像匹配 Graph 与 v0.7 Preparation/Feedback Subgraphs 均已完成离线验收。v0.7 新增 116 项测试、全量 338 项通过，v0.1-v0.6 的 222 项回归全部保留；21 案例离线固定集达到既定门槛。当前活动版本 v0.7.1 进入 Ready for Implementation，目标是补齐正式 CLI、节点级可观测性、真实材料/来源语义验收和相邻 subgraph typed handoff，不提前实现 v1.0 Parent Graph。已完成版本文档作为历史记录保留，后续变化通过新版本 requirements、RFC 和 ADR 描述。
 
 ## 目录说明
 
@@ -15,6 +15,7 @@
 - `06_contracts/`：状态、工具、证据、LLM 输出等接口契约。
 - `07_evaluation/`：评估指标、评估数据和评估报告模板。
 - `08_deployment/`：本地开发、云服务器部署、安全和密钥管理。
+- `09_versions/`：活动版本的导航入口、验收矩阵和实际执行台账；不复制 canonical requirements/contracts。
 
 ## 标准开发流
 
@@ -46,6 +47,11 @@ v0.7 已完成实现与验收：selected target 生成带依赖、容量和截�
 raw-before-interpret，再分离 observation、diagnosis 和 impact。无解释拒绝不推断能力原因，
 单次反馈不改岗位族；跨域变化通过 typed directive 和后继 snapshot refs 恢复。实现任务与实际
 指标见 `docs/03_requirements/v0.7-implementation-tasks.md` 和 `docs/07_evaluation/v0.7-eval-report.md`。
+
+v0.7.1 文档路线已确认，状态为 Ready for Implementation。该版本按 CLI/Run 基座、Candidate、
+CareerIntent、Role、Matching、Preparation、Feedback 和 typed handoff 的顺序逐个完成九层纵向
+验收。版本入口见 `docs/09_versions/v0.7.1/README.md`；完成代码、真实 smoke 和 Eval report 前
+不得标记 Implemented。
 
 ## Codex 协作边界
 

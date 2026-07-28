@@ -103,7 +103,12 @@ def run_node_with_trace(
         return {
             "trace": trace,
             "errors": list(state.get("errors", []))
-            + [{"node": node_name, "message": str(exc), "recoverable": False}],
+            + [{
+                "node": node_name,
+                "error_type": getattr(exc, "error_type", "internal_error"),
+                "message": str(exc),
+                "recoverable": False,
+            }],
         }
 
     ended_at = utc_now_iso()

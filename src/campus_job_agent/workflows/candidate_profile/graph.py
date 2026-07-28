@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import sqlite3
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from time import perf_counter_ns
+from typing import Any, Callable
 from uuid import uuid4
 
 from langchain_core.runnables import RunnableConfig
@@ -230,20 +232,20 @@ def build_candidate_profile_graph(
         route_policy=route_policy or CandidateRoutePolicy(),
     )
     graph = StateGraph(CandidateProfileGraphState)
-    graph.add_node("initialize_profile_run", handlers.initialize_profile_run)
-    graph.add_node("ingest_pending_materials", handlers.ingest_pending_materials)
+    graph.add_node("initialize_profile_run", _observable_node("initialize_profile_run", handlers.initialize_profile_run))
+    graph.add_node("ingest_pending_materials", _observable_node("ingest_pending_materials", handlers.ingest_pending_materials))
     graph.add_node(
-        "extract_and_validate_claims", handlers.extract_and_validate_claims
+        "extract_and_validate_claims", _observable_node("extract_and_validate_claims", handlers.extract_and_validate_claims)
     )
-    graph.add_node("project_candidate_profile", handlers.project_candidate_profile)
+    graph.add_node("project_candidate_profile", _observable_node("project_candidate_profile", handlers.project_candidate_profile))
     graph.add_node(
-        "assess_profile_sufficiency", handlers.assess_profile_sufficiency
+        "assess_profile_sufficiency", _observable_node("assess_profile_sufficiency", handlers.assess_profile_sufficiency)
     )
-    graph.add_node("route_next_action", handlers.route_next_action)
-    graph.add_node("plan_human_interaction", handlers.plan_human_interaction)
-    graph.add_node("interrupt_for_user", handlers.interrupt_for_user)
-    graph.add_node("archive_human_input", handlers.archive_human_input)
-    graph.add_node("finalize_profile", handlers.finalize_profile)
+    graph.add_node("route_next_action", _observable_node("route_next_action", handlers.route_next_action))
+    graph.add_node("plan_human_interaction", _observable_node("plan_human_interaction", handlers.plan_human_interaction))
+    graph.add_node("interrupt_for_user", _observable_node("interrupt_for_user", handlers.interrupt_for_user))
+    graph.add_node("archive_human_input", _observable_node("archive_human_input", handlers.archive_human_input))
+    graph.add_node("finalize_profile", _observable_node("finalize_profile", handlers.finalize_profile))
 
     graph.add_edge(START, "initialize_profile_run")
     graph.add_edge("initialize_profile_run", "ingest_pending_materials")
@@ -1074,7 +1076,7 @@ def _trace(
     timestamp = datetime.now(UTC).isoformat()
     return {
         "node": node,
-        "status": "success",
+        "status": "pending_observation",
         "started_at": timestamp,
         "ended_at": timestamp,
         "duration_ms": 0,
@@ -1087,6 +1089,56 @@ def _trace(
         "request_id": request_id,
         "response_id": response_id,
     }
+
+
+def _observable_node(
+    node: str, handler: Callable[[CandidateProfileGraphState], dict[str, Any]]
+) -> Callable[[CandidateProfileGraphState], dict[str, Any]]:
+    """Replace the historical placeholder trace with measured node output facts."""
+
+    def observed(
+        state: CandidateProfileGraphState, config: RunnableConfig
+    ) -> dict[str, Any]:
+        started_at = datetime.now(UTC)
+        started_ns = perf_counter_ns()
+        update = (
+            handler(state, config)  # type: ignore[call-arg]
+            if node == "initialize_profile_run"
+            else handler(state)
+        )
+        ended_at = datetime.now(UTC)
+        duration_ms = max(1, math.ceil((perf_counter_ns() - started_ns) / 1_000_000))
+        new_errors = [
+            item for item in update.get("errors", [])
+            if isinstance(item, dict) and item.get("node") == node
+        ]
+        lifecycle = str(update.get("status") or "")
+        status = "failed" if new_errors or lifecycle == "failed" else (
+            lifecycle if lifecycle in {"interrupted", "cancelled", "completed_with_unknowns"}
+            else "success"
+        )
+        output_counts = {
+            f"{key}_count": len(value)
+            for key, value in update.items()
+            if isinstance(value, list) and key.endswith(("_ids", "_results"))
+        }
+        traces = []
+        for event in update.get("trace", []):
+            if isinstance(event, dict) and event.get("node") == node:
+                event = {
+                    **event,
+                    "status": status,
+                    "started_at": started_at.isoformat(),
+                    "ended_at": ended_at.isoformat(),
+                    "duration_ms": duration_ms,
+                    "output_counts": output_counts,
+                    "route": update.get("next_action"),
+                    "reason_codes": [str(item.get("error_type")) for item in new_errors if item.get("error_type")],
+                }
+            traces.append(event)
+        return {**update, "trace": traces}
+
+    return observed
 
 
 def _stable_hash(prefix: str, values: Any) -> str:

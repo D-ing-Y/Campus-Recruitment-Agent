@@ -27,6 +27,11 @@ v0.7 准备计划与反馈闭环已于 2026-07-27 完成实现与验收，当前
 负责确定性优先级、最小准备包与容量排期；FeedbackGraph 负责 raw-first 反馈、归因门禁、
 Claim/Impact/Directive，并以本地 saga 验证 feedback→snapshot→rematch→replan 版本链。
 
+v0.7.1“子 Workflow 纵向闭环与 CLI 加固”已完成文档路线确认，状态为 Ready for
+Implementation；代码版本仍为 `0.7.0`。该版本将先建立正式 CLI、RunSession 和节点级诊断，
+再按 Candidate、CareerIntent、Role、Matching、Preparation、Feedback 顺序完成真实纵向验收与
+typed handoff 连通。版本入口见 `docs/09_versions/v0.7.1/README.md`。v0.7.1 不实现 v1.0 Parent Graph。
+
 v0.1/v0.2 保留为 Runtime 与 LLM 基座，v0.3 提供统一证据层、领域契约、版本化画像快照和证据质量评估；v0.4 已将这些能力接入第一个可循环、可中断、可恢复的候选人画像 LangGraph subgraph。
 
 项目从 v0.3 起定位为“证据驱动的双画像求职 Agent”：原始材料进入统一证据层，系统构建候选人画像、求职意图和岗位需求画像，通过 LangGraph 完成画像充分性评价、岗位检索、差距分析、人工决策、准备计划和反馈更新。
@@ -109,6 +114,9 @@ v0.7 已实现：
 
 v0.7 不实现 RAG、外部课程搜索、分布式存储、Multi-Agent、Web UI、自动投递或 v1.0 Parent Graph。
 默认测试不访问真实招聘网站，不需要登录或真实 API key。
+
+v0.7.1 将增加 opt-in DeepSeek 与真实招聘来源验收；离线 CI、真实模型 smoke 和 live source smoke
+必须分层报告。外部来源阻塞时保留真实 `blocked_by_auth`/Partial 结果，不使用 fixture 冒充成功。
 
 后续路线会实际实现 LangGraph 高级编排、Hybrid RAG、分布式存储和必要的 Sub-Agent；每项技术必须对应真实业务问题、简单基线和量化验收，而不是仅作为技术展示。
 
