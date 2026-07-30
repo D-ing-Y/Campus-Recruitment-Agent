@@ -3,12 +3,14 @@
 import json
 
 from campus_job_agent.evidence.candidate_predicates import (
+    CURRENT_CANDIDATE_CLAIM_SCHEMAS,
     CandidatePredicateError,
     parse_candidate_predicate,
     validate_candidate_value,
 )
 from campus_job_agent.ontology import CapabilityOntology
 from campus_job_agent.schemas import EvidenceClaim
+from campus_job_agent.schemas.candidate_taxonomy import CapabilityClaimValue
 from campus_job_agent.storage.base import EvidenceRepository
 
 
@@ -106,7 +108,7 @@ class CandidateClaimValidator(ClaimValidator):
             super().validate(claim, allowed_artifact_ids, expected_owner_id)
             parsed = parse_candidate_predicate(
                 claim.predicate,
-                allow_legacy=claim.schema_version != "candidate_claim_v0.7.1",
+                allow_legacy=claim.schema_version not in CURRENT_CANDIDATE_CLAIM_SCHEMAS,
             )
             if (
                 parsed.kind == "capability"
@@ -118,6 +120,23 @@ class CandidateClaimValidator(ClaimValidator):
                     reason_code="unknown_capability_id",
                 )
             validate_candidate_value(parsed, claim.value)
+            if (
+                parsed.kind == "capability"
+                and not parsed.legacy
+                and claim.schema_version == "candidate_claim_v0.7.1.2"
+            ):
+                normalized = CapabilityClaimValue.model_validate(claim.value)
+                resolved = self.ontology.resolve(normalized.raw_label)
+                if resolved.capability_id is None:
+                    raise CandidateClaimValidationError(
+                        "capability raw_label is not represented by the current ontology",
+                        reason_code="unmapped_capability_label",
+                    )
+                if resolved.capability_id != parsed.capability_id:
+                    raise CandidateClaimValidationError(
+                        "capability raw_label does not match capability_id",
+                        reason_code="capability_id_mismatch",
+                    )
         except CandidateClaimValidationError:
             raise
         except CandidatePredicateError as exc:

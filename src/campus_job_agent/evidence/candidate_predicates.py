@@ -7,9 +7,18 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
+from campus_job_agent.schemas.candidate_taxonomy import (
+    CAPABILITY_LEVELS,
+    EXPERIENCE_CONTEXTS,
+    EXPERIENCE_KINDS,
+    CapabilityClaimValue,
+    ExperienceKindValue,
+)
 
-CAPABILITY_LEVELS = {"unknown", "beginner", "intermediate", "advanced", "expert"}
-EXPERIENCE_KINDS = {"research", "project", "internship", "competition", "other"}
+CURRENT_CANDIDATE_CLAIM_SCHEMAS = {
+    "candidate_claim_v0.7.1", "candidate_claim_v0.7.1.1",
+    "candidate_claim_v0.7.1.2",
+}
 EDUCATION_FIELDS = {"institution", "degree", "major", "graduation_year"}
 EXPERIENCE_LIST_FIELDS = {"responsibilities", "technologies", "outputs", "results"}
 
@@ -79,15 +88,24 @@ def parse_candidate_predicate(
 
 def validate_candidate_value(parsed: CandidatePredicate, value: Any) -> None:
     if parsed.kind == "capability":
-        valid = (
-            isinstance(value, dict)
-            and isinstance(value.get("level"), str)
-            and value.get("level") in CAPABILITY_LEVELS
-        )
+        try:
+            CapabilityClaimValue.model_validate(value)
+        except ValueError:
+            valid = False
+        else:
+            valid = True
     elif parsed.kind == "education":
         valid = isinstance(value, str) and bool(value.strip())
     elif parsed.field == "kind":
-        valid = isinstance(value, str) and value in EXPERIENCE_KINDS
+        try:
+            normalized = ExperienceKindValue.model_validate(value)
+        except ValueError:
+            valid = False
+        else:
+            valid = (
+                normalized.kind in EXPERIENCE_KINDS
+                and normalized.context in EXPERIENCE_CONTEXTS
+            )
     elif parsed.field in EXPERIENCE_LIST_FIELDS:
         valid = (
             isinstance(value, list)

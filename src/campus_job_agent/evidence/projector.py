@@ -12,6 +12,10 @@ from campus_job_agent.evidence.candidate_predicates import (
     CandidatePredicateError,
     parse_candidate_predicate,
 )
+from campus_job_agent.schemas.candidate_taxonomy import (
+    CapabilityClaimValue,
+    ExperienceKindValue,
+)
 from campus_job_agent.schemas import (
     CandidateProfile,
     CapabilityAssessment,
@@ -151,8 +155,13 @@ class CandidateProfileProjector:
             if latest.value is None:
                 continue
             level = "unknown"
+            source_label = resolution.canonical_name or raw_label
+            raw_level = None
             if isinstance(latest.value, dict):
-                level = str(latest.value.get("level", "unknown"))
+                normalized = CapabilityClaimValue.model_validate(latest.value)
+                level = normalized.level
+                source_label = normalized.raw_label or source_label
+                raw_level = normalized.raw_level
             if level not in {"unknown", "beginner", "intermediate", "advanced", "expert"}:
                 level = "unknown"
             status = (
@@ -165,7 +174,8 @@ class CandidateProfileProjector:
             result.append(
                 CapabilityAssessment(
                     capability_id=resolution.capability_id,
-                    raw_label=resolution.canonical_name or raw_label,
+                    raw_label=source_label,
+                    raw_level=raw_level,
                     level=level,
                     confidence=max(item.confidence for item in claims),
                     status=status,
@@ -253,10 +263,20 @@ def _project_experiences(
         ]
     result: list[ExperienceRecord] = []
     for experience_id, data in sorted(values.items()):
+        raw_kind = data.get("kind")
+        if raw_kind is None:
+            normalized_kind = ExperienceKindValue(
+                kind="other", context="unspecified", raw_label="unspecified"
+            )
+        else:
+            normalized_kind = ExperienceKindValue.model_validate(raw_kind)
         result.append(
             ExperienceRecord(
                 experience_id=experience_id,
-                kind=data.get("kind", "project"),
+                kind=normalized_kind.kind,
+                context=normalized_kind.context,
+                raw_kind_label=normalized_kind.raw_label,
+                raw_context_label=normalized_kind.raw_context,
                 title=str(data.get("title", experience_id)),
                 description=data.get("description"),
                 responsibilities=[str(value) for value in data.get("responsibilities", [])],

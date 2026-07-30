@@ -392,3 +392,25 @@ Next action:
   integration）；wheel 重新安装，`compileall` 与 `git diff --check` 通过。
 - Gate decision：WP2 Passed；下一工作包为 WP3 Role live source。代码版本保持 0.7.0，
   v0.7.1 整体仍未完成。
+
+## WP1.2 Candidate 经历 Taxonomy 补丁 / 2026-07-30 / working tree（未提交）
+
+- Problem：真实 Tool Calling 已通过 Pydantic，但旧 Candidate schema 未向模型暴露经历 kind、
+  context、capability id/level 的完整固定值；中文经历标签和 `proficient` 被领域 Validator 拒绝，
+  缺失 kind 还可能被 Projector 错默认为 project。
+- Research：参考 MIT、Stanford、Yale、Europass、教育部求职材料，并结合 LangChain structured
+  output 与 Pydantic discriminated union 规范，确定开放原文 + 封闭双轴 taxonomy。
+- Contract：新增 12 类 experience kind、18 类 context 和 raw label；新模型协议改为
+  `claim_kind` discriminated union；capability id/level 也作为 Tool enum 暴露；旧 predicate/value
+  只在迁移边界保留。
+- Semantic failure：首次 v6 真实 run `run-4e139cc7-ab98-4e44-bc38-8b971129d8d8` 虽然 Tool/Pydantic
+  success，却把 C++/Java/Pandas 等强制映射到近似 capability，产生 3 个画像伪冲突。v7 增加
+  exact ontology mapping Prompt 与 Validator 一致性门禁，未建模技能改为 reasoned rejection。
+- Final live E4：`run-a0047b90-e893-4ced-8df8-314cdd0d3838`，cache miss、DeepSeek 非思考
+  Tool Calling、Pydantic success；36 项中 18 accepted、18 reasoned rejected，0 conflict，状态
+  completed，next action=`intent.create`。两段经历正确区分 public-funded 与 academic research，
+  raw label/context 可追溯，九项 Candidate 指标均 1.0。
+- Tests：WP1/WP2 聚焦 41 passed；全量 428 passed in 85.47s；`compileall`、`git diff --check`
+  通过。
+- Boundary：本补丁解决经历分类和固定值暴露，不声称已覆盖荣誉或所有技能 ontology；这些信息
+  保留在原始 Evidence，未建模模型项有 rejection receipt。WP2 保持 Passed，下一工作包仍为 WP3。

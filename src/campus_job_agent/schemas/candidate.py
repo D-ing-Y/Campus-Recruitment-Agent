@@ -12,15 +12,13 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from campus_job_agent.schemas.evidence import utc_now
+from campus_job_agent.schemas.candidate_taxonomy import (
+    CapabilityLevel,
+    ExperienceContext,
+    ExperienceKind,
+)
 
 
-CapabilityLevel = Literal[
-    "unknown",
-    "beginner",
-    "intermediate",
-    "advanced",
-    "expert",
-]
 ProfileFieldStatus = Literal["confirmed", "inferred", "unknown", "conflicted"]
 CompletionReason = Literal[
     "sufficient",
@@ -35,6 +33,7 @@ CompletionReason = Literal[
 class CapabilityAssessment(BaseModel):
     capability_id: str | None = None
     raw_label: str
+    raw_level: str | None = None
     level: CapabilityLevel = "unknown"
     confidence: float = Field(ge=0.0, le=1.0)
     status: ProfileFieldStatus = "inferred"
@@ -54,7 +53,10 @@ class EducationRecord(BaseModel):
 
 class ExperienceRecord(BaseModel):
     experience_id: str
-    kind: Literal["research", "project", "internship", "competition", "other"]
+    kind: ExperienceKind = "other"
+    context: ExperienceContext = "unspecified"
+    raw_kind_label: str | None = None
+    raw_context_label: str | None = None
     title: str
     description: str | None = None
     responsibilities: list[str] = Field(default_factory=list)

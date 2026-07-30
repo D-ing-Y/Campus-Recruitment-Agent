@@ -4,11 +4,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from campus_job_agent.schemas.candidate_taxonomy import (
+    CapabilityId,
+    CapabilityClaimValue,
+    ExperienceKindValue,
+)
 
 
 ClaimType = Literal[
@@ -126,7 +133,7 @@ class EvidenceClaim(BaseModel):
 
 
 class ExtractedClaim(BaseModel):
-    """LLM output before the runtime assigns IDs and extractor metadata."""
+    """Compatibility/runtime Claim before IDs and extractor metadata are assigned."""
 
     predicate: str
     value: Any
@@ -143,8 +150,199 @@ class ExtractedClaim(BaseModel):
         return value
 
 
+class _TypedClaimCandidate(BaseModel):
+    """Fields shared by the model-visible typed Claim variants."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    claim_type: ClaimType
+    evidence_fragment_ids: list[str] = Field(min_length=1)
+    confidence: float = Field(ge=0.0, le=1.0)
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def normalize_confidence_label(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            aliases = {"high": 0.9, "medium": 0.6, "low": 0.3}
+            return aliases.get(value.strip().casefold(), value)
+        return value
+
+
+class CapabilityClaimCandidate(_TypedClaimCandidate):
+    claim_kind: Literal["capability"]
+    capability_id: CapabilityId = Field(
+        description="A versioned capability_id exposed as a closed Tool enum.",
+    )
+    value: CapabilityClaimValue
+
+
+class EducationClaimCandidate(_TypedClaimCandidate):
+    claim_kind: Literal["education"]
+    record_id: str = Field(
+        min_length=1,
+        description="Batch-local label reused for fields of the same education record.",
+    )
+    field: Literal["institution", "degree", "major", "graduation_year"]
+    value: str = Field(min_length=1)
+
+
+class ExperienceKindClaimCandidate(_TypedClaimCandidate):
+    claim_kind: Literal["experience_kind"]
+    record_id: str = Field(
+        min_length=1,
+        description="Batch-local label reused for fields of the same experience record.",
+    )
+    value: ExperienceKindValue
+
+
+class ExperienceTextClaimCandidate(_TypedClaimCandidate):
+    claim_kind: Literal["experience_text"]
+    record_id: str = Field(
+        min_length=1,
+        description="Batch-local label reused for fields of the same experience record.",
+    )
+    field: Literal["title", "description"]
+    value: str = Field(min_length=1)
+
+
+class ExperienceListClaimCandidate(_TypedClaimCandidate):
+    claim_kind: Literal["experience_list"]
+    record_id: str = Field(
+        min_length=1,
+        description="Batch-local label reused for fields of the same experience record.",
+    )
+    field: Literal["responsibilities", "technologies", "outputs", "results"]
+    value: list[str] = Field(min_length=1)
+
+
+class UnsupportedClaimCandidate(_TypedClaimCandidate):
+    claim_kind: Literal["unsupported"]
+    predicate: str = Field(
+        min_length=1,
+        description="Source-faithful label for a fact outside the current Candidate contract.",
+    )
+    value: Any
+
+
+TypedClaimCandidate = Annotated[
+    CapabilityClaimCandidate
+    | EducationClaimCandidate
+    | ExperienceKindClaimCandidate
+    | ExperienceTextClaimCandidate
+    | ExperienceListClaimCandidate
+    | UnsupportedClaimCandidate,
+    Field(discriminator="claim_kind"),
+]
+
 class ClaimExtractionBatch(BaseModel):
-    claims: list[ExtractedClaim] = Field(default_factory=list)
+    """Typed model boundary with deterministic legacy input migration."""
+
+    claims: list[TypedClaimCandidate] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_claims(cls, value: Any) -> Any:
+        if not isinstance(value, dict) or not isinstance(value.get("claims"), list):
+            return value
+        data = dict(value)
+        data["claims"] = [
+            _upgrade_legacy_claim(item) if isinstance(item, dict) else item
+            for item in value["claims"]
+        ]
+        return data
+
+    def to_extracted_claims(self) -> list[ExtractedClaim]:
+        result: list[ExtractedClaim] = []
+        for item in self.claims:
+            common = {
+                "claim_type": item.claim_type,
+                "evidence_fragment_ids": item.evidence_fragment_ids,
+                "confidence": item.confidence,
+            }
+            if isinstance(item, CapabilityClaimCandidate):
+                predicate = f"capability:{item.capability_id}"
+                value = item.value.model_dump(mode="json", exclude_none=True)
+            elif isinstance(item, EducationClaimCandidate):
+                predicate = f"education:{item.record_id}.{item.field}"
+                value = item.value
+            elif isinstance(item, ExperienceKindClaimCandidate):
+                predicate = f"experience:{item.record_id}.kind"
+                value = item.value.model_dump(mode="json", exclude_none=True)
+            elif isinstance(item, ExperienceTextClaimCandidate):
+                predicate = f"experience:{item.record_id}.{item.field}"
+                value = item.value
+            elif isinstance(item, ExperienceListClaimCandidate):
+                predicate = f"experience:{item.record_id}.{item.field}"
+                value = item.value
+            else:
+                predicate = item.predicate
+                value = item.value
+            result.append(ExtractedClaim(predicate=predicate, value=value, **common))
+        return result
+
+
+_EDUCATION_CANDIDATE = re.compile(
+    r"^education:([a-zA-Z0-9][a-zA-Z0-9_-]*)\."
+    r"(institution|degree|major|graduation_year)$"
+)
+_EXPERIENCE_CANDIDATE = re.compile(
+    r"^experience:([a-zA-Z0-9][a-zA-Z0-9_-]*)\."
+    r"(kind|title|description|responsibilities|technologies|outputs|results)$"
+)
+
+
+def _upgrade_legacy_claim(item: dict[str, Any]) -> dict[str, Any]:
+    """Read old cache/fixtures without publishing their Any schema to the model."""
+
+    if "claim_kind" in item:
+        return item
+    predicate = str(item.get("predicate") or "")
+    raw_value = item.get("value")
+    common = {
+        key: item.get(key)
+        for key in ("claim_type", "evidence_fragment_ids", "confidence")
+    }
+    if predicate.startswith("capability:") and predicate.count(":") == 1:
+        capability_id = predicate.split(":", 1)[1]
+        value = dict(raw_value) if isinstance(raw_value, dict) else {"level": raw_value}
+        value.setdefault("raw_label", value.get("label") or capability_id)
+        return {
+            "claim_kind": "capability", "capability_id": capability_id,
+            "value": value, **common,
+        }
+    education = _EDUCATION_CANDIDATE.fullmatch(predicate)
+    if education is not None and isinstance(raw_value, str) and raw_value.strip():
+        return {
+            "claim_kind": "education", "record_id": education.group(1),
+            "field": education.group(2), "value": raw_value, **common,
+        }
+    experience = _EXPERIENCE_CANDIDATE.fullmatch(predicate)
+    if experience is not None:
+        record_id, field = experience.groups()
+        if field == "kind" and isinstance(raw_value, (str, dict)):
+            return {
+                "claim_kind": "experience_kind", "record_id": record_id,
+                "value": raw_value, **common,
+            }
+        if field in {"title", "description"} and isinstance(raw_value, str) and raw_value.strip():
+            return {
+                "claim_kind": "experience_text", "record_id": record_id,
+                "field": field, "value": raw_value, **common,
+            }
+        if (
+            field in {"responsibilities", "technologies", "outputs", "results"}
+            and isinstance(raw_value, list)
+            and raw_value
+            and all(isinstance(value, str) and value.strip() for value in raw_value)
+        ):
+            return {
+                "claim_kind": "experience_list", "record_id": record_id,
+                "field": field, "value": raw_value, **common,
+            }
+    return {
+        "claim_kind": "unsupported", "predicate": predicate or "unsupported",
+        "value": raw_value, **common,
+    }
 
 
 class ValidationReceipt(BaseModel):

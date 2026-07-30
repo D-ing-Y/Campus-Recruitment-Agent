@@ -101,6 +101,22 @@ WP1 全量回归：398 passed in 40.11s，`compileall` 与 `git diff --check` �
 健康检查、真实简历 E4 与断网缓存回放已通过；用户已完成真实画像人工确认。WP1
 退出门禁已满足，但本结论不代表 WP3 已开始或 v0.7.1 整体已完成。
 
+### 4.1 WP1.2 经历 Taxonomy 与 typed Claim 补丁
+
+| Gate | 预期 | 状态 | 证据 |
+| --- | --- | --- | --- |
+| Resume taxonomy | 校招及有工作经验人群的常见经历可表示 | passed | 12 类 kind + 18 类 context + raw label；课程、毕设、论文、纵向、横向、实习/工作项目、个人/开源均有映射 |
+| Tool contract | 固定值进入模型可见 Schema | passed | Pydantic discriminated union；capability id/level 与 experience kind/context 均为 enum |
+| Open world | 未知经历不丢失、不误默认为 project | passed | `other/unspecified + raw_label` 单元与 projector 测试 |
+| Semantic gate | 模型不能把未建模技能强塞进近似 capability | passed | `raw_label -> capability_id` ontology 一致性测试；拒绝原因可检查 |
+| Real DeepSeek | 无缓存、非思考 Tool Calling、Pydantic 与投影通过 | passed | `run-a0047b90-e893-4ced-8df8-314cdd0d3838`；18 accepted/18 reasoned rejected，0 conflict，下一步 `intent.create` |
+| WP2 regression | CareerIntent 与 handoff 不回退 | passed | WP1/WP2 聚焦 41 passed |
+| Full regression | 全项目无回归 | passed | 428 passed in 85.47s；`compileall`、`git diff --check` 通过 |
+
+本补丁保证“经历类型表达差异”不再造成合法经历拒绝，并保证未建模技能有拒绝回执而不是伪造
+capability。荣誉奖项和更细粒度语言/库/工具仍不属于当前 Candidate projection contract；原始 PDF
+仍在 Evidence Store，扩展它们需要独立 taxonomy/ontology 变更，不能把本补丁表述为完整简历语义覆盖。
+
 ## 5. WP2 CareerIntent
 
 | Gate | 预期 | 状态 | 证据 |

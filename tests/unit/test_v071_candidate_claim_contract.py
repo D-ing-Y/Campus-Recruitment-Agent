@@ -4,6 +4,7 @@ import hashlib
 import json
 import sqlite3
 from pathlib import Path
+from typing import get_args
 
 import pytest
 
@@ -15,14 +16,21 @@ from campus_job_agent.evidence import (
     parse_candidate_predicate,
 )
 from campus_job_agent.llm import LLMCache, LLMConfig, LLMProviderError
+from campus_job_agent.ontology import CapabilityOntology
 from campus_job_agent.runtime import ValidationReceipt
 from campus_job_agent.prompts import build_claim_extractor_messages
 from campus_job_agent.schemas import (
+    ClaimExtractionBatch,
     ClaimExtractor,
     EvidenceArtifact,
     EvidenceClaim,
     EvidenceFragment,
     LLMResponse,
+)
+from campus_job_agent.schemas.candidate_taxonomy import (
+    CapabilityId,
+    CapabilityClaimValue,
+    ExperienceKindValue,
 )
 from campus_job_agent.storage import SQLiteRepository
 from campus_job_agent.tools.candidate_profile import ExtractCandidateClaimsTool
@@ -63,7 +71,7 @@ def _receipt(claim: EvidenceClaim, index: int) -> ValidationReceipt:
     )
 
 
-def test_real_model_prompt_forbids_generic_predicates_and_shows_canonical_examples(
+def test_real_model_prompt_exposes_typed_claim_taxonomy(
     tmp_path: Path,
 ) -> None:
     repository = SQLiteRepository(tmp_path / "evidence.sqlite3")
@@ -72,12 +80,150 @@ def test_real_model_prompt_forbids_generic_predicates_and_shows_canonical_exampl
         "content"
     ]
 
-    assert "Never output generic predicates: education, skill" in system
-    assert '"predicate":"education:graduate.institution"' in system
-    assert '"predicate":"experience:depression-project.title"' in system
-    assert '"predicate":"capability:programming.python"' in system
+    assert "Select claim_kind capability, education, experience_kind" in system
+    assert '"claim_kind":"education"' in system
+    assert '"claim_kind":"experience_kind"' in system
+    assert '"claim_kind":"capability"' in system
+    assert "public_funded_research" in system
+    assert "industry_collaboration" in system
+    assert "Never force an unlisted language" in system
+    assert "Emit at most one capability claim for each capability_id" in system
     assert '"confidence":0.9' in system
     assert 'never strings such as "high"' in system
+
+
+def test_tool_schema_exposes_discriminator_and_closed_enums_without_legacy_any() -> None:
+    schema = json.dumps(ClaimExtractionBatch.model_json_schema(), ensure_ascii=False)
+    assert "discriminator" in schema
+    assert "ExtractedClaim" not in schema
+    for value in (
+        "employment", "internship", "research", "project", "campus_activity",
+        "volunteering", "teaching", "coursework", "capstone", "thesis",
+        "public_funded_research", "industry_collaboration", "open_source",
+        "beginner", "intermediate", "advanced", "expert",
+    ):
+        assert value in schema
+    assert set(get_args(CapabilityId)) == {
+        item.capability_id
+        for item in CapabilityOntology.load_default().capabilities
+    }
+
+
+def test_open_world_labels_normalize_without_losing_source_wording() -> None:
+    vertical = ExperienceKindValue.model_validate({
+        "kind": "纵向科研经历", "raw_label": "纵向科研经历"
+    })
+    assert vertical.kind == "research"
+    assert vertical.context == "public_funded_research"
+    assert vertical.raw_label == "纵向科研经历"
+
+    horizontal = ExperienceKindValue.model_validate({
+        "kind": "横向开发经历", "raw_label": "横向开发经历"
+    })
+    assert horizontal.kind == "project"
+    assert horizontal.context == "industry_collaboration"
+
+    unknown = ExperienceKindValue.model_validate({
+        "kind": "跨界探索经历", "raw_label": "跨界探索经历"
+    })
+    assert unknown.kind == "other"
+    assert unknown.context == "unspecified"
+    assert unknown.raw_label == "跨界探索经历"
+
+    level = CapabilityClaimValue.model_validate({
+        "level": "proficient", "raw_label": "SQL"
+    })
+    assert level.level == "unknown"
+    assert level.raw_level == "proficient"
+
+
+def test_typed_claims_project_canonical_taxonomy_and_preserve_raw_labels(
+    tmp_path: Path,
+) -> None:
+    batch = ClaimExtractionBatch.model_validate({"claims": [
+        {
+            "claim_kind": "experience_kind", "record_id": "vertical-project",
+            "value": {
+                "kind": "research", "context": "public_funded_research",
+                "raw_label": "纵向科研经历",
+            },
+            "claim_type": "observed_fact",
+            "evidence_fragment_ids": ["fragment-candidate-contract"],
+            "confidence": 0.95,
+        },
+        {
+            "claim_kind": "experience_text", "record_id": "vertical-project",
+            "field": "title", "value": "多模态行为研究",
+            "claim_type": "observed_fact",
+            "evidence_fragment_ids": ["fragment-candidate-contract"],
+            "confidence": 0.95,
+        },
+        {
+            "claim_kind": "experience_text", "record_id": "unclassified",
+            "field": "title", "value": "未标注类型的作品",
+            "claim_type": "observed_fact",
+            "evidence_fragment_ids": ["fragment-candidate-contract"],
+            "confidence": 0.8,
+        },
+        {
+            "claim_kind": "capability", "capability_id": "database.sql",
+            "value": {"level": "proficient", "raw_label": "SQL"},
+            "claim_type": "observed_fact",
+            "evidence_fragment_ids": ["fragment-candidate-contract"],
+            "confidence": 0.85,
+        },
+    ]})
+    extracted = batch.to_extracted_claims()
+    assert extracted[0].value == {
+        "kind": "research", "context": "public_funded_research",
+        "raw_label": "纵向科研经历",
+    }
+    assert extracted[3].value == {
+        "level": "unknown", "raw_label": "SQL", "raw_level": "proficient",
+    }
+
+    repository = SQLiteRepository(tmp_path / "evidence.sqlite3")
+    fragment = _seed_fragment(repository, tmp_path)
+    validator = CandidateClaimValidator(repository)
+    claims = [
+        EvidenceClaim(
+            subject_id="candidate-owner", predicate=item.predicate, value=item.value,
+            claim_type=item.claim_type, evidence_fragment_ids=[fragment.fragment_id],
+            confidence=item.confidence,
+            extractor=ClaimExtractor(provider="fixture", model="typed"),
+            prompt_version="candidate_claim_extractor_v6",
+            schema_version="candidate_claim_v0.7.1.1",
+        )
+        for item in extracted
+    ]
+    validated = [
+        validator.validate(
+            claim, {fragment.artifact_id}, expected_owner_id="owner"
+        )
+        for claim in claims
+    ]
+    repository.save_candidate_claim_batch(
+        [(claim, _receipt(claim, index)) for index, claim in enumerate(validated)],
+        rejected_receipts=[],
+    )
+    snapshot = CandidateProfileProjector(repository).project(
+        "candidate-owner", repository.list_active_claims("candidate-owner")
+    )
+    experiences = {
+        item["title"]: item for item in snapshot.profile_data["experiences"]
+    }
+    research = experiences["多模态行为研究"]
+    assert research["kind"] == "research"
+    assert research["context"] == "public_funded_research"
+    assert research["raw_kind_label"] == "纵向科研经历"
+    assert experiences["未标注类型的作品"]["kind"] == "other"
+    assert experiences["未标注类型的作品"]["context"] == "unspecified"
+
+    sql = snapshot.profile_data["capabilities"][0]
+    assert sql["capability_id"] == "database.sql"
+    assert sql["level"] == "unknown"
+    assert sql["raw_label"] == "SQL"
+    assert sql["raw_level"] == "proficient"
 
 
 def test_v071_predicate_contract_matches_projector_shape(tmp_path: Path) -> None:
@@ -108,6 +254,36 @@ def test_v071_predicate_contract_matches_projector_shape(tmp_path: Path) -> None
             validator.validate(
                 _claim(fragment, predicate, value),
                 {fragment.artifact_id}, expected_owner_id="owner",
+            )
+        assert captured.value.reason_code == reason
+
+
+def test_current_capability_claim_requires_raw_label_to_match_ontology(
+    tmp_path: Path,
+) -> None:
+    repository = SQLiteRepository(tmp_path / "evidence.sqlite3")
+    fragment = _seed_fragment(repository, tmp_path)
+    validator = CandidateClaimValidator(repository)
+
+    accepted = _claim(
+        fragment,
+        "capability:programming.python",
+        {"level": "advanced", "raw_label": "Python", "raw_level": "熟练"},
+    ).model_copy(update={"schema_version": "candidate_claim_v0.7.1.2"})
+    assert validator.validate(
+        accepted, {fragment.artifact_id}, expected_owner_id="owner"
+    ).predicate == "capability:programming.python"
+
+    for predicate, raw_label, reason in (
+        ("capability:engineering.backend", "C++", "unmapped_capability_label"),
+        ("capability:database.sql", "Python", "capability_id_mismatch"),
+    ):
+        claim = _claim(
+            fragment, predicate, {"level": "intermediate", "raw_label": raw_label}
+        ).model_copy(update={"schema_version": "candidate_claim_v0.7.1.2"})
+        with pytest.raises(CandidateClaimValidationError) as captured:
+            validator.validate(
+                claim, {fragment.artifact_id}, expected_owner_id="owner"
             )
         assert captured.value.reason_code == reason
 

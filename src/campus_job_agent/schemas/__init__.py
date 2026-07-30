@@ -8,6 +8,14 @@ from campus_job_agent.schemas.candidate import (
     ExperienceRecord,
     ResponsibilityBoundary,
 )
+from campus_job_agent.schemas.candidate_taxonomy import (
+    CapabilityId,
+    CapabilityClaimValue,
+    CapabilityLevel,
+    ExperienceContext,
+    ExperienceKind,
+    ExperienceKindValue,
+)
 from campus_job_agent.schemas.candidate_graph import (
     BudgetState,
     CandidateProfileGraphState,
@@ -202,6 +210,12 @@ __all__ = [
     "ValidationReceipt",
     "ProfileSnapshot",
     "CandidateProfile",
+    "CapabilityClaimValue",
+    "CapabilityId",
+    "CapabilityLevel",
+    "ExperienceKind",
+    "ExperienceContext",
+    "ExperienceKindValue",
     "CapabilityAssessment",
     "EducationRecord",
     "ExperienceRecord",

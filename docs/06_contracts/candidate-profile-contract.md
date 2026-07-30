@@ -271,8 +271,19 @@ experience:<record_id>.kind|title|description|responsibilities|technologies|outp
   不同模型临时 ID 必须得到相同的持久化 ID，不得依赖列表位置。
 - `education:<record_id>.graduation_year` 在身份计算与 Claim 构建前归一化为四位年份；
   例如 `2024-07` 与 `2024` 都持久化为 `2024`，避免粒度差异产生伪冲突。
-- capability value 必须包含合法 `level`；education 标量字段必须是非空字符串；experience 的
-  `kind` 使用既有枚举，集合字段必须为非空字符串数组。
+- capability value 必须包含合法 canonical `level`，并可携带 `raw_label/raw_level`；未知熟练度
+  使用 `level=unknown` 保留原文，不丢弃 capability。education 标量字段必须是非空字符串。
+- `capability_id` 与 level 一样必须作为 Tool JSON Schema 的显式 enum 暴露；模型不得把未被
+  CapabilityOntology 表示的语言、库或工具强行映射到语义近似 ID。Validator 必须检查
+  `raw_label -> capability_id` 的确定性一致性，不匹配时生成拒绝回执而不是制造画像冲突。
+- experience 的 `kind` 从稳定大类枚举中选择；`experience.kind` 新值使用
+  `{kind, context, raw_label, raw_context?}`，旧字符串值只用于 replay 兼容。`kind` 表示经历大类，
+  `context` 表示 coursework/capstone/thesis/academic research/public-funded research/industry
+  collaboration/internship/employment/personal/open-source 等发生场景。无法映射时使用
+  `other/unspecified` 并保留 raw label，不得丢弃或默认成 `project`。集合字段必须为非空字符串数组。
+- 新模型输出使用以 `claim_kind` 为 discriminator 的 typed union，将 capability level、experience
+  kind/context 和 text/list value 类型暴露给 Tool JSON Schema；`ExtractedClaim(predicate, value)`
+  仅保留为领域 Claim 转换与旧 cache/fixture 兼容边界。
 - `education.<field>`、`education:<field>`、`experiences[<id>].<field>` 仅作为 v0.4 历史 Claim 的
   replay 兼容语法；v0.7.1 模型输出与新人工 Claim 不得继续产生这些别名。
 - 没有确定性投影语义的 predicate 必须产生 rejected ValidationReceipt，不能进入 active Candidate

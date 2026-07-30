@@ -34,6 +34,9 @@ v0.7.1 的唯一目标是把现有 v0.3-v0.7 能力从“独立子图与离线�
 - Eval plan：`docs/07_evaluation/v0.7.1-eval-plan.md`
 - WP1.1 Eval plan：`docs/07_evaluation/v0.7.1-wp1.1-eval-plan.md`
 - WP1.1 Eval report：`docs/07_evaluation/v0.7.1-wp1.1-eval-report.md`
+- WP1.2 经历 Taxonomy 补丁：`docs/03_requirements/v0.7.1-wp1.2-candidate-experience-taxonomy.md`、
+  RFC-0011、ADR-0011、Candidate Profile Contract 与
+  `docs/07_evaluation/v0.7.1-wp1.2-eval-report.md`
 - WP2 文档包：`docs/03_requirements/v0.7.1-wp2-career-intent-intake.md`、RFC-0010、ADR-0010 与
   `docs/06_contracts/career-intent-contract.md`
 - WP2 Eval report：`docs/07_evaluation/v0.7.1-wp2-eval-report.md`

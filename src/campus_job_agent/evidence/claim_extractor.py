@@ -73,7 +73,9 @@ class ClaimExtractorService:
             schema_version=CLAIM_SCHEMA_VERSION,
             retry_builder=retry,
         )
-        normalized_claims = _normalize_candidate_records(batch.claims)
+        normalized_claims = _normalize_candidate_records(
+            batch.to_extracted_claims()
+        )
         extractor = ClaimExtractor(provider=self.provider.name, model=self.config.model)
         claims = [
             EvidenceClaim(
