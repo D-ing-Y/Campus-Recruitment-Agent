@@ -8,6 +8,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, model_validator
 
+from campus_job_agent.schemas.evidence import ValidationReceipt
+
 
 SCHEMA_VERSION = "v0.7.1"
 SessionStatus = Literal["active", "interrupted", "blocked", "completed", "cancelled", "failed"]
@@ -140,22 +142,10 @@ class LLMCallReceipt(BaseModel):
     validation_result: str | None = None
     fallback: str | None = None
     error_ref: str | None = None
-
-
-class ValidationReceipt(BaseModel):
-    receipt_id: str = Field(default_factory=lambda: new_id("validation"))
-    schema_version: str = SCHEMA_VERSION
-    run_id: str
-    workflow: str
-    node: str
-    item_index: int
-    candidate_hash: str
-    subject_ref: str
-    fragment_ids: list[str] = Field(default_factory=list)
-    predicate: str | None = None
-    status: Literal["accepted", "rejected", "duplicate", "retryable_error", "fatal_error"]
-    reason_codes: list[str] = Field(default_factory=list)
-    persisted_claim_id: str | None = None
+    integration: str | None = None
+    requested_strategy: str | None = None
+    effective_strategy: str | None = None
+    capabilities: dict[str, Any] | None = None
 
 
 class ErrorEvent(BaseModel):

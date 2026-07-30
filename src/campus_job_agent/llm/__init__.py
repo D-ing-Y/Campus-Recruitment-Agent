@@ -4,6 +4,13 @@ from campus_job_agent.llm.base import LLMConfigError, LLMProvider, LLMProviderEr
 from campus_job_agent.llm.cache import LLMCache
 from campus_job_agent.llm.config import load_llm_config
 from campus_job_agent.llm.mock import MockLLMProvider
+from campus_job_agent.llm.langchain_provider import (
+    LangChainChatProvider,
+    build_llm_provider,
+    infer_model_capabilities,
+    infer_model_integration,
+    resolve_structured_output_strategy,
+)
 from campus_job_agent.llm.structured import (
     StructuredOutputError,
     parse_search_goal_with_llm,
@@ -19,6 +26,11 @@ __all__ = [
     "LLMCache",
     "load_llm_config",
     "MockLLMProvider",
+    "LangChainChatProvider",
+    "build_llm_provider",
+    "infer_model_capabilities",
+    "infer_model_integration",
+    "resolve_structured_output_strategy",
     "OpenAICompatibleProvider",
     "StructuredOutputError",
     "parse_search_goal_with_llm",

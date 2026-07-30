@@ -181,7 +181,7 @@ def _prompt_for_gap(gap: InformationGap) -> str:
             "请区分个人贡献与团队整体成果。"
         )
     if gap.category == "education":
-        return "请说明你的院校、专业、学位及预计毕业年份；不确定的部分可以跳过。"
+        return "请说明你的院校名称；不确定或不愿提供时可以跳过。"
     if gap.category == "conflict":
         return "现有材料对该字段表述不一致。请说明你认可的当前事实及需要纠正的旧表述。"
     return f"请补充与“{gap.description}”直接相关、可由你确认的信息；可以跳过。"

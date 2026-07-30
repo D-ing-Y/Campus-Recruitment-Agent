@@ -2,11 +2,23 @@
 
 import json
 
+from campus_job_agent.evidence.candidate_predicates import (
+    CandidatePredicateError,
+    parse_candidate_predicate,
+    validate_candidate_value,
+)
+from campus_job_agent.ontology import CapabilityOntology
 from campus_job_agent.schemas import EvidenceClaim
 from campus_job_agent.storage.base import EvidenceRepository
 
 
 class ClaimValidationError(ValueError):
+    def __init__(self, message: str, *, reason_code: str = "invalid_evidence_reference") -> None:
+        super().__init__(message)
+        self.reason_code = reason_code
+
+
+class CandidateClaimValidationError(ClaimValidationError):
     pass
 
 
@@ -73,6 +85,50 @@ class ClaimValidator:
         return self.repository.save_claim(
             self.validate(claim, allowed_artifact_ids, expected_owner_id)
         )
+
+
+class CandidateClaimValidator(ClaimValidator):
+    """Validate that a Candidate Claim is both evidenced and projectable."""
+
+    def __init__(
+        self, repository: EvidenceRepository, ontology: CapabilityOntology | None = None
+    ) -> None:
+        super().__init__(repository)
+        self.ontology = ontology or CapabilityOntology.load_default()
+
+    def validate(
+        self,
+        claim: EvidenceClaim,
+        allowed_artifact_ids: set[str] | None = None,
+        expected_owner_id: str | None = None,
+    ) -> EvidenceClaim:
+        try:
+            super().validate(claim, allowed_artifact_ids, expected_owner_id)
+            parsed = parse_candidate_predicate(
+                claim.predicate,
+                allow_legacy=claim.schema_version != "candidate_claim_v0.7.1",
+            )
+            if (
+                parsed.kind == "capability"
+                and not parsed.legacy
+                and self.ontology.get(parsed.capability_id or "") is None
+            ):
+                raise CandidateClaimValidationError(
+                    f"unknown capability_id: {parsed.capability_id}",
+                    reason_code="unknown_capability_id",
+                )
+            validate_candidate_value(parsed, claim.value)
+        except CandidateClaimValidationError:
+            raise
+        except CandidatePredicateError as exc:
+            raise CandidateClaimValidationError(
+                str(exc), reason_code=exc.reason_code
+            ) from exc
+        except ClaimValidationError as exc:
+            raise CandidateClaimValidationError(
+                str(exc), reason_code=exc.reason_code
+            ) from exc
+        return claim
 
 
 def _reject_non_json(value: object) -> None:

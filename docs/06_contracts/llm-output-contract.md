@@ -351,3 +351,22 @@ feedback_diagnosis_v1 / schema v0.7
 
 cache key 包含 input/event/fragment canonical hash、prompt/schema/policy version。不得缓存完整私人面试
 记录、未脱敏文件或 checkpoint resume 正文。
+
+## v0.7.1 Candidate Claim Extractor
+
+```text
+candidate_claim_extractor_v5 / candidate_claim_v0.7.1
+```
+
+模型只能输出 Candidate contract 第 10 节列出的三类 predicate。Prompt 必须提供当前 capability ID
+allowlist、字段 allowlist、稳定 record ID 规则和逐字段原子 Claim 示例。模型输出仍先按通用 JSON
+schema 解析；predicate、value、owner、fragment scope 和 projector support 由确定性 Candidate
+validator 逐项裁决，以便 schema-valid/domain-invalid item 也能形成 rejected receipt。
+
+`confidence` 的权威 JSON shape 是 `0.0..1.0` 数字，Prompt 必须给出完整 Claim 对象示例，
+不得用 `"high"/"medium"/"low"` 作为正式输出。为吸收 Provider 常见的可恢复格式偏差，通用
+schema 边界可在其他字段合法时将这三个精确别名确定性归一化为 `0.9/0.6/0.3`；
+其他字符串或超界数值仍必须 schema validation failed。
+
+模型不得输出 contact、award、任意 profile path、完整简历摘要或没有投影语义的扩展字段。一个 item
+不合法不得使其他 item 的验证证据消失；所有 item 都必须出现在 ValidationReceipt 集合中。

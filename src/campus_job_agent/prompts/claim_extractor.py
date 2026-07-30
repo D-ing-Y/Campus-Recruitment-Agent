@@ -2,11 +2,12 @@
 
 import json
 
+from campus_job_agent.ontology import CapabilityOntology
 from campus_job_agent.schemas import EvidenceFragment
 
 CLAIM_PROMPT_NAME = "candidate_claim_extractor"
-CLAIM_PROMPT_VERSION = "candidate_claim_extractor_v2"
-CLAIM_SCHEMA_VERSION = "v0.4"
+CLAIM_PROMPT_VERSION = "candidate_claim_extractor_v5"
+CLAIM_SCHEMA_VERSION = "candidate_claim_v0.7.1"
 
 
 def build_claim_extractor_messages(
@@ -22,19 +23,39 @@ def build_claim_extractor_messages(
         }
         for fragment in fragments
     ]
+    capability_ids = [
+        item.capability_id
+        for item in CapabilityOntology.load_default().capabilities
+    ]
     return [
         {
             "role": "system",
             "content": (
-                "CLAIM_EXTRACTOR_V04\n"
+                "CLAIM_EXTRACTOR_V071\n"
                 "You extract atomic candidate facts only from supplied evidence. "
                 "Return one JSON object with key claims. Every claim must cite at "
                 "least one supplied fragment_id. Never invent facts. Allowed "
                 "claim_type: observed_fact, user_reported, model_inference, "
-                "feedback_signal. Use capability:<label> for explicit skills; "
-                "education.<field> for explicit education; and "
-                "experiences[<id>].<field> for project or work evidence. A project "
-                "title does not prove an individual responsibility."
+                "feedback_signal. Use only capability:<capability_id>, "
+                "education:<stable_record_id>.<field>, or "
+                "experience:<stable_record_id>.<field>. Education fields are "
+                "institution, degree, major, graduation_year. Experience fields are "
+                "kind, title, description, responsibilities, technologies, outputs, results. "
+                "List fields must be JSON arrays of non-empty strings. Reuse the same stable "
+                "record_id for fields from one record. A project title does not prove an "
+                "individual responsibility. Do not output contact, award, or arbitrary paths. "
+                "Never output generic predicates: education, skill, project_experience, "
+                "research_experience, experience, project, or capability. Split every record "
+                "into atomic field claims. Every claim object must also contain claim_type, "
+                "evidence_fragment_ids, and confidence. confidence must be a JSON number from "
+                '0.0 through 1.0, for example "confidence":0.9; never strings such as "high". '
+                "Canonical predicate/value examples: "
+                '{"predicate":"education:graduate.institution","value":"Example University","claim_type":"observed_fact","evidence_fragment_ids":["fragment-id"],"confidence":0.9}; '
+                '{"predicate":"experience:depression-project.title","value":"Multimodal Project"}; '
+                '{"predicate":"experience:depression-project.responsibilities","value":["Implemented model"]}; '
+                '{"predicate":"capability:programming.python","value":{"level":"advanced"}}. '
+                "Replace example values only with facts directly supported by the supplied fragments. "
+                f"Allowed capability_id values: {', '.join(capability_ids)}."
             ),
         },
         {

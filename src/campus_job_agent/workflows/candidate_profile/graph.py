@@ -92,7 +92,8 @@ class CandidateProfileGraphRuntime:
             ) from exc
 
     def resume(
-        self, *, thread_id: str, response: HumanInteractionResponse | dict[str, Any]
+        self, *, thread_id: str, response: HumanInteractionResponse | dict[str, Any],
+        run_id: str | None = None,
     ) -> dict[str, Any]:
         payload = (
             response.model_dump(mode="json")
@@ -127,6 +128,11 @@ class CandidateProfileGraphRuntime:
                     "idempotency_conflict: response_id has a different payload"
                 )
             return values
+        if run_id is not None:
+            self.app.update_state(
+                {"configurable": {"thread_id": thread_id}},
+                {"run_id": run_id},
+            )
         try:
             return self.app.invoke(
                 Command(resume=payload),
@@ -139,6 +145,21 @@ class CandidateProfileGraphRuntime:
 
     def get_state(self, thread_id: str) -> Any:
         return self.app.get_state({"configurable": {"thread_id": thread_id}})
+
+    def authorize_upload_paths(self, thread_id: str, file_paths: list[str]) -> None:
+        """Add roots for files explicitly supplied through the application boundary."""
+        if not file_paths:
+            return
+        current = self.get_state(thread_id)
+        values = dict(current.values or {})
+        roots = _stable_unique([
+            *[str(value) for value in values.get("allowed_path_roots", [])],
+            *[str(Path(value).expanduser().resolve().parent) for value in file_paths],
+        ])
+        self.app.update_state(
+            {"configurable": {"thread_id": thread_id}},
+            {"allowed_path_roots": roots},
+        )
 
 
 def open_sqlite_checkpointer(
@@ -190,7 +211,9 @@ def create_candidate_profile_state(
         "processed_artifact_ids": [],
         "fragment_ids": [],
         "processed_fragment_ids": [],
+        "fragment_processing": {},
         "claim_ids": [],
+        "validation_receipts": [],
         "unsupported_artifact_ids": [],
         "candidate_profile_snapshot_id": None,
         "sufficiency_assessment": None,
@@ -468,6 +491,7 @@ class _CandidateProfileNodes:
         result, counters = self._call_tool(
             "evidence.extract_candidate_claims",
             {
+                "run_id": state["run_id"],
                 "subject_id": state["candidate_id"],
                 "owner_id": state["user_id"],
                 "fragment_ids": new_fragments,
@@ -489,6 +513,9 @@ class _CandidateProfileNodes:
             "llm_calls": llm_calls,
             "trace": [_trace("extract_and_validate_claims", state, counters)],
         }
+        record = result.records[0] if result.records else {}
+        update["validation_receipts"] = record.get("validation_receipts", [])
+        update["fragment_processing"] = record.get("fragment_processing", {})
         if result.status == "failed":
             update["errors"] = [_tool_error("extract_and_validate_claims", result)]
             return update
@@ -737,7 +764,7 @@ class _CandidateProfileNodes:
         )
         interaction_round = counters.interaction_rounds + 1
         request_id = _stable_hash(
-            "hir",
+            "request",
             [
                 state["thread_id"],
                 interaction_round,
@@ -1053,7 +1080,11 @@ def _tool_error(node: str, result: ToolResult) -> dict[str, Any]:
         "message": result.error or f"{result.tool_name} failed",
         "retryable": bool(result.metadata.get("retryable")),
         "needs_user_action": bool(result.metadata.get("needs_user_action")),
-        "fatal": error_type in {"storage_error", "checkpoint_error"},
+        "fatal": error_type in {
+            "storage_error", "checkpoint_error", "llm_output_error",
+            "validation_error", "permission_denied", "network_timeout",
+            "rate_limited", "provider_error", "auth_required",
+        },
     }
 
 

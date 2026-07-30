@@ -231,7 +231,7 @@ def _deterministic_gaps(
         gaps.append(
             _gap(
                 "gap:education",
-                "education",
+                "education:primary.institution",
                 "education",
                 "Education background is not supported by current evidence.",
                 0.65,
@@ -280,7 +280,7 @@ def _deterministic_gaps(
         gaps.append(
             _gap(
                 f"gap:experience.{experience_id}.responsibility",
-                f"experiences[{experience_id}].responsibilities",
+                f"experience:{experience_id}.responsibilities",
                 "responsibility_boundary",
                 "The candidate's personal responsibility is unclear relative to team output.",
                 0.95,

@@ -31,7 +31,7 @@ class CapabilityOntology(BaseModel):
     def resolve(self, raw_label: str) -> CapabilityResolution:
         normalized = _normalize(raw_label)
         for item in self.capabilities:
-            names = [item.canonical_name, *item.aliases]
+            names = [item.capability_id, item.canonical_name, *item.aliases]
             if normalized in {_normalize(name) for name in names}:
                 return CapabilityResolution(
                     raw_label=raw_label,
@@ -40,6 +40,12 @@ class CapabilityOntology(BaseModel):
                     matched=True,
                 )
         return CapabilityResolution(raw_label=raw_label)
+
+    def get(self, capability_id: str) -> CapabilityEntry | None:
+        return next(
+            (item for item in self.capabilities if item.capability_id == capability_id),
+            None,
+        )
 
 
 def _normalize(value: str) -> str:

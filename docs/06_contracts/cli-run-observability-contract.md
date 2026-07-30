@@ -319,3 +319,35 @@ JSON 模式最少返回：
 - 旧 Mini Runtime `run` 命令保留时必须标记 legacy，输出不得称为完整 campus workflow。
 - 新事件不要求迁移历史 trace；历史 Run 以 schema/version 区分。
 - 各领域 contract 优先；本契约遇到冲突时不得放宽 Evidence、Human、Source 或 Profile 安全边界。
+
+## 16. CLI UI 与 ModelProviderProfile
+
+真实 TTY 下，无子命令进入项目 CLI UI；非 TTY 不读取 stdin，继续返回安全引导。CLI UI 当前只开放
+Model 配置，所有操作调用 `ModelProfileService`，不得在 UI 中直接读写 SQLite 或 secret 文件。
+
+`ModelProviderProfile` 对外采用 CC Switch 风格字段：
+
+```text
+id, name, settingsConfig, websiteUrl, category, createdAt, sortIndex,
+notes, icon, iconColor, isCurrent
+```
+
+不变量：
+
+- SQLite 是 Provider 元数据/current 状态的 SSOT；切换使用单事务，最多一个 current；
+- 枚举菜单选择必须显式输入，不设置默认占位值；
+- Add Provider 中可推导的自由文本字段必须以 `Label : dim-default` 展示，不使用方括号；空输入接受
+  默认值，首个非空输入触发整行重绘并完整移除默认占位值；
+- 布尔确认统一显示 `[Y/n]` 或 `[y/N]`，空输入选择大写项，显式输入大小写不敏感；
+- Provider ID 默认由 preset 生成，冲突时使用稳定数字后缀递增，不要求普通用户理解内部主键；
+- 内置 `mock-default` 保证首次启动可用；current Provider 不能删除；
+- `settingsConfig.credential_ref` 是安全引用，不是 key；
+- API key 文件目录 `0700`、文件 `0600`，写入使用临时文件、fsync 和原子替换；
+- `model add/edit` 只从隐藏 prompt 或 `--api-key-stdin` 读取 key，不接受 `--api-key` 参数；
+- `model edit --api-key-stdin` 轮换 key 时，若 Provider 元数据更新失败，必须恢复旧 key；
+- `model list/show/doctor/test` 的 JSON 和 human 输出不得包含 secret payload；
+- `model test` 只发送最小健康检查，不发送简历、README 或其他 Evidence；
+- `settingsConfig.timeout_seconds` 可由 add/edit/UI 配置；DeepSeek preset 默认 90 秒；
+- `httpx.TimeoutException` 映射 `network_timeout/retryable=true`，401/403 映射 `auth_required`，429 映射
+  `rate_limited/retryable=true`；Candidate 必须保留该分类并返回外部依赖 exit 4；
+- `--json` 不启动交互 UI；需要输入却未提供 stdin 时返回 `invalid_input/2`。

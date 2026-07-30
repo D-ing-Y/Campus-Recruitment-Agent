@@ -26,6 +26,7 @@ class MockLLMProvider:
         if request.messages and (
             "CLAIM_EXTRACTOR_V03" in request.messages[0]["content"]
             or "CLAIM_EXTRACTOR_V04" in request.messages[0]["content"]
+            or "CLAIM_EXTRACTOR_V071" in request.messages[0]["content"]
         ):
             if self.mode == "claim_schema_error_then_valid" and self.call_count == 1:
                 return self._response(
@@ -83,15 +84,15 @@ def _valid_claims(messages: list[dict[str, str]]) -> dict:
     claims = []
     for fragment in fragments:
         text = str(fragment.get("text", ""))
-        labels = [
-            name
-            for name in ["Python", "LangGraph", "RAG", "LLM"]
-            if name.lower() in text.lower()
-        ]
+        capabilities = {
+            "Python": "programming.python", "LangGraph": "agent.langgraph",
+            "RAG": "ai.rag", "LLM": "ai.llm",
+        }
+        labels = [name for name in capabilities if name.lower() in text.lower()]
         claims.extend(
             [
                 {
-                    "predicate": f"capability:{label}",
+                    "predicate": f"capability:{capabilities[label]}",
                     "value": {"label": label, "level": "unknown"},
                     "claim_type": "observed_fact",
                     "evidence_fragment_ids": [fragment["fragment_id"]],
@@ -104,7 +105,7 @@ def _valid_claims(messages: list[dict[str, str]]) -> dict:
         if "education:" in lower or "university" in lower or "大学" in text:
             claims.append(
                 {
-                    "predicate": "education.institution",
+                    "predicate": "education:primary.institution",
                     "value": _line_value(text, ["university", "大学", "education:"]),
                     "claim_type": "observed_fact",
                     "evidence_fragment_ids": [fragment["fragment_id"]],
@@ -115,7 +116,7 @@ def _valid_claims(messages: list[dict[str, str]]) -> dict:
         if year and ("graduat" in lower or "毕业" in text):
             claims.append(
                 {
-                    "predicate": "education.graduation_year",
+                    "predicate": "education:primary.graduation_year",
                     "value": year,
                     "claim_type": "observed_fact",
                     "evidence_fragment_ids": [fragment["fragment_id"]],
@@ -126,14 +127,14 @@ def _valid_claims(messages: list[dict[str, str]]) -> dict:
             claims.extend(
                 [
                     {
-                        "predicate": "experiences[project].kind",
+                        "predicate": "experience:project.kind",
                         "value": "project",
                         "claim_type": "observed_fact",
                         "evidence_fragment_ids": [fragment["fragment_id"]],
                         "confidence": 0.95,
                     },
                     {
-                        "predicate": "experiences[project].title",
+                        "predicate": "experience:project.title",
                         "value": "Documented project",
                         "claim_type": "observed_fact",
                         "evidence_fragment_ids": [fragment["fragment_id"]],
@@ -144,8 +145,8 @@ def _valid_claims(messages: list[dict[str, str]]) -> dict:
         if "responsibilit" in lower or "负责" in text or "implemented" in lower:
             claims.append(
                 {
-                    "predicate": "experiences[project].responsibilities",
-                    "value": _responsibility_value(text),
+                    "predicate": "experience:project.responsibilities",
+                    "value": [_responsibility_value(text)],
                     "claim_type": "observed_fact",
                     "evidence_fragment_ids": [fragment["fragment_id"]],
                     "confidence": 0.85,

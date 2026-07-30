@@ -11,6 +11,7 @@ from pydantic import BaseModel, ValidationError
 
 from campus_job_agent.llm.base import LLMProvider, LLMProviderError
 from campus_job_agent.llm.cache import LLMCache
+from campus_job_agent.llm.langchain_provider import resolve_structured_output_strategy
 from campus_job_agent.prompts import (
     PROMPT_NAME,
     PROMPT_VERSION,
@@ -31,10 +32,13 @@ class StructuredOutputError(Exception):
         error_type: str,
         message: str,
         call_records: list[LLMCallRecord] | None = None,
+        *,
+        retryable: bool = False,
     ) -> None:
         super().__init__(message)
         self.error_type = error_type
         self.call_records = call_records or []
+        self.retryable = retryable
 
 
 def parse_structured_output(
@@ -64,6 +68,7 @@ def parse_structured_output(
         retry_builder=retry_builder,
         normalizer=normalizer,
         retry_count=0,
+        cache_aliases=[],
     )
 
 
@@ -114,8 +119,33 @@ def _parse_with_messages(
     retry_builder: RetryBuilder | None,
     normalizer: Normalizer[StructuredT] | None,
     retry_count: int,
+    cache_aliases: list[str],
 ) -> tuple[StructuredT, list[LLMCallRecord]]:
     started = perf_counter()
+    requested_strategy = config.structured_output_strategy
+    capabilities = getattr(provider, "capabilities", None)
+    integration = config.integration or getattr(provider, "integration", None)
+    if capabilities is not None:
+        try:
+            effective_strategy = resolve_structured_output_strategy(
+                requested_strategy, capabilities
+            )
+        except ValueError as exc:
+            raise StructuredOutputError(
+                "unsupported_capability", str(exc), retryable=False
+            ) from exc
+        capability_fingerprint = capabilities.model_dump_json()
+        capability_snapshot = capabilities.model_dump(mode="json")
+    elif provider.name == "mock":
+        effective_strategy = "mock"
+        capability_fingerprint = "mock"
+        capability_snapshot = None
+        integration = integration or "mock"
+    else:
+        # Compatibility-only providers retain their historic JSON contract.
+        effective_strategy = "json_mode"
+        capability_fingerprint = "legacy-json-mode"
+        capability_snapshot = None
     cache_key = cache.make_cache_key(
         provider=provider.name,
         model=config.model,
@@ -123,6 +153,9 @@ def _parse_with_messages(
         prompt_version=prompt_version,
         schema_version=schema_version,
         messages=messages,
+        integration=integration,
+        structured_output_strategy=effective_strategy,
+        capability_fingerprint=capability_fingerprint,
     )
     cache_value: dict[str, Any] | None = None
     cache_error: str | None = None
@@ -131,9 +164,14 @@ def _parse_with_messages(
 
     usage: dict[str, Any] | None = None
     cache_hit = cache_value is not None
+    fallback_reason: str | None = None
     if cache_value is not None:
         response_text = str(cache_value.get("raw_output", ""))
         usage = cache_value.get("usage")
+        effective_strategy = str(
+            cache_value.get("structured_output_strategy") or effective_strategy
+        )
+        fallback_reason = cache_value.get("fallback_reason")
     else:
         request = LLMRequest(
             messages=messages,
@@ -142,8 +180,17 @@ def _parse_with_messages(
             timeout_seconds=config.timeout_seconds,
         )
         try:
-            response = provider.generate(request)
+            structured_generate = getattr(provider, "generate_structured", None)
+            if callable(structured_generate):
+                response = structured_generate(
+                    request,
+                    output_model,
+                    requested_strategy=requested_strategy,
+                )
+            else:
+                response = provider.generate(request)
         except LLMProviderError as exc:
+            error_type = exc.error_type
             record = _record(
                 config,
                 provider.name,
@@ -155,31 +202,51 @@ def _parse_with_messages(
                 retry_count,
                 started,
                 "failed",
-                "provider_error",
+                error_type,
                 str(exc),
                 None,
+                integration,
+                requested_strategy,
+                effective_strategy,
+                fallback_reason,
+                capability_snapshot,
             )
-            raise StructuredOutputError("provider_error", str(exc), [record]) from exc
+            raise StructuredOutputError(
+                error_type,
+                str(exc),
+                [record],
+                retryable=exc.retryable,
+            ) from exc
         response_text = response.text
         usage = response.usage
+        effective_strategy = response.effective_strategy or effective_strategy
+        fallback_reason = response.fallback_reason
 
     parsed, validation_error = _parse_and_validate(response_text, output_model)
     if parsed is not None:
         if normalizer is not None:
             parsed = normalizer(parsed)
-        if config.cache_enabled and not cache_hit:
-            write_error = cache.write(
-                cache_key=cache_key,
-                provider=provider.name,
-                model=config.model,
-                prompt_name=prompt_name,
-                prompt_version=prompt_version,
-                schema_version=schema_version,
-                raw_output=response_text,
-                parsed_json=parsed.model_dump(),
-                usage=usage,
-            )
-            cache_error = cache_error or write_error
+        if config.cache_enabled:
+            cache_targets = [*cache_aliases]
+            if not cache_hit:
+                cache_targets.append(cache_key)
+            for target in dict.fromkeys(cache_targets):
+                write_error = cache.write(
+                    cache_key=target,
+                    provider=provider.name,
+                    model=config.model,
+                    prompt_name=prompt_name,
+                    prompt_version=prompt_version,
+                    schema_version=schema_version,
+                    raw_output=response_text,
+                    parsed_json=parsed.model_dump(),
+                    usage=usage,
+                    integration=integration,
+                    structured_output_strategy=effective_strategy,
+                    capability_fingerprint=capability_fingerprint,
+                    fallback_reason=fallback_reason,
+                )
+                cache_error = cache_error or write_error
         return parsed, [
             _record(
                 config,
@@ -195,6 +262,11 @@ def _parse_with_messages(
                 "cache_error" if cache_error else None,
                 cache_error,
                 usage,
+                integration,
+                requested_strategy,
+                effective_strategy,
+                fallback_reason,
+                capability_snapshot,
             )
         ]
 
@@ -211,6 +283,7 @@ def _parse_with_messages(
             retry_builder=retry_builder,
             normalizer=normalizer,
             retry_count=retry_count + 1,
+            cache_aliases=[*cache_aliases, cache_key],
         )
 
     error_type = _classify_validation_error(validation_error)
@@ -228,6 +301,11 @@ def _parse_with_messages(
         error_type,
         validation_error,
         usage,
+        integration,
+        requested_strategy,
+        effective_strategy,
+        fallback_reason,
+        capability_snapshot,
     )
     raise StructuredOutputError(error_type, validation_error, [record])
 
@@ -265,6 +343,11 @@ def _record(
     error_type: str | None,
     error: str | None,
     usage: dict[str, Any] | None,
+    integration: str | None,
+    requested_strategy: str | None,
+    effective_strategy: str | None,
+    fallback_reason: str | None,
+    capabilities: dict[str, Any] | None,
 ) -> LLMCallRecord:
     return LLMCallRecord(
         provider=provider,
@@ -280,4 +363,9 @@ def _record(
         error_type=error_type,  # type: ignore[arg-type]
         error=error,
         usage=usage,
+        integration=integration,  # type: ignore[arg-type]
+        requested_strategy=requested_strategy,  # type: ignore[arg-type]
+        effective_strategy=effective_strategy,
+        fallback_reason=fallback_reason,
+        capabilities=capabilities,
     )

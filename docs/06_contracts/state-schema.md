@@ -664,6 +664,20 @@ fail
 - checkpoint 不作为 plan/profile/feedback 事实来源。
 - 输入 snapshot 更新后必须重新校验 plan staleness。
 
+## v0.7.1 Candidate WP1 State 增量
+
+CandidateProfileGraph 新增两个诊断字段，不复制 evidence 正文：
+
+```text
+validation_receipts: append-only receipt summaries
+fragment_processing: fragment_id → processed_with_accepted_claims |
+  processed_all_rejected | retryable_extraction_failure | fatal_validation_failure
+```
+
+`processed_fragment_ids` 只包含完成确定性逐项裁决的 fragment；retryable/fatal failure 只写
+`fragment_processing`，不得冒充成功处理。checkpoint 保存执行恢复状态，receipt 的 durable 事实仍在
+EvidenceRepository，Run artifact 只保存安全诊断投影。
+
 ## v1.0 ParentState 目标形态
 
 ```python

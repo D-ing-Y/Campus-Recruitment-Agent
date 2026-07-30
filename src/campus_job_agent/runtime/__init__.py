@@ -4,6 +4,14 @@ from campus_job_agent.runtime.artifacts import (
     ArtifactWriteError, NodeObserver, RunArtifactWriter, redact,
 )
 from campus_job_agent.runtime.factory import Runtime, RuntimeFactory, RuntimePaths
+from campus_job_agent.runtime.candidate import CandidateApplicationError, CandidateApplicationService
+from campus_job_agent.runtime.model_profiles import (
+    ModelProfileError,
+    ModelProfileService,
+    ModelProviderProfile,
+    ModelProviderSettings,
+    SQLiteModelProfileRepository,
+)
 from campus_job_agent.runtime.models import (
     ArtifactEntry, ArtifactIndex, ErrorEvent, Handoff, LLMCallReceipt, ObjectRef,
     RunEvent, RunManifest, RunSession, ValidationReceipt, exit_code_for_error,
@@ -19,5 +27,8 @@ __all__ = [
     "RunManifest", "RunSession", "Runtime", "RuntimeFactory", "RuntimePaths",
     "SQLiteSessionRepository", "SessionConflictError", "SessionError",
     "SessionNotFoundError", "SessionReferenceError", "SessionService",
-    "ValidationReceipt", "exit_code_for_error", "redact",
+    "ValidationReceipt", "CandidateApplicationError", "CandidateApplicationService",
+    "ModelProfileError", "ModelProfileService", "ModelProviderProfile",
+    "ModelProviderSettings", "SQLiteModelProfileRepository",
+    "exit_code_for_error", "redact",
 ]

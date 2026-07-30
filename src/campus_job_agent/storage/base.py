@@ -8,6 +8,7 @@ from campus_job_agent.schemas import (
     EvidenceClaim,
     EvidenceFragment,
     ProfileSnapshot,
+    ValidationReceipt,
 )
 
 
@@ -37,6 +38,17 @@ class EvidenceRepository(Protocol):
     def list_fragments(self, artifact_id: str) -> list[EvidenceFragment]: ...
 
     def save_claim(self, claim: EvidenceClaim) -> EvidenceClaim: ...
+
+    def save_candidate_claim_batch(
+        self,
+        validated: list[tuple[EvidenceClaim, ValidationReceipt]],
+        *,
+        rejected_receipts: list[ValidationReceipt],
+    ) -> tuple[list[EvidenceClaim], list[ValidationReceipt]]: ...
+
+    def list_validation_receipts(
+        self, *, subject_ref: str | None = None, run_id: str | None = None
+    ) -> list[ValidationReceipt]: ...
 
     def get_claim(self, claim_id: str) -> EvidenceClaim | None: ...
 

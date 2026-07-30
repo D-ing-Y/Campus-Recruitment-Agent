@@ -29,6 +29,7 @@ from campus_job_agent.schemas.evidence import (
     ExtractedClaim,
     ProfileSnapshot,
     Provenance,
+    ValidationReceipt,
 )
 from campus_job_agent.schemas.gap import GapAssessment, GapItem, migrate_legacy_gap_assessment
 from campus_job_agent.schemas.goal import ParsedGoal, PlanTask, SearchGoal
@@ -103,6 +104,14 @@ from campus_job_agent.schemas.llm import (
     LLMRequest,
     LLMResponse,
 )
+from campus_job_agent.schemas.integrations import (
+    EffectiveStructuredOutputStrategy,
+    MCPServerConfig,
+    ModelCapabilities,
+    ModelIntegration,
+    StructuredOutputStrategy,
+    ToolSpec,
+)
 from campus_job_agent.schemas.tool import ToolResult
 from campus_job_agent.schemas.human_interaction import (
     HumanAnswer,
@@ -157,6 +166,12 @@ __all__ = [
     "LLMRequest",
     "LLMResponse",
     "LLMCallRecord",
+    "ModelIntegration",
+    "ModelCapabilities",
+    "StructuredOutputStrategy",
+    "EffectiveStructuredOutputStrategy",
+    "ToolSpec",
+    "MCPServerConfig",
     "ToolResult",
     "TraceEvent",
     "VerificationResult",
@@ -168,6 +183,7 @@ __all__ = [
     "ClaimExtractionBatch",
     "ClaimExtractor",
     "Provenance",
+    "ValidationReceipt",
     "ProfileSnapshot",
     "CandidateProfile",
     "CapabilityAssessment",

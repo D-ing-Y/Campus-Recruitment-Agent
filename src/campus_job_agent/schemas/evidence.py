@@ -134,9 +134,40 @@ class ExtractedClaim(BaseModel):
     evidence_fragment_ids: list[str] = Field(min_length=1)
     confidence: float = Field(ge=0.0, le=1.0)
 
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def normalize_confidence_label(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            aliases = {"high": 0.9, "medium": 0.6, "low": 0.3}
+            return aliases.get(value.strip().casefold(), value)
+        return value
+
 
 class ClaimExtractionBatch(BaseModel):
     claims: list[ExtractedClaim] = Field(default_factory=list)
+
+
+class ValidationReceipt(BaseModel):
+    """Per-model-item Candidate domain validation result."""
+
+    receipt_id: str = Field(default_factory=lambda: f"validation-{uuid4()}")
+    schema_version: str = "v0.7.1"
+    run_id: str
+    workflow: str
+    node: str
+    item_index: int
+    candidate_hash: str
+    subject_ref: str
+    fragment_ids: list[str] = Field(default_factory=list)
+    predicate: str | None = None
+    status: Literal[
+        "accepted", "rejected", "duplicate", "retryable_error", "fatal_error"
+    ]
+    reason_codes: list[str] = Field(default_factory=list)
+    persisted_claim_id: str | None = None
+    extractor: str | None = None
+    prompt_version: str | None = None
+    schema_version_used: str | None = None
 
 
 class ProfileSnapshot(BaseModel):

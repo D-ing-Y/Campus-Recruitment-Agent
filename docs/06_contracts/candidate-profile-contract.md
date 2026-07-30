@@ -251,3 +251,34 @@ fail
 - profile 数据、active supporting claim IDs 和 schema version 的 canonical hash 相同则复用已有 snapshot。
 - 新 Claim、supersede、冲突状态变化或 schema 迁移可创建新 snapshot。
 - 旧 snapshot 永不原地修改。
+
+## 10. v0.7.1 Candidate Claim 增量契约
+
+WP1 起，模型新产生的 Candidate Claim 使用 `candidate_claim_v0.7.1` predicate contract。允许的
+discriminated union 为：
+
+```text
+capability:<capability_id>
+education:<record_id>.institution|degree|major|graduation_year
+experience:<record_id>.kind|title|description|responsibilities|technologies|outputs|results
+```
+
+- `capability_id` 必须来自当前 versioned CapabilityOntology；模型不得临时发明 ID。
+- 模型输出中的 `record_id` 只负责在当次 batch 内聚合同一记录的字段，不是持久化身份的权威来源。
+  ClaimExtractor 必须在构建 Claim 前生成确定性 record ID：教育记录优先使用
+  `(institution, degree, major)` 的 canonical hash，经历记录优先使用 `title` 的 canonical hash；
+  身份字段缺失时使用该组已归一化字段的 canonical hash 作为 fallback。相同材料的重试、回放与
+  不同模型临时 ID 必须得到相同的持久化 ID，不得依赖列表位置。
+- `education:<record_id>.graduation_year` 在身份计算与 Claim 构建前归一化为四位年份；
+  例如 `2024-07` 与 `2024` 都持久化为 `2024`，避免粒度差异产生伪冲突。
+- capability value 必须包含合法 `level`；education 标量字段必须是非空字符串；experience 的
+  `kind` 使用既有枚举，集合字段必须为非空字符串数组。
+- `education.<field>`、`education:<field>`、`experiences[<id>].<field>` 仅作为 v0.4 历史 Claim 的
+  replay 兼容语法；v0.7.1 模型输出与新人工 Claim 不得继续产生这些别名。
+- 没有确定性投影语义的 predicate 必须产生 rejected ValidationReceipt，不能进入 active Candidate
+  Claim set，也不能仅靠 Projector 静默忽略。
+- `EducationRecord` 与 `ExperienceRecord` 都保存稳定 record ID；Projector 必须支持多记录并按 ID
+  稳定排序。
+
+CandidateProfile snapshot 仍保持 v0.4 业务对象兼容版本；本节升级的是输入 Claim/predicate 和
+validation contract，不提前改变 Matching 等下游 snapshot 语义。

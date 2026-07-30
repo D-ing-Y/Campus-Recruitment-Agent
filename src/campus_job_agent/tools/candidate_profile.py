@@ -5,13 +5,21 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import sqlite3
 from pathlib import Path
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
 from pypdf import PdfReader
 
-from campus_job_agent.evidence import ArtifactIngestor, ClaimValidator
+from campus_job_agent.evidence import (
+    ArtifactIngestor,
+    CandidateClaimValidationError,
+    CandidateClaimValidator,
+    ClaimValidator,
+    normalize_human_candidate_value,
+    profile_path_to_candidate_predicate,
+)
 from campus_job_agent.evidence.claim_extractor import ClaimExtractorService
 from campus_job_agent.evidence.projector import CandidateProfileProjector
 from campus_job_agent.schemas import (
@@ -25,6 +33,7 @@ from campus_job_agent.schemas import (
     HumanInteractionResponse,
     ProfileVersionDiff,
     ToolResult,
+    ValidationReceipt,
 )
 from campus_job_agent.storage.base import BlobStore, EvidenceRepository, ProfileRepository
 from campus_job_agent.tools.registry import ToolRegistry
@@ -77,6 +86,25 @@ def _failure(
             "needs_user_action": needs_user_action,
         },
     )
+
+
+def _candidate_claim_failure(
+    name: str,
+    error: str,
+    error_type: str,
+    fragment_ids: list[str],
+) -> ToolResult:
+    result = _failure(name, error, error_type)
+    result.records = [{
+        "claim_ids": [],
+        "llm_calls": [],
+        "validation_receipts": [],
+        "fragment_processing": {
+            fragment_id: "fatal_validation_failure"
+            for fragment_id in fragment_ids
+        },
+    }]
+    return result
 
 
 class CandidateIngestMaterialTool:
@@ -311,30 +339,34 @@ class ExtractCandidateClaimsTool:
     ) -> None:
         self.repository = repository
         self.extractor = extractor
-        self.validator = ClaimValidator(repository)
+        self.validator = CandidateClaimValidator(repository)
 
     def run(self, args: dict[str, Any]) -> ToolResult:
         subject_id = str(args.get("subject_id", "")).strip()
         owner_id = str(args.get("owner_id", "")).strip()
+        run_id = str(args.get("run_id", "run-unscoped")).strip()
         fragment_ids = [str(value) for value in args.get("fragment_ids", [])]
         if not subject_id or not owner_id or not fragment_ids:
-            return _failure(
+            return _candidate_claim_failure(
                 self.name,
                 "subject_id, owner_id and fragment_ids are required",
                 "validation_error",
+                fragment_ids,
             )
         fragments: list[EvidenceFragment] = []
         allowed_artifacts: set[str] = set()
         for fragment_id in fragment_ids:
             fragment = self.repository.get_fragment(fragment_id)
             if fragment is None:
-                return _failure(
-                    self.name, f"unknown fragment: {fragment_id}", "validation_error"
+                return _candidate_claim_failure(
+                    self.name, f"unknown fragment: {fragment_id}",
+                    "validation_error", fragment_ids,
                 )
             artifact = self.repository.get_artifact(fragment.artifact_id)
             if artifact is None or artifact.owner_id != owner_id:
-                return _failure(
-                    self.name, "fragment owner mismatch", "permission_denied"
+                return _candidate_claim_failure(
+                    self.name, "fragment owner mismatch", "permission_denied",
+                    fragment_ids,
                 )
             fragments.append(fragment)
             allowed_artifacts.add(fragment.artifact_id)
@@ -348,38 +380,120 @@ class ExtractCandidateClaimsTool:
                     else None
                 ),
             )
-            saved = [
-                self.validator.validate_and_save(
-                    claim,
-                    allowed_artifacts,
-                    expected_owner_id=owner_id,
-                )
-                for claim in claims
-            ]
         except Exception as exc:
+            structured_error = exc.__class__.__name__ == "StructuredOutputError"
+            structured_type = str(
+                getattr(exc, "error_type", "llm_output_error")
+            )
             error_type = (
-                "llm_output_error"
-                if exc.__class__.__name__ == "StructuredOutputError"
+                structured_type
+                if structured_error and structured_type in {
+                    "network_timeout", "rate_limited", "auth_required",
+                    "provider_error",
+                }
+                else "llm_output_error" if structured_error
                 else "validation_error"
             )
+            retryable = bool(getattr(exc, "retryable", False))
             calls = [
                 item.model_dump(mode="json")
                 for item in getattr(exc, "call_records", [])
             ]
-            failed = _failure(self.name, str(exc), error_type)
-            if calls:
-                failed.records = [{"claim_ids": [], "llm_calls": calls}]
+            failed = _failure(
+                self.name, str(exc), error_type, retryable=retryable
+            )
+            failed.records = [{
+                "claim_ids": [], "llm_calls": calls,
+                "validation_receipts": [],
+                "fragment_processing": {
+                    fragment_id: "retryable_extraction_failure"
+                    for fragment_id in fragment_ids
+                },
+            }]
             return failed
+
+        validated: list[tuple[EvidenceClaim, ValidationReceipt]] = []
+        rejected: list[ValidationReceipt] = []
+        for index, claim in enumerate(claims):
+            receipt = ValidationReceipt(
+                run_id=run_id, workflow="candidate_profile",
+                node="extract_and_validate_claims", item_index=index,
+                candidate_hash=claim.idempotency_key(), subject_ref=subject_id,
+                fragment_ids=claim.evidence_fragment_ids, predicate=claim.predicate,
+                status="accepted",
+                extractor=f"{claim.extractor.provider}/{claim.extractor.model}",
+                prompt_version=claim.prompt_version,
+                schema_version_used=claim.schema_version,
+            )
+            try:
+                validated_claim = self.validator.validate(
+                    claim, allowed_artifacts, expected_owner_id=owner_id
+                )
+            except CandidateClaimValidationError as exc:
+                rejected.append(receipt.model_copy(update={
+                    "status": "rejected", "reason_codes": [exc.reason_code],
+                }))
+            else:
+                validated.append((validated_claim, receipt))
+        try:
+            saved, receipts = self.repository.save_candidate_claim_batch(
+                validated, rejected_receipts=rejected
+            )
+        except (sqlite3.Error, OSError) as exc:
+            failed = _failure(
+                self.name, str(exc), "storage_error", retryable=True
+            )
+            failed.records = [{
+                "claim_ids": [],
+                "llm_calls": [item.model_dump(mode="json") for item in calls],
+                "validation_receipts": [
+                    item.model_copy(update={
+                        "status": "retryable_error",
+                        "reason_codes": ["storage_failure"],
+                        "persisted_claim_id": None,
+                    }).model_dump(mode="json")
+                    for _, item in validated
+                ] + [item.model_dump(mode="json") for item in rejected],
+                "fragment_processing": {
+                    fragment_id: "retryable_extraction_failure"
+                    for fragment_id in fragment_ids
+                },
+            }]
+            return failed
+
+        accepted_fragments = {
+            fragment_id
+            for receipt in receipts
+            if receipt.status in {"accepted", "duplicate"}
+            for fragment_id in receipt.fragment_ids
+        }
+        fragment_processing = {
+            fragment_id: (
+                "processed_with_accepted_claims"
+                if fragment_id in accepted_fragments
+                else "processed_all_rejected"
+            )
+            for fragment_id in fragment_ids
+        }
         return _success(
             self.name,
             records=[
                 {
                     "claim_ids": [item.claim_id for item in saved],
                     "llm_calls": [item.model_dump(mode="json") for item in calls],
+                    "validation_receipts": [
+                        item.model_dump(mode="json") for item in receipts
+                    ],
+                    "fragment_processing": fragment_processing,
                 }
             ],
             evidence_ids=[item.claim_id for item in saved],
-            metadata={"record_count": len(saved)},
+            metadata={
+                "record_count": len(saved),
+                "accepted_count": sum(item.status == "accepted" for item in receipts),
+                "duplicate_count": sum(item.status == "duplicate" for item in receipts),
+                "rejected_count": sum(item.status == "rejected" for item in receipts),
+            },
         )
 
 
@@ -389,7 +503,7 @@ class ArchiveUserResponseTool:
     def __init__(self, blob_store: BlobStore, repository: EvidenceRepository) -> None:
         self.blob_store = blob_store
         self.repository = repository
-        self.validator = ClaimValidator(repository)
+        self.validator = CandidateClaimValidator(repository)
 
     def run(self, args: dict[str, Any]) -> ToolResult:
         try:
@@ -460,6 +574,9 @@ class ArchiveUserResponseTool:
             )
             result = {
                 "payload_hash": payload_hash,
+                "request_id": request.request_id,
+                "thread_id": request.thread_id,
+                "user_id": request.user_id,
                 "artifact_id": artifact.artifact_id,
                 "fragment_ids": [item.fragment_id for item in fragments],
                 "claim_ids": [item.claim_id for item in claims],
@@ -513,14 +630,16 @@ class ArchiveUserResponseTool:
             fragment = fragment_by_pointer[f"/answers/{index}/text"]
             claim = EvidenceClaim(
                 subject_id=candidate_id,
-                predicate=question.target_path,
-                value=answer.text,
+                predicate=profile_path_to_candidate_predicate(question.target_path),
+                value=normalize_human_candidate_value(
+                    profile_path_to_candidate_predicate(question.target_path), answer.text
+                ),
                 claim_type="user_reported",
                 evidence_fragment_ids=[fragment.fragment_id],
                 confidence=1.0,
                 extractor=ClaimExtractor(provider="human", model="user_response"),
-                prompt_version="human_interaction_v0.4",
-                schema_version="v0.4",
+                prompt_version="human_interaction_v0.7.1",
+                schema_version="candidate_claim_v0.7.1",
             )
             saved.append(
                 self.validator.validate_and_save(
@@ -533,16 +652,31 @@ class ArchiveUserResponseTool:
             fragment = fragment_by_pointer[f"/corrections/{index}"]
             supersedes = correction.supersedes_claim_ids or [None]
             for previous_id in supersedes:
+                previous = (
+                    self.repository.get_claim(previous_id) if previous_id else None
+                )
+                predicate = (
+                    previous.predicate
+                    if previous is not None
+                    else profile_path_to_candidate_predicate(correction.target_path)
+                )
+                schema_version = (
+                    previous.schema_version
+                    if previous is not None
+                    else "candidate_claim_v0.7.1"
+                )
                 claim = EvidenceClaim(
                     subject_id=correction.candidate_id,
-                    predicate=correction.target_path,
-                    value=correction.new_value,
+                    predicate=predicate,
+                    value=normalize_human_candidate_value(
+                        predicate, correction.new_value
+                    ),
                     claim_type="user_reported",
                     evidence_fragment_ids=[fragment.fragment_id],
                     confidence=1.0,
                     extractor=ClaimExtractor(provider="human", model="profile_correction"),
-                    prompt_version="human_interaction_v0.4",
-                    schema_version="v0.4",
+                    prompt_version="human_interaction_v0.7.1",
+                    schema_version=schema_version,
                     supersedes_claim_id=previous_id,
                 )
                 existing_claim = next(
@@ -1029,7 +1163,9 @@ def _receipt_evidence_ids(receipt: dict[str, Any]) -> list[str]:
 
 def canonical_response_payload(response: HumanInteractionResponse) -> bytes:
     return json.dumps(
-        response.model_dump(mode="json", exclude_none=True),
+        response.model_dump(
+            mode="json", exclude_none=True, exclude={"submitted_at"}
+        ),
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),

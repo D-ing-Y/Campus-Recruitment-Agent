@@ -24,3 +24,15 @@
 - 网页 HTML/text 一律视为非可信数据，不能修改系统提示、Tool 权限、域名白名单或预算。
 - LLM 不得在 live run 中生成并执行 Python、JavaScript 或 shell 爬虫；声明式 adapter spec
   必须离线 replay、测试和人工批准。
+
+## v0.7.1 Model Provider
+
+- Model Provider 元数据和 current 状态保存到 SQLite；API key 不进入 Provider JSON。
+- API key 只通过隐藏 prompt 或 stdin 进入本地 SecretStore，并以 `credential_ref` 传递。
+- SecretStore 目录权限必须为 `0700`、文件为 `0600`；写入必须原子覆盖。
+- 该文件权限是本机账户边界，不等同于加密或 macOS Keychain；不得把 credential root 同步到共享盘、
+  云盘或 Git。后续若引入系统 Keychain，只替换 SecretStore adapter，不改变 Provider contract。
+- 不支持命令行 `--api-key <value>`，避免 shell history 和 process list 泄露。
+- 不自动加载项目 `.env`；显式环境变量仅作为自动化/兼容覆盖，不是普通用户配置事实源。
+- `doctor/model list/show/test`、异常、Run artifacts、LLM receipts 和缓存不得包含 key。
+- Model 健康检查不得携带 Candidate/Role/Feedback 等业务材料。

@@ -239,3 +239,19 @@ credential payload, login form data
 - role family subject ID：`role_family:<search_scope_hash>`。
 - snapshot 保存 collection window、valid_as_of、source refs、supporting Claim 和 aggregation policy。
 - 过期/关闭状态通过新 snapshot 表达，历史证据和画像不删除。
+
+## v0.7.1 Candidate ValidationReceipt 与批事务增量
+
+Candidate 模型批次先完成逐项领域校验，再在同一个 SQLite 事务中提交所有 accepted/duplicate Claim
+结果与本批全部 ValidationReceipt。规则如下：
+
+- 每个模型 item 恰好一条 receipt，保留 item index、candidate hash、subject、fragment refs、
+  predicate、extractor、prompt/schema version、status、reason codes 和 persisted claim ID。
+- domain-invalid item 为 `rejected`，不写 Claim；同幂等键已存在为 `duplicate` 并引用原 Claim。
+- 任一数据库写入失败，整批新 Claim 与 receipts 一起回滚；不得出现“前项已提交、整批却报告失败”。
+- rejected item 不阻止同批其他合法 item 提交，但 rejected 原因必须完整可查。这是“先逐项验证，
+  再原子提交 accepted subset + all receipts”，不是不可解释的逐项半提交。
+- Fragment 完成一次模型提取后必须记录 `processed_with_accepted_claims` 或
+  `processed_all_rejected`；结构化输出/外部依赖失败记录 `retryable_extraction_failure`，不可恢复的
+  evidence/contract 失败记录 `fatal_validation_failure`。
+- prompt/schema 升级后的重放必须创建新 Run/receipt，不修改旧 Artifact、Fragment、Claim 或 receipt。

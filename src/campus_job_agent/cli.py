@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import sys
 from pathlib import Path
@@ -24,6 +25,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--json", action="store_true", dest="json_output", help="emit one JSON document")
     parser.add_argument("--data-root", type=Path, help="explicit cwd-independent data root")
     commands = parser.add_subparsers(dest="command")
+
+    commands.add_parser("ui", help="open the project CLI UI")
 
     commands.add_parser("doctor", help="check runtime paths and dependencies without exposing secrets")
 
@@ -61,6 +64,67 @@ def _build_parser() -> argparse.ArgumentParser:
     handoff.add_argument("--run-id")
     handoff.add_argument("--session-id")
 
+    candidate = commands.add_parser("candidate", help="build and resume CandidateProfileGraph")
+    candidate_commands = candidate.add_subparsers(dest="candidate_command", required=True)
+    candidate_build = candidate_commands.add_parser("build")
+    candidate_build.add_argument("session_id")
+    candidate_build.add_argument("--candidate-id", required=True)
+    candidate_build.add_argument("--input", action="append", default=[])
+    candidate_resume = candidate_commands.add_parser("resume")
+    candidate_resume.add_argument("session_id")
+    candidate_resume.add_argument(
+        "--action", required=True,
+        choices=("answer", "upload", "correct", "confirm", "skip", "cancel"),
+    )
+    candidate_resume.add_argument("--response-id", required=True)
+    candidate_resume.add_argument("--answer", action="append", default=[])
+    candidate_resume.add_argument("--upload", action="append", default=[])
+    candidate_resume.add_argument("--correction", action="append", default=[])
+    candidate_resume.add_argument("--skip-id", action="append", default=[])
+    candidate_show = candidate_commands.add_parser("show")
+    candidate_show.add_argument("snapshot_id")
+    candidate_diff = candidate_commands.add_parser("diff")
+    candidate_diff.add_argument("from_snapshot_id")
+    candidate_diff.add_argument("to_snapshot_id")
+
+    model = commands.add_parser("model", help="manage CC Switch-style model providers")
+    model_commands = model.add_subparsers(dest="model_command", required=True)
+    model_add = model_commands.add_parser("add")
+    model_add.add_argument("--preset", required=True, choices=("deepseek", "openai-compatible", "mock"))
+    model_add.add_argument("--id", required=True, dest="profile_id")
+    model_add.add_argument("--name", required=True)
+    model_add.add_argument("--base-url")
+    model_add.add_argument("--model")
+    model_add.add_argument("--timeout-seconds", type=float)
+    model_add.add_argument("--category")
+    model_add.add_argument("--website-url")
+    model_add.add_argument("--notes")
+    model_add.add_argument("--icon")
+    model_add.add_argument("--api-key-stdin", action="store_true")
+    model_add.add_argument("--api-key", help=argparse.SUPPRESS)
+    model_add.add_argument("--activate", action="store_true")
+    model_commands.add_parser("list")
+    model_edit = model_commands.add_parser("edit")
+    model_edit.add_argument("profile_id")
+    model_edit.add_argument("--name")
+    model_edit.add_argument("--base-url")
+    model_edit.add_argument("--model")
+    model_edit.add_argument("--timeout-seconds", type=float)
+    model_edit.add_argument("--category")
+    model_edit.add_argument("--website-url")
+    model_edit.add_argument("--notes")
+    model_edit.add_argument("--icon")
+    model_edit.add_argument("--api-key-stdin", action="store_true")
+    model_edit.add_argument("--api-key", help=argparse.SUPPRESS)
+    model_show = model_commands.add_parser("show")
+    model_show.add_argument("profile_id")
+    model_use = model_commands.add_parser("use")
+    model_use.add_argument("profile_id")
+    model_remove = model_commands.add_parser("remove")
+    model_remove.add_argument("profile_id")
+    model_test = model_commands.add_parser("test")
+    model_test.add_argument("profile_id")
+
     legacy = commands.add_parser(
         "run",
         help="legacy-mini-runtime: mock job search compatibility only; not the formal business workflow",
@@ -82,7 +146,10 @@ def main(argv: list[str] | None = None) -> int:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     json_mode = "--json" in raw_argv
     if not raw_argv:
-        return _interactive_guide(json_mode=False)
+        if sys.stdin.isatty() and sys.stdout.isatty():
+            raw_argv = ["ui"]
+        else:
+            return _interactive_guide(json_mode=False)
     try:
         args = _build_parser().parse_args(raw_argv)
         if args.command is None:
@@ -114,10 +181,19 @@ def _dispatch(args: argparse.Namespace) -> int:
             "checks": checks, "next_action": "session.start" if status == "completed" else "fix_doctor_failures",
             "warnings": [] if status == "completed" else ["runtime_dependency_incomplete"], "errors": [],
         }, json_mode=args.json_output)
+    if args.command == "ui":
+        if args.json_output:
+            raise CLIArgumentError("CLI UI does not support --json")
+        from campus_job_agent.cli_ui import run_cli_ui
+        return run_cli_ui(runtime)
+    if args.command == "model":
+        return _model(runtime, args)
     if args.command == "session":
         return _session(runtime, args)
     if args.command == "inspect":
         return _inspect(runtime, args)
+    if args.command == "candidate":
+        return _candidate(runtime, args)
     if args.command == "run":
         return _legacy_run(runtime, args)
     if args.command == "auth":
@@ -238,7 +314,7 @@ def _inspect(runtime: Any, args: argparse.Namespace) -> int:
         data.pop("text", None)
         result = redact(data)
     elif args.inspect_command == "claims":
-        result = [
+        claim_items = [
             {
                 "claim_id": item.claim_id, "subject_id": item.subject_id,
                 "predicate": item.predicate, "claim_type": item.claim_type,
@@ -248,6 +324,15 @@ def _inspect(runtime: Any, args: argparse.Namespace) -> int:
             }
             for item in runtime.evidence_repository.list_claims(args.subject_id)
         ]
+        result = {
+            "claims": claim_items,
+            "validation_receipts": [
+                item.model_dump(mode="json")
+                for item in runtime.evidence_repository.list_validation_receipts(
+                    subject_ref=args.subject_id
+                )
+            ],
+        }
     elif args.inspect_command == "profile":
         profile = runtime.profile_repository.get_profile(args.snapshot_id)
         if profile is None:
@@ -276,6 +361,195 @@ def _inspect(runtime: Any, args: argparse.Namespace) -> int:
         "next_action": None, "warnings": [], "errors": [],
     }
     return _emit(payload, json_mode=args.json_output)
+
+
+def _candidate(runtime: Any, args: argparse.Namespace) -> int:
+    from campus_job_agent.schemas import (
+        HumanAnswer,
+        HumanInteractionResponse,
+        ProfileCorrection,
+    )
+    from campus_job_agent.tools.candidate_profile import diff_profile_snapshots
+
+    service = runtime.application_services["candidate"]
+    command = f"candidate.{args.candidate_command}"
+    if args.candidate_command == "build":
+        payload = service.build(
+            session_id=args.session_id,
+            candidate_id=args.candidate_id,
+            input_paths=args.input,
+        )
+        return _emit(
+            payload, json_mode=args.json_output,
+            exit_code=_candidate_exit_code(payload),
+        )
+    if args.candidate_command == "show":
+        snapshot = runtime.profile_repository.get_profile(args.snapshot_id)
+        if snapshot is None:
+            raise KeyError(f"profile not found: {args.snapshot_id}")
+        result = {
+            "snapshot_id": snapshot.snapshot_id,
+            "subject_id": snapshot.subject_id,
+            "version": snapshot.version,
+            "schema_version": snapshot.schema_version,
+            "supporting_claim_ids": snapshot.supporting_claim_ids,
+            "profile": snapshot.profile_data,
+        }
+        return _emit({
+            "schema_version": "v0.7.1", "command": command,
+            "status": "completed", "result": result,
+            "next_action": None, "warnings": [], "errors": [],
+        }, json_mode=args.json_output)
+    if args.candidate_command == "diff":
+        before = runtime.profile_repository.get_profile(args.from_snapshot_id)
+        after = runtime.profile_repository.get_profile(args.to_snapshot_id)
+        if before is None:
+            raise KeyError(f"profile not found: {args.from_snapshot_id}")
+        if after is None:
+            raise KeyError(f"profile not found: {args.to_snapshot_id}")
+        result = diff_profile_snapshots(
+            before.snapshot_id, before.profile_data,
+            after.snapshot_id, after.profile_data,
+        ).model_dump(mode="json")
+        return _emit({
+            "schema_version": "v0.7.1", "command": command,
+            "status": "completed", "result": result,
+            "next_action": None, "warnings": [], "errors": [],
+        }, json_mode=args.json_output)
+
+    session = runtime.session_service.status(args.session_id)
+    receipt = runtime.evidence_repository.get_response_receipt(args.response_id)
+    request = None
+    thread_id = None
+    user_id = session.user_id
+    if session.latest_run_id:
+        manifest = runtime.artifact_writer.load_manifest(session.latest_run_id)
+        thread_id = manifest.thread_id
+        with runtime.open_workflow("candidate") as workflow:
+            values = dict(workflow.get_state(thread_id).values or {})
+        request = values.get("pending_interaction")
+    if request is None and receipt is not None:
+        request = {
+            "request_id": receipt.get("request_id"),
+            "thread_id": receipt.get("thread_id"),
+            "user_id": receipt.get("user_id"),
+        }
+        thread_id = str(receipt.get("thread_id") or thread_id or "")
+        user_id = str(receipt.get("user_id") or user_id)
+    if not isinstance(request, dict) or not request.get("request_id") or not thread_id:
+        raise CLIArgumentError("session has no pending Candidate interaction")
+
+    answers: list[HumanAnswer] = []
+    for value in args.answer:
+        if "=" not in value:
+            raise CLIArgumentError("--answer must use QUESTION_ID=TEXT")
+        question_id, text = value.split("=", 1)
+        answers.append(HumanAnswer(question_id=question_id.strip(), text=text))
+    corrections: list[ProfileCorrection] = []
+    for value in args.correction:
+        try:
+            corrections.append(ProfileCorrection.model_validate(json.loads(value)))
+        except (json.JSONDecodeError, ValueError) as exc:
+            raise CLIArgumentError(f"invalid --correction JSON: {exc}") from exc
+    response = HumanInteractionResponse(
+        response_id=args.response_id,
+        request_id=str(request["request_id"]),
+        thread_id=str(thread_id),
+        user_id=user_id,
+        action=args.action,
+        answers=answers,
+        file_paths=[str(Path(value).expanduser().resolve()) for value in args.upload],
+        corrections=corrections,
+        confirmation=True if args.action == "confirm" else None,
+        skipped_ids=args.skip_id,
+    )
+    payload = service.resume(session_id=args.session_id, response=response)
+    return _emit(
+        payload, json_mode=args.json_output,
+        exit_code=_candidate_exit_code(payload),
+    )
+
+
+def _model(runtime: Any, args: argparse.Namespace) -> int:
+    command = f"model.{args.model_command}"
+    service = runtime.model_profile_service
+    if args.model_command == "list":
+        result = {
+            "providers": service.list_safe(),
+            "current": (
+                runtime.model_profile_repository.get_current().profile_id
+                if runtime.model_profile_repository.get_current() else None
+            ),
+        }
+    elif args.model_command == "show":
+        result = service.show_safe(args.profile_id)
+    elif args.model_command == "edit":
+        if args.api_key is not None:
+            raise CLIArgumentError(
+                "--api-key is forbidden; use hidden input or --api-key-stdin"
+            )
+        api_key = None
+        if args.api_key_stdin:
+            api_key = sys.stdin.readline().rstrip("\r\n")
+            if not api_key:
+                raise CLIArgumentError("--api-key-stdin received an empty key")
+        profile = service.edit(
+            args.profile_id, name=args.name, base_url=args.base_url,
+            model=args.model, api_key=api_key,
+            timeout_seconds=args.timeout_seconds, category=args.category,
+            website_url=args.website_url, notes=args.notes, icon=args.icon,
+        )
+        result = service.safe(profile)
+    elif args.model_command == "use":
+        result = service.safe(service.use(args.profile_id))
+    elif args.model_command == "remove":
+        removed = service.remove(args.profile_id)
+        result = {"id": removed.profile_id, "removed": True}
+    elif args.model_command == "test":
+        result = service.test(args.profile_id)
+    else:
+        if args.api_key is not None:
+            raise CLIArgumentError(
+                "--api-key is forbidden; use hidden input or --api-key-stdin"
+            )
+        api_key = None
+        if args.preset != "mock":
+            if args.api_key_stdin:
+                api_key = sys.stdin.readline().rstrip("\r\n")
+            elif sys.stdin.isatty():
+                api_key = getpass.getpass("API key: ")
+            else:
+                raise CLIArgumentError(
+                    "non-mock provider requires hidden input or --api-key-stdin"
+                )
+        profile = service.add(
+            profile_id=args.profile_id, name=args.name, preset=args.preset,
+            base_url=args.base_url, model=args.model, api_key=api_key,
+            activate=args.activate, timeout_seconds=args.timeout_seconds,
+            category=args.category,
+            website_url=args.website_url, notes=args.notes, icon=args.icon,
+        )
+        result = service.safe(profile)
+    return _emit({
+        "schema_version": "v0.7.1", "command": command,
+        "status": "completed", "result": result,
+        "next_action": None, "warnings": [], "errors": [],
+    }, json_mode=args.json_output)
+
+
+def _candidate_exit_code(payload: dict[str, Any]) -> int:
+    if payload.get("status") != "failed":
+        return 0
+    error_types = {
+        str(item.get("error_type")) for item in payload.get("errors", [])
+    }
+    if error_types.intersection({"provider_error", "network_timeout", "rate_limited", "auth_required"}):
+        return 4
+    if error_types.intersection({"storage_error", "storage_failure", "checkpoint_error", "checkpoint_failure"}):
+        return 5
+    if error_types.intersection({"validation_error", "llm_output_error", "contract_violation"}):
+        return 3
+    return 6
 
 
 def _legacy_run(runtime: Any, args: argparse.Namespace) -> int:
@@ -358,8 +632,8 @@ def _next_action(stage: str) -> str:
 def _interactive_guide(*, json_mode: bool) -> int:
     payload = {
         "schema_version": "v0.7.1", "command": "guide", "status": "completed",
-        "message": "Start with `campus-agent session start`; then use session status and inspect commands.",
-        "next_action": "session.start", "warnings": ["wp1_business_commands_not_started"], "errors": [],
+        "message": "Start with `campus-agent session start`; then use candidate build and resume commands.",
+        "next_action": "session.start", "warnings": [], "errors": [],
     }
     return _emit(payload, json_mode=json_mode)
 
@@ -370,7 +644,7 @@ def _emit(payload: dict[str, Any], *, json_mode: bool, exit_code: int = 0) -> in
     else:
         for key in (
             "workflow", "run_id", "session_id", "status", "current_stage", "next_action",
-            "source_id", "credential_ref", "credential_root",
+            "source_id", "credential_ref", "credential_root", "deduplicated",
         ):
             if key in payload and payload[key] is not None:
                 print(f"{key}: {payload[key]}")
@@ -380,6 +654,12 @@ def _emit(payload: dict[str, Any], *, json_mode: bool, exit_code: int = 0) -> in
             print("warnings: " + ", ".join(payload["warnings"]))
         if payload.get("artifact_paths"):
             print("artifact_paths: " + json.dumps(payload["artifact_paths"], ensure_ascii=False))
+        if payload.get("output_refs"):
+            print("output_refs: " + json.dumps(payload["output_refs"], ensure_ascii=False))
+        if payload.get("pending_request"):
+            print("pending_request: " + json.dumps(payload["pending_request"], ensure_ascii=False))
+        if payload.get("metrics"):
+            print("metrics: " + json.dumps(payload["metrics"], ensure_ascii=False))
         if payload.get("checks"):
             print(json.dumps(payload["checks"], ensure_ascii=False, indent=2))
         if "result" in payload:
@@ -408,12 +688,18 @@ def _emit_error(error_type: str, message: str, exit_code: int, *, json_mode: boo
 
 def _handle_error(exc: Exception, *, json_mode: bool) -> int:
     from campus_job_agent.llm import LLMConfigError, LLMProviderError, StructuredOutputError
-    from campus_job_agent.runtime import ArtifactWriteError, SessionError
+    from campus_job_agent.runtime import (
+        ArtifactWriteError, CandidateApplicationError, ModelProfileError, SessionError,
+    )
 
     if isinstance(exc, CLIArgumentError):
         return _emit_error("invalid_input", str(exc), 2, json_mode=json_mode, recovery_hint="check command arguments")
     if isinstance(exc, SessionError):
         return _emit_error(exc.error_type, str(exc), 3, json_mode=json_mode, recovery_hint="inspect session refs and retry with the current version")
+    if isinstance(exc, CandidateApplicationError):
+        return _emit_error(exc.error_type, str(exc), 3, json_mode=json_mode, recovery_hint="inspect the Candidate run and retry with valid input")
+    if isinstance(exc, ModelProfileError):
+        return _emit_error(exc.error_type, str(exc), 3, json_mode=json_mode, recovery_hint="inspect model providers and choose a valid profile")
     if isinstance(exc, KeyError):
         return _emit_error("not_found", str(exc).strip("'"), 3, json_mode=json_mode, recovery_hint="verify the object ID and data root")
     if isinstance(exc, LLMConfigError):

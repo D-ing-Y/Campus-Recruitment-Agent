@@ -12,8 +12,8 @@ from typing import Any, Iterator
 
 from campus_job_agent.evidence import ClaimExtractorService
 from campus_job_agent.llm import (
-    LLMCache, LLMConfigError, LLMProviderError, MockLLMProvider,
-    OpenAICompatibleProvider, load_llm_config,
+    LLMCache, LLMConfigError, LLMProviderError, build_llm_provider,
+    load_llm_config,
 )
 from campus_job_agent.schemas import LLMConfig
 from campus_job_agent.sources import (
@@ -34,6 +34,12 @@ from campus_job_agent.workflows.profile_matching.service import MatchingService
 from campus_job_agent.workflows.role_profile import RoleProfileGraphRuntime
 
 from campus_job_agent.runtime.artifacts import RunArtifactWriter
+from campus_job_agent.runtime.candidate import CandidateApplicationService
+from campus_job_agent.runtime.model_profiles import (
+    ModelProfileError,
+    ModelProfileService,
+    SQLiteModelProfileRepository,
+)
 from campus_job_agent.runtime.sessions import SQLiteSessionRepository, SessionService
 
 
@@ -94,6 +100,8 @@ class Runtime:
     tool_registry: ToolRegistry
     source_adapter_registry: SourceAdapterRegistry
     credential_resolver: LocalCredentialStore
+    model_profile_repository: SQLiteModelProfileRepository
+    model_profile_service: ModelProfileService
     event_sink: RunArtifactWriter
     artifact_writer: RunArtifactWriter
     application_services: dict[str, Any]
@@ -175,6 +183,10 @@ class Runtime:
             "writable": writable,
             "sqlite_checkpointer": {"available": checkpoint_ok, "error_type": checkpoint_error},
             "llm": {
+                "profile_id": (
+                    self.model_profile_repository.get_current().profile_id
+                    if self.model_profile_repository.get_current() else None
+                ),
                 "provider": self.llm_config.provider, "model": self.llm_config.model,
                 "configuration_complete": llm_complete, "api_key_present": bool(self.llm_config.api_key),
                 "error_type": "config_error" if self.llm_config_error else None,
@@ -183,7 +195,7 @@ class Runtime:
             "source_adapters": self.source_adapter_registry.capabilities(),
             "console_script": str(Path(sys.argv[0]).resolve()),
             "legacy_cli": "legacy-mini-runtime",
-            "feature_stage": "v0.7.1-wp0",
+            "feature_stage": "v0.7.1-wp1",
         }
 
 
@@ -201,17 +213,37 @@ class RuntimeFactory:
         sessions = SQLiteSessionRepository(self.paths.database_root / "sessions.sqlite3")
         blob = LocalBlobStore(self.paths.blob_root)
         credential_store = LocalCredentialStore(self.paths.credential_root)
+        model_profiles = SQLiteModelProfileRepository(
+            self.paths.database_root / "model_profiles.sqlite3"
+        )
+        model_profile_service = ModelProfileService(model_profiles, credential_store)
 
         llm_config_error = None
         try:
-            llm_config = load_llm_config()
-        except LLMConfigError:
+            explicit_profile = os.getenv("CAMPUS_AGENT_MODEL_PROFILE")
+            if explicit_profile:
+                llm_config = model_profile_service.resolve_llm_config(explicit_profile)
+            elif "CAMPUS_AGENT_LLM_PROVIDER" in os.environ:
+                llm_config = load_llm_config()
+            else:
+                llm_config = model_profile_service.resolve_llm_config()
+        except (LLMConfigError, ModelProfileError, ValueError):
             llm_config_error = "configured provider is incomplete"
+            current = model_profiles.get_current()
             llm_config = LLMConfig(
-                provider="openai_compatible",
-                base_url=os.getenv("OPENAI_BASE_URL") or None,
-                api_key=os.getenv("OPENAI_API_KEY") or None,
-                model=os.getenv("OPENAI_MODEL") or "unconfigured",
+                provider=(
+                    current.settings_config.provider if current
+                    else "openai_compatible"
+                ),
+                base_url=(
+                    current.settings_config.base_url if current
+                    else os.getenv("OPENAI_BASE_URL") or None
+                ),
+                api_key=None,
+                model=(
+                    current.settings_config.model if current
+                    else os.getenv("OPENAI_MODEL") or "unconfigured"
+                ),
             )
         llm_config = llm_config.model_copy(
             update={"cache_dir": str(self.paths.cache_root / "llm")}
@@ -219,10 +251,8 @@ class RuntimeFactory:
         llm_cache = LLMCache(str(self.paths.cache_root / "llm"))
         if llm_config_error:
             provider = _UnavailableLLMProvider()
-        elif llm_config.provider == "mock":
-            provider = MockLLMProvider(llm_config.mock_mode)
         else:
-            provider = OpenAICompatibleProvider(llm_config)
+            provider = build_llm_provider(llm_config)
         extractor = ClaimExtractorService(llm_config, provider, llm_cache)
 
         live_enabled = os.getenv("CAMPUS_AGENT_ENABLE_LIVE_SOURCES", "").lower() in {"1", "true", "yes"}
@@ -277,7 +307,7 @@ class RuntimeFactory:
             name: self.paths.checkpoint_root / f"{name}.sqlite3"
             for name in ("candidate", "role", "matching", "preparation", "feedback")
         }
-        return Runtime(
+        runtime = Runtime(
             paths=self.paths, owner_id=owner_id, blob_store=blob,
             evidence_repository=evidence, profile_repository=evidence,
             role_repository=role, matching_repository=matching,
@@ -287,9 +317,14 @@ class RuntimeFactory:
             llm_provider=provider, llm_cache=llm_cache,
             structured_output=extractor, tool_registry=tools,
             source_adapter_registry=adapters, credential_resolver=credential_store,
+            model_profile_repository=model_profiles,
+            model_profile_service=model_profile_service,
             event_sink=writer, artifact_writer=writer, application_services=services,
             checkpoint_paths=checkpoints,
         )
+        runtime.application_services["candidate"] = CandidateApplicationService(runtime)
+        runtime.application_services["model"] = model_profile_service
+        return runtime
 
 
 def _locate_project_root() -> Path:

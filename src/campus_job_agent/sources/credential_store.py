@@ -102,6 +102,39 @@ class LocalCredentialStore:
             credential_type="cookie",
         )
 
+    def save_api_key(self, *, profile_id: str, api_key: str) -> CredentialRef:
+        """Persist an LLM API key without returning or logging its payload."""
+        if not api_key or not api_key.strip():
+            raise ValueError("API key is required")
+        self._write(
+            source_id="llm", name=profile_id, credential_type="api_key_ref",
+            headers={"api_key": api_key.strip()},
+        )
+        return CredentialRef(
+            credential_ref=f"local-secret://llm/{profile_id}",
+            source_id="llm", credential_type="api_key_ref",
+        )
+
+    def resolve_api_key(self, credential_ref: str) -> str:
+        values = self.resolve(credential_ref, source_id="llm")
+        api_key = values.get("api_key")
+        if not api_key:
+            raise ValueError("API key reference is invalid")
+        return api_key
+
+    def secret_exists(self, credential_ref: str) -> bool:
+        try:
+            source_id, name = _parse_credential_ref(credential_ref)
+        except ValueError:
+            return False
+        return self._target(source_id, name).is_file()
+
+    def delete_secret(self, credential_ref: str) -> None:
+        source_id, name = _parse_credential_ref(credential_ref)
+        target = self._target(source_id, name)
+        if target.is_file():
+            target.unlink()
+
     def resolve(self, credential_ref: str, *, source_id: str) -> dict[str, str]:
         expected = f"local-secret://{source_id}/"
         if not credential_ref.startswith(expected):
@@ -158,6 +191,19 @@ def _extract_headers(curl_text: str) -> dict[str, str]:
         name, content = value.split(":", 1)
         headers[name.strip().lower()] = content.strip()
     return headers
+
+
+def _parse_credential_ref(credential_ref: str) -> tuple[str, str]:
+    prefix = "local-secret://"
+    if not credential_ref.startswith(prefix):
+        raise ValueError("credential ref must use local-secret://")
+    remainder = credential_ref.removeprefix(prefix)
+    if "/" not in remainder:
+        raise ValueError("credential ref is incomplete")
+    source_id, name = remainder.split("/", 1)
+    if not source_id or not name or "/" in name or "\\" in name:
+        raise ValueError("credential ref is invalid")
+    return source_id, name
 
 
 def _domain_cookies(jar: Iterable[Any], *, domain: str) -> dict[str, str]:

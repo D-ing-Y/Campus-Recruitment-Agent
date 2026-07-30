@@ -19,6 +19,9 @@ class LLMCache:
         prompt_version: str,
         schema_version: str,
         messages: list[dict[str, str]],
+        integration: str | None = None,
+        structured_output_strategy: str | None = None,
+        capability_fingerprint: str | None = None,
     ) -> str:
         payload = {
             "provider": provider,
@@ -27,6 +30,9 @@ class LLMCache:
             "prompt_version": prompt_version,
             "schema_version": schema_version,
             "messages": messages,
+            "integration": integration,
+            "structured_output_strategy": structured_output_strategy,
+            "capability_fingerprint": capability_fingerprint,
         }
         canonical = json.dumps(
             payload,
@@ -56,6 +62,10 @@ class LLMCache:
         raw_output: str,
         parsed_json: dict[str, Any],
         usage: dict[str, Any] | None,
+        integration: str | None = None,
+        structured_output_strategy: str | None = None,
+        capability_fingerprint: str | None = None,
+        fallback_reason: str | None = None,
     ) -> str | None:
         try:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -70,6 +80,10 @@ class LLMCache:
                 "raw_output": raw_output,
                 "parsed_json": parsed_json,
                 "usage": usage,
+                "integration": integration,
+                "structured_output_strategy": structured_output_strategy,
+                "capability_fingerprint": capability_fingerprint,
+                "fallback_reason": fallback_reason,
             }
             (self.cache_dir / f"{cache_key}.json").write_text(
                 json.dumps(value, ensure_ascii=False, indent=2),

@@ -9,8 +9,13 @@ description = "Evidence-driven candidate, role and explainable matching Graphs f
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+  "langchain>=1.2,<2",
   "langgraph>=1.2,<2",
   "langgraph-checkpoint-sqlite>=3.1,<4",
+  "langchain-deepseek>=1,<2",
+  "langchain-openai>=1,<2",
+  "langchain-mcp-adapters>=0.2,<1",
+  "mcp>=1.24,<2",
   "pydantic>=2.13,<3",
   "pypdf>=6.14,<7",
   "httpx",

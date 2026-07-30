@@ -43,6 +43,7 @@ class CapabilityAssessment(BaseModel):
 
 
 class EducationRecord(BaseModel):
+    education_id: str = "primary"
     institution: str
     degree: str | None = None
     major: str | None = None

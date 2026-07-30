@@ -8,6 +8,10 @@ from collections import defaultdict
 from typing import Any
 
 from campus_job_agent.ontology import CapabilityOntology
+from campus_job_agent.evidence.candidate_predicates import (
+    CandidatePredicateError,
+    parse_candidate_predicate,
+)
 from campus_job_agent.schemas import (
     CandidateProfile,
     CapabilityAssessment,
@@ -84,6 +88,13 @@ class CandidateProfileProjector:
             and values[0].claim_type == "model_inference"
         )
         latest = self.repository.get_latest_profile(subject_id, "candidate")
+        if (
+            latest is not None
+            and completion_reason is None
+            and not unknowns
+            and latest.supporting_claim_ids == used_claims
+        ):
+            return latest
         profile = CandidateProfile(
             candidate_id=subject_id,
             schema_version="v0.4",
@@ -178,9 +189,9 @@ def _project_education(
         "education.graduation_year": "graduation_year",
         "education:graduation_year": "graduation_year",
     }
-    values: dict[str, Any] = {}
-    claim_ids: list[str] = []
-    field_claim_ids: dict[str, list[str]] = {}
+    values: dict[str, dict[str, Any]] = defaultdict(dict)
+    claim_ids: dict[str, list[str]] = defaultdict(list)
+    field_claim_ids: dict[str, dict[str, list[str]]] = defaultdict(dict)
     for predicate, field in aliases.items():
         claims = grouped.get(predicate, [])
         if (
@@ -189,17 +200,31 @@ def _project_education(
             or predicate in conflicting_predicates
         ):
             continue
-        values[field] = claims[-1].value
-        field_claim_ids[field] = [item.claim_id for item in claims]
-        claim_ids.extend(field_claim_ids[field])
-    if "institution" not in values:
-        return []
+        values["primary"][field] = claims[-1].value
+        field_claim_ids["primary"][field] = [item.claim_id for item in claims]
+        claim_ids["primary"].extend(field_claim_ids["primary"][field])
+    for predicate, claims in grouped.items():
+        if predicate in conflicting_predicates or not claims or claims[-1].value is None:
+            continue
+        try:
+            parsed = parse_candidate_predicate(predicate, allow_legacy=False)
+        except CandidatePredicateError:
+            continue
+        if parsed.kind != "education" or parsed.record_id is None or parsed.field is None:
+            continue
+        record_id = parsed.record_id
+        values[record_id][parsed.field] = claims[-1].value
+        field_claim_ids[record_id][parsed.field] = [item.claim_id for item in claims]
+        claim_ids[record_id].extend(field_claim_ids[record_id][parsed.field])
     return [
         EducationRecord(
-            **values,
-            supporting_claim_ids=_stable_unique(claim_ids),
-            field_supporting_claim_ids=field_claim_ids,
+            education_id=record_id,
+            **data,
+            supporting_claim_ids=_stable_unique(claim_ids[record_id]),
+            field_supporting_claim_ids=field_claim_ids[record_id],
         )
+        for record_id, data in sorted(values.items())
+        if "institution" in data
     ]
 
 
@@ -299,12 +324,11 @@ def _find_conflicts(
 
 
 def _is_candidate_predicate(predicate: str) -> bool:
-    return (
-        predicate.startswith("capability:")
-        or predicate.startswith("education.")
-        or predicate.startswith("education:")
-        or _EXPERIENCE_PATTERN.match(predicate) is not None
-    )
+    try:
+        parse_candidate_predicate(predicate, allow_legacy=True)
+    except CandidatePredicateError:
+        return False
+    return True
 
 
 def _canonical_profile(profile_data: dict[str, Any]) -> str:

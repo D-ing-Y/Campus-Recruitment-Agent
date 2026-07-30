@@ -3,8 +3,8 @@
 from campus_job_agent.llm import (
     LLMCache,
     LLMConfigError,
-    MockLLMProvider,
     StructuredOutputError,
+    build_llm_provider,
     load_llm_config,
     parse_search_goal_with_llm,
 )
@@ -35,12 +35,7 @@ def parse_goal_with_llm(user_input: str) -> tuple[dict, list[dict], list[dict]]:
     except LLMConfigError:
         raise
 
-    if config.provider == "mock":
-        provider = MockLLMProvider(config.mock_mode)
-    else:
-        from campus_job_agent.llm.openai_compatible import OpenAICompatibleProvider
-
-        provider = OpenAICompatibleProvider(config)
+    provider = build_llm_provider(config)
     cache = LLMCache(config.cache_dir)
 
     try:

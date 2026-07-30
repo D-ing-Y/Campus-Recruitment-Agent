@@ -20,6 +20,8 @@ checkpoint 和 handoff。
 
 - 保留现有 `campus-agent` console script，不另建第二套 CLI harness。
 - 默认交互式引导与 one-shot 子命令并存，所有命令提供纯 JSON 模式。
+- 采用 CC Switch 的 Provider/SQLite SSOT/原子 current switch 形状建立 ModelProfile；CLI UI 只是
+  ModelProfileService 和既有 Application Services 的交互适配层。
 - 引入 `RuntimeFactory` 作为生产装配根，统一解析项目数据根和依赖。
 - 引入 `RunSession` 与 typed handoff；Session 只保存引用和当前阶段，不复制子图 State。
 - 引入追加式 `NodeEvent`/`ErrorEvent` 与安全的 Run artifact bundle。
@@ -31,11 +33,12 @@ checkpoint 和 handoff。
 
 ```text
 campus-agent CLI
-  ├─ interactive shell / guided prompts
+  ├─ project CLI UI / guided prompts
   ├─ one-shot commands
   └─ --json
         ↓
 Application Services
+  ├─ ModelProfileService
   ├─ SessionService
   ├─ CandidateService
   ├─ IntentIntakeService
@@ -121,6 +124,14 @@ failed
 
 ```text
 campus-agent
+├─ model
+│  ├─ add
+│  ├─ edit
+│  ├─ list
+│  ├─ show
+│  ├─ use
+│  ├─ remove
+│  └─ test
 ├─ doctor
 ├─ session
 │  ├─ start
@@ -176,6 +187,38 @@ campus-agent
 ```
 
 无参数进入交互式引导；交互层最终调用同一 application service，不维护第二套业务实现。
+
+### 6.1 Model Provider SSOT
+
+参考 CC Switch 的 Provider 形状和 SQLite SSOT，但不复制其面向外部 CLI 的 live-file 覆盖逻辑：
+
+```json
+{
+  "id": "deepseek-default",
+  "name": "DeepSeek Default",
+  "settingsConfig": {
+    "provider": "openai_compatible",
+    "base_url": "https://api.deepseek.com",
+    "model": "deepseek-v4-flash",
+    "credential_ref": "local-secret://llm/deepseek-default"
+  },
+  "category": "cn_official",
+  "websiteUrl": "https://platform.deepseek.com/",
+  "createdAt": 0,
+  "sortIndex": 0,
+  "notes": null,
+  "icon": "deepseek",
+  "iconColor": null,
+  "isCurrent": true
+}
+```
+
+Repository 使用 `(id, app_type)` 主键、`settings_config` JSON 和 `is_current`；切换在同一事务中先清除
+旧 current 再设置目标。配置读取顺序为显式 `CAMPUS_AGENT_MODEL_PROFILE` → 显式进程环境变量 →
+SQLite current Provider。项目不隐式加载 cwd 下 `.env`，避免重新引入 cwd-dependent 配置源。
+
+API key 不进入 Provider 表。SecretStore 保存 `api_key_ref`，运行装配只在 Provider 边界解析；
+`doctor/model list/show` 只显示 `api_key_present` 和 credential ref，不显示 payload。
 
 ## 7. 交互原则
 
@@ -373,7 +416,8 @@ ErrorEvent 保存安全 message、error type、retryability、node、related ref
 ## 18. 风险
 
 - 真实来源不稳定：使用 opt-in smoke、raw replay 与明确 Partial/blocked 状态，不降低门槛。
-- CLI 范围膨胀：只做当前业务流程、诊断和恢复，不做通用 TUI/Web。
+- CLI 范围膨胀：只做项目专用 CLI UI、当前业务流程、配置、诊断和恢复，不做通用 TUI 框架、
+  Web 或桌面应用；未开放页面只保留稳定导航占位。
 - 双重状态源：Session 只保存 refs，事实/执行状态仍分别归 repository/checkpoint。
 - 日志泄露：默认最小摘要、引用优先、统一 redaction 和 Git ignore 检查。
 - 为了“节点化”而过度拆分：以独立业务责任和失败边界决定节点，不按数量追求复杂度。

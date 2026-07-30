@@ -156,7 +156,7 @@ def test_answer_is_archived_before_profile_update_and_skip_is_not_reasked(
     )
     assert skipped["status"] == "completed_with_unknowns"
     assert "__interrupt__" not in skipped
-    assert "gap:experience.project.responsibility" in skipped["skipped_gap_ids"]
+    assert skip_request["questions"][0]["gap_id"] in skipped["skipped_gap_ids"]
 
 
 def test_wrong_request_id_is_rejected_without_evidence_write(tmp_path) -> None:

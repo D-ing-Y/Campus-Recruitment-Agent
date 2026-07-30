@@ -14,6 +14,7 @@ from campus_job_agent.schemas import (
     EvidenceClaim,
     EvidenceFragment,
     ProfileSnapshot,
+    ValidationReceipt,
 )
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
@@ -149,6 +150,80 @@ class SQLiteRepository:
                 return EvidenceClaim.model_validate_json(row[0])
             raise
         return claim
+
+    def save_candidate_claim_batch(
+        self,
+        validated: list[tuple[EvidenceClaim, ValidationReceipt]],
+        *,
+        rejected_receipts: list[ValidationReceipt],
+    ) -> tuple[list[EvidenceClaim], list[ValidationReceipt]]:
+        saved: list[EvidenceClaim] = []
+        receipts: list[ValidationReceipt] = []
+        with self._connect() as connection:
+            for claim, receipt in validated:
+                row = connection.execute(
+                    "SELECT payload_json FROM claims WHERE idempotency_key = ?",
+                    (claim.idempotency_key(),),
+                ).fetchone()
+                if row is None:
+                    connection.execute(
+                        "INSERT INTO claims VALUES (?, ?, ?, ?, ?, ?)",
+                        (
+                            claim.claim_id, claim.subject_id, claim.predicate,
+                            claim.idempotency_key(), claim.model_dump_json(),
+                            claim.created_at.isoformat(),
+                        ),
+                    )
+                    connection.executemany(
+                        "INSERT INTO claim_fragments VALUES (?, ?)",
+                        [(claim.claim_id, value) for value in claim.evidence_fragment_ids],
+                    )
+                    persisted = claim
+                    status = "accepted"
+                else:
+                    persisted = EvidenceClaim.model_validate_json(row[0])
+                    status = "duplicate"
+                final_receipt = receipt.model_copy(update={
+                    "status": status,
+                    "persisted_claim_id": persisted.claim_id,
+                })
+                self._insert_validation_receipt(connection, final_receipt)
+                saved.append(persisted)
+                receipts.append(final_receipt)
+            for receipt in rejected_receipts:
+                self._insert_validation_receipt(connection, receipt)
+                receipts.append(receipt)
+        receipts.sort(key=lambda item: item.item_index)
+        return saved, receipts
+
+    def list_validation_receipts(
+        self, *, subject_ref: str | None = None, run_id: str | None = None
+    ) -> list[ValidationReceipt]:
+        clauses: list[str] = []
+        params: list[str] = []
+        if subject_ref is not None:
+            clauses.append("subject_ref = ?")
+            params.append(subject_ref)
+        if run_id is not None:
+            clauses.append("run_id = ?")
+            params.append(run_id)
+        query = "SELECT payload_json FROM candidate_validation_receipts"
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += " ORDER BY created_at, receipt_id"
+        return self._many(query, tuple(params), ValidationReceipt)
+
+    @staticmethod
+    def _insert_validation_receipt(
+        connection: sqlite3.Connection, receipt: ValidationReceipt
+    ) -> None:
+        connection.execute(
+            "INSERT INTO candidate_validation_receipts VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                receipt.receipt_id, receipt.run_id, receipt.subject_ref,
+                receipt.status, receipt.model_dump_json(), datetime.now(UTC).isoformat(),
+            ),
+        )
 
     def get_claim(self, claim_id: str) -> EvidenceClaim | None:
         return self._one(

@@ -50,6 +50,10 @@ def append_items(left: list[Any], right: list[Any]) -> list[Any]:
     return list(left or []) + list(right or [])
 
 
+def merge_mapping(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
+    return {**(left or {}), **(right or {})}
+
+
 class InformationGap(BaseModel):
     gap_id: str
     target_path: str
@@ -202,7 +206,9 @@ class CandidateProfileGraphState(TypedDict, total=False):
     processed_artifact_ids: Annotated[list[str], stable_union]
     fragment_ids: Annotated[list[str], stable_union]
     processed_fragment_ids: Annotated[list[str], stable_union]
+    fragment_processing: Annotated[dict[str, str], merge_mapping]
     claim_ids: Annotated[list[str], stable_union]
+    validation_receipts: Annotated[list[dict[str, Any]], append_items]
     unsupported_artifact_ids: Annotated[list[str], stable_union]
 
     candidate_profile_snapshot_id: str | None

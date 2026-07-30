@@ -82,3 +82,22 @@ def test_structured_output_cache_hit_does_not_call_provider(tmp_path):
 
     assert provider.call_count == first_count
     assert calls[0].cache_hit is True
+
+
+def test_retry_success_is_aliased_to_initial_request_cache_key(tmp_path):
+    cache = LLMCache(str(tmp_path))
+    config = _config(tmp_path)
+    provider = MockLLMProvider("invalid_json_then_valid")
+
+    parse_search_goal_with_llm(
+        "成都 AI Agent 2027 秋招", config, provider, cache
+    )
+    assert provider.call_count == 2
+
+    goal, calls = parse_search_goal_with_llm(
+        "成都 AI Agent 2027 秋招", config, provider, cache
+    )
+    assert goal.role_query == "AI Agent"
+    assert provider.call_count == 2
+    assert calls[0].cache_hit is True
+    assert calls[0].retry_count == 0

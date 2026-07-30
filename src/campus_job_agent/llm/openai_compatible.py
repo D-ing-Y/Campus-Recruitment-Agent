@@ -38,8 +38,37 @@ class OpenAICompatibleProvider:
             response.raise_for_status()
             data = response.json()
             text = data["choices"][0]["message"]["content"]
-        except Exception as exc:
-            raise LLMProviderError(f"OpenAI-compatible provider error: {exc}") from exc
+        except httpx.TimeoutException as exc:
+            raise LLMProviderError(
+                f"OpenAI-compatible provider timeout: {exc}",
+                error_type="network_timeout",
+                retryable=True,
+            ) from exc
+        except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code
+            if status_code in {401, 403}:
+                error_type, retryable = "auth_required", False
+            elif status_code == 429:
+                error_type, retryable = "rate_limited", True
+            else:
+                error_type, retryable = "provider_error", status_code >= 500
+            raise LLMProviderError(
+                f"OpenAI-compatible provider HTTP status: {status_code}",
+                error_type=error_type,
+                retryable=retryable,
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise LLMProviderError(
+                f"OpenAI-compatible provider network error: {exc}",
+                error_type="provider_error",
+                retryable=True,
+            ) from exc
+        except (KeyError, TypeError, ValueError) as exc:
+            raise LLMProviderError(
+                "OpenAI-compatible provider returned an invalid response",
+                error_type="provider_error",
+                retryable=False,
+            ) from exc
 
         return LLMResponse(
             text=text,
