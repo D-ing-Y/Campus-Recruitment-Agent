@@ -14,6 +14,13 @@ from campus_job_agent.prompts.claim_extractor import (
     build_claim_extractor_messages,
     build_claim_retry_messages,
 )
+from campus_job_agent.prompts.career_intent import (
+    INTENT_PROMPT_NAME,
+    INTENT_PROMPT_VERSION,
+    INTENT_SCHEMA_VERSION,
+    build_career_intent_messages,
+    build_career_intent_retry_messages,
+)
 from campus_job_agent.prompts.candidate_sufficiency import (
     PROMPT_NAME as SUFFICIENCY_PROMPT_NAME,
     PROMPT_VERSION as SUFFICIENCY_PROMPT_VERSION,
@@ -40,6 +47,11 @@ __all__ = [
     "CLAIM_SCHEMA_VERSION",
     "build_claim_extractor_messages",
     "build_claim_retry_messages",
+    "INTENT_PROMPT_NAME",
+    "INTENT_PROMPT_VERSION",
+    "INTENT_SCHEMA_VERSION",
+    "build_career_intent_messages",
+    "build_career_intent_retry_messages",
     "SUFFICIENCY_PROMPT_NAME",
     "SUFFICIENCY_PROMPT_VERSION",
     "SUFFICIENCY_SCHEMA_VERSION",

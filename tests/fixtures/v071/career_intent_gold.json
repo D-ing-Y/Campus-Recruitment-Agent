@@ -1,0 +1,44 @@
+{
+  "cases": [
+    {
+      "case_id": "hard_location_misclassified_by_model",
+      "raw_text": "Agent 开发，工作地点必须成都",
+      "model_key": "location",
+      "model_value": "成都",
+      "model_kind": "negotiable",
+      "expected_key": "location",
+      "expected_kind": "hard",
+      "expected_affects_search_scope": true
+    },
+    {
+      "case_id": "preferred_large_company_type",
+      "raw_text": "Agent 开发，优先大型企业",
+      "model_key": "company_type",
+      "model_value": "大型企业",
+      "model_kind": "hard",
+      "expected_key": "company_type",
+      "expected_kind": "negotiable",
+      "expected_affects_search_scope": false
+    },
+    {
+      "case_id": "technology_company_is_company_type",
+      "raw_text": "Agent 开发，优先互联网科技公司",
+      "model_key": "industry",
+      "model_value": "互联网科技公司",
+      "model_kind": "negotiable",
+      "expected_key": "company_type",
+      "expected_kind": "negotiable",
+      "expected_affects_search_scope": false
+    },
+    {
+      "case_id": "generic_ai_industry_remains_industry",
+      "raw_text": "Agent 开发，优先人工智能行业",
+      "model_key": "industry",
+      "model_value": "人工智能行业",
+      "model_kind": "negotiable",
+      "expected_key": "industry",
+      "expected_kind": "negotiable",
+      "expected_affects_search_scope": false
+    }
+  ]
+}

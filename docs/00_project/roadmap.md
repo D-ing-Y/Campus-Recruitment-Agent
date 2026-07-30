@@ -249,8 +249,9 @@ DeepSeek、智联、牛客、企业官网传输和真实 auth resume 已通过�
 
 ## v0.7.1：子 Workflow 纵向闭环与 CLI 加固
 
-状态：Ready for Implementation（2026-07-28）。Requirements / RFC / ADR / CLI-Run Contract、
-实现任务和 Eval plan 已确认；尚无 v0.7.1 代码或验收报告。
+状态：In Progress（2026-07-30）。Requirements / RFC / ADR / CLI-Run Contract、实现任务和
+Eval plan 已确认；WP0、WP1、WP1.1 与 WP2 已通过，WP3-WP7 尚未完成。当前通过的是分阶段验收，
+不等同于 v0.7.1 整体 Implemented / Accepted。
 
 版本定位：
 

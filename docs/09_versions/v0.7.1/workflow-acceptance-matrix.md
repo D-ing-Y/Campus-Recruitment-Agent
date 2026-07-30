@@ -1,6 +1,6 @@
 # v0.7.1 Workflow 验收矩阵
 
-状态：WP0 Passed；WP1 Passed；WP1.1 Passed
+状态：WP0 Passed；WP1 Passed；WP1.1 Passed；WP2 Passed
 日期：2026-07-30
 
 状态枚举：`not_started | failing | blocked | partial | passed | not_applicable`。
@@ -11,7 +11,7 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Runtime/CLI | passed | not_applicable | not_applicable | passed | passed | passed | not_applicable | passed | passed | passed |
 | Candidate | passed | passed | passed | passed | passed | passed | passed | passed | passed | passed |
-| CareerIntent | not_started | not_started | not_started | not_started | not_started | not_started | not_started | not_started | not_started | not_started |
+| CareerIntent | passed | passed | passed | passed | passed | passed | passed | passed | passed | passed |
 | Role | partial | partial | partial | partial | partial | partial | partial | failing | partial | partial |
 | Matching/Decision | partial | not_applicable | partial | partial | partial | partial | partial | failing | partial | partial |
 | Preparation | partial | not_applicable | partial | partial | partial | partial | partial | failing | partial | partial |
@@ -99,13 +99,27 @@ MCP 配置尚未开放到 CLI UI。
 
 WP1 全量回归：398 passed in 40.11s，`compileall` 与 `git diff --check` 通过。DeepSeek Provider
 健康检查、真实简历 E4 与断网缓存回放已通过；用户已完成真实画像人工确认。WP1
-退出门禁已满足，但本结论不代表 WP2 已开始或 v0.7.1 整体已完成。
+退出门禁已满足，但本结论不代表 WP3 已开始或 v0.7.1 整体已完成。
 
-## 5. WP2-WP7
+## 5. WP2 CareerIntent
+
+| Gate | 预期 | 状态 | 证据 |
+| --- | --- | --- | --- |
+| Contract | constraints 为 canonical source，扁平字段不漂移 | passed | CareerIntent Contract + Pydantic consistency validator |
+| Evidence | raw/response 先归档，constraint 有 fragment ref | passed | E2 provider failure raw-first + E4 final snapshot |
+| Model | DeepSeek non-thinking Tool Calling | passed | `run-b2b9ddee-610a-476d-bf51-4c54310352c5`；cache miss，effective tool calling |
+| Validator | Pydantic + hard/preference/key/owner 领域门 | passed | gold 4 cases + real semantic mismatch correction |
+| Projection | confirmed hard constraint 才进入 SearchScope | passed | `intent-snapshot:f50118c95f38e33dfa79f129` |
+| Persistence | draft/receipt/response/snapshot/scope/handoff 幂等 | passed | repository regression + duplicate confirm 零写 |
+| Graph | checkpoint interrupt/revise/confirm/cancel/failure | passed | WP2 Graph integration tests |
+| CLI/Observability | installed create/resume/show/inspect 和 8 件套 | passed | installed CLI E3 + E4 run artifacts |
+| Eval | E0-E4 与全量回归 | passed | `v0.7.1-wp2-eval-report.md`；424 tests |
+
+## 6. WP3-WP7
 
 后续工作包开始时，按照 Requirements 第 6 节和 Eval plan 补充对应 Gate。不得预填 `passed`。
 
-## 6. 版本放行
+## 7. 版本放行
 
 只有总矩阵所有适用项为 `passed`，或外部 live source 项具有经用户接受且不影响版本核心声明的
 明确 `blocked/partial` 限制，才可进入最终 Eval report。任何 Candidate、Intent、Matching、

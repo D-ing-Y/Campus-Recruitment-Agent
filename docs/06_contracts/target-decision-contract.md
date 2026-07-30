@@ -231,3 +231,15 @@ RebuildDirective = comparison + directive type + required input hash
 - trace 记录 decision ID、status、reason code，不复制完整 note。
 - correction 自由文本必须交给 Human Interaction/Evidence 流程归档，不塞入 directive trace。
 - intent/decision 不得包含 Cookie、API key 或平台登录信息。
+
+## 9. v0.7.1 初始 CareerIntent 边界
+
+WP2 将“初次创建 CareerIntent”从 v0.6 comparison 后的 revision 路径中分离，交由
+CareerIntentGraph 负责。初次 intent 和后续 revision 共用以下不变量：
+
+- `constraints` 是唯一规范事实；`locations`、`graduation_year`等扁平字段是确定性投影。
+- 仅 `confirmed + affects_search_scope` constraint 能进入 SearchScope。
+- “必须”位置和明确毕业年是 hard scope；“优先”公司类型是 negotiable，不扩大 scope。
+- 只说“校招”时 recruitment type 保持待确认，不由模型猜测秋招或春招。
+- CareerIntent snapshot 和 SearchScope 成功持久化后才能创建 `role_research_required` Handoff。
+- WP2 只创建 Handoff；WP3 或未来 Parent Graph 负责消费。

@@ -363,3 +363,32 @@ Next action:
   新增 12 项，0 regression；`compileall` 和 `git diff --check` 通过。
 - Gate decision：WP1.1 Passed。限制是 MCP 仅 fixture/协议层验收，未验证任意第三方
   MCP Server，未在 CLI UI 开放 MCP 配置；WP2 仍未开始。
+
+## WP2 CareerIntent 首次入口 / 2026-07-30 / working tree（未提交）
+
+- Doc-first：先新增 WP2 Requirements、RFC-0010、ADR-0010、CareerIntent Contract、Tasks 和
+  Eval plan，再实现代码。
+- Scope：新增 raw intent evidence、structured candidate、领域 Validator、HITL、snapshot、
+  SearchScope、typed handoff、CLI/inspect；未进入 WP3 真实岗位来源或 v1.0 Parent Graph。
+- Failure 1：Intent repository 记录 ID 选择顺序使 validation receipt 错用 `draft_id`，与 draft
+  主键冲突；已改为 receipt/confirmation/scope/request/draft 显式 ID 顺序。
+- Failure 2：Graph list 无 reducer 导致跨 resume 诊断历史可丢失；已改 append reducer。
+- Failure 3：同 key 偏好 revision 时覆盖，且未修改 constraint 的 provenance 被错重写为 patch；
+  已改为聚合去重，仅修改字段引用 response fragment。
+- Failure 4：模型失败曾统一记为 `internal_error`，且中断阶段的 confirmed/projection 指标曾预填
+  1.0；已保留失败 LLM receipt、区分 unavailable/invalid output，未评估指标改为 null。
+- Live semantic failure：DeepSeek 首次将“互联网科技公司”识别为 industry，最终非缓存 E4
+  又将 recruitment constraint 标为 negotiable。这证明 Tool Calling 只控制结构；已由确定性
+  policy 归一 company type 并校正 hard/preference，问题仍要求用户修订后才发布。
+- Final live E4：`run-b2b9ddee-610a-476d-bf51-4c54310352c5`，DeepSeek
+  `effective_strategy=tool_calling`、`cache_hit=false`、Pydantic accepted；修订 run
+  `run-5f1e583e-9f42-4e24-a166-cf5c239672c3`，确认 run
+  `run-8692976b-144b-4e33-b569-ae5af73952a3` completed。
+- Outputs：CareerIntent `intent-snapshot:f50118c95f38e33dfa79f129`；SearchScope
+  `0361ec3f-0445-487c-8b38-43f0910d5620`；Handoff `handoff:1a6cd482b65e65d63ac05dad`。
+- Idempotency/privacy：重复 confirm 返回 deduplicated，session version 不变；E4 Run artifacts 中raw
+  intent 和 secret pattern 命中数均为 0。
+- Tests：424 tests 分组全量验证（349 eval/unit + 58 历史 integration + 17 v0.7.1 installed
+  integration）；wheel 重新安装，`compileall` 与 `git diff --check` 通过。
+- Gate decision：WP2 Passed；下一工作包为 WP3 Role live source。代码版本保持 0.7.0，
+  v0.7.1 整体仍未完成。

@@ -24,6 +24,12 @@ from campus_job_agent.storage import LocalBlobStore, SQLiteRepository
 from campus_job_agent.tools import build_candidate_profile_registry, build_role_profile_registry
 from campus_job_agent.tools.registry import ToolRegistry
 from campus_job_agent.workflows.candidate_profile import CandidateProfileGraphRuntime, open_sqlite_checkpointer
+from campus_job_agent.workflows.career_intent import (
+    CareerIntentGraphRuntime,
+    IntentCandidateExtractor,
+    IntentEvidenceIngestor,
+    SQLiteIntentRepository,
+)
 from campus_job_agent.workflows.feedback import FeedbackGraphRuntime, SQLiteFeedbackRepository
 from campus_job_agent.workflows.feedback.ingestion import FeedbackIngestor
 from campus_job_agent.workflows.feedback.service import FeedbackService
@@ -35,6 +41,7 @@ from campus_job_agent.workflows.role_profile import RoleProfileGraphRuntime
 
 from campus_job_agent.runtime.artifacts import RunArtifactWriter
 from campus_job_agent.runtime.candidate import CandidateApplicationService
+from campus_job_agent.runtime.intent import IntentApplicationService
 from campus_job_agent.runtime.model_profiles import (
     ModelProfileError,
     ModelProfileService,
@@ -90,6 +97,7 @@ class Runtime:
     matching_repository: SQLiteMatchingRepository
     preparation_repository: SQLitePreparationRepository
     feedback_repository: SQLiteFeedbackRepository
+    intent_repository: SQLiteIntentRepository
     session_repository: SQLiteSessionRepository
     session_service: SessionService
     llm_config: Any
@@ -117,6 +125,21 @@ class Runtime:
                     registry=self.tool_registry,
                     evidence_repository=self.evidence_repository,
                     profile_repository=self.profile_repository,
+                    checkpointer=checkpointer,
+                )
+            elif workflow == "intent":
+                yield CareerIntentGraphRuntime(
+                    ingestor=IntentEvidenceIngestor(
+                        blob_store=self.blob_store,
+                        evidence_repository=self.evidence_repository,
+                    ),
+                    extractor=IntentCandidateExtractor(
+                        self.llm_config, self.llm_provider, self.llm_cache
+                    ),
+                    evidence_repository=self.evidence_repository,
+                    profile_repository=self.profile_repository,
+                    intent_repository=self.intent_repository,
+                    session_repository=self.session_repository,
                     checkpointer=checkpointer,
                 )
             elif workflow == "role":
@@ -195,7 +218,7 @@ class Runtime:
             "source_adapters": self.source_adapter_registry.capabilities(),
             "console_script": str(Path(sys.argv[0]).resolve()),
             "legacy_cli": "legacy-mini-runtime",
-            "feature_stage": "v0.7.1-wp1",
+            "feature_stage": "v0.7.1-wp2",
         }
 
 
@@ -210,6 +233,7 @@ class RuntimeFactory:
         matching = SQLiteMatchingRepository(self.paths.database_root / "matching.sqlite3")
         preparation = SQLitePreparationRepository(self.paths.database_root / "preparation.sqlite3")
         feedback = SQLiteFeedbackRepository(self.paths.database_root / "feedback.sqlite3")
+        intent = SQLiteIntentRepository(self.paths.database_root / "intent.sqlite3")
         sessions = SQLiteSessionRepository(self.paths.database_root / "sessions.sqlite3")
         blob = LocalBlobStore(self.paths.blob_root)
         credential_store = LocalCredentialStore(self.paths.credential_root)
@@ -305,13 +329,14 @@ class RuntimeFactory:
         writer = RunArtifactWriter(self.paths.run_root, software_version="0.7.0")
         checkpoints = {
             name: self.paths.checkpoint_root / f"{name}.sqlite3"
-            for name in ("candidate", "role", "matching", "preparation", "feedback")
+            for name in ("candidate", "intent", "role", "matching", "preparation", "feedback")
         }
         runtime = Runtime(
             paths=self.paths, owner_id=owner_id, blob_store=blob,
             evidence_repository=evidence, profile_repository=evidence,
             role_repository=role, matching_repository=matching,
             preparation_repository=preparation, feedback_repository=feedback,
+            intent_repository=intent,
             session_repository=sessions, session_service=services["session"],
             llm_config=llm_config, llm_config_error=llm_config_error,
             llm_provider=provider, llm_cache=llm_cache,
@@ -323,6 +348,7 @@ class RuntimeFactory:
             checkpoint_paths=checkpoints,
         )
         runtime.application_services["candidate"] = CandidateApplicationService(runtime)
+        runtime.application_services["intent"] = IntentApplicationService(runtime)
         runtime.application_services["model"] = model_profile_service
         return runtime
 

@@ -87,6 +87,19 @@ def _build_parser() -> argparse.ArgumentParser:
     candidate_diff.add_argument("from_snapshot_id")
     candidate_diff.add_argument("to_snapshot_id")
 
+    intent = commands.add_parser("intent", help="create and confirm CareerIntent")
+    intent_commands = intent.add_subparsers(dest="intent_command", required=True)
+    intent_create = intent_commands.add_parser("create")
+    intent_create.add_argument("session_id")
+    intent_create.add_argument("--text", required=True)
+    intent_resume = intent_commands.add_parser("resume")
+    intent_resume.add_argument("session_id")
+    intent_resume.add_argument("--action", required=True, choices=("confirm", "revise", "cancel"))
+    intent_resume.add_argument("--response-id", required=True)
+    intent_resume.add_argument("--patch")
+    intent_show = intent_commands.add_parser("show")
+    intent_show.add_argument("snapshot_id")
+
     model = commands.add_parser("model", help="manage CC Switch-style model providers")
     model_commands = model.add_subparsers(dest="model_command", required=True)
     model_add = model_commands.add_parser("add")
@@ -194,6 +207,8 @@ def _dispatch(args: argparse.Namespace) -> int:
         return _inspect(runtime, args)
     if args.command == "candidate":
         return _candidate(runtime, args)
+    if args.command == "intent":
+        return _intent(runtime, args)
     if args.command == "run":
         return _legacy_run(runtime, args)
     if args.command == "auth":
@@ -470,6 +485,67 @@ def _candidate(runtime: Any, args: argparse.Namespace) -> int:
     )
 
 
+def _intent(runtime: Any, args: argparse.Namespace) -> int:
+    from campus_job_agent.schemas import IntentReviewResponse, IntentRevisionPatch, SearchScope
+
+    service = runtime.application_services["intent"]
+    command = f"intent.{args.intent_command}"
+    if args.intent_command == "create":
+        payload = service.create(session_id=args.session_id, raw_text=args.text)
+        return _emit(payload, json_mode=args.json_output)
+    if args.intent_command == "show":
+        snapshot = runtime.profile_repository.get_profile(args.snapshot_id)
+        if snapshot is None or snapshot.profile_type != "career_intent":
+            raise KeyError(f"CareerIntent snapshot not found: {args.snapshot_id}")
+        scopes = [
+            item for item in runtime.intent_repository.list("search_scope", SearchScope, owner_id=snapshot.subject_id)
+            if item.career_intent_snapshot_id == snapshot.snapshot_id
+        ]
+        return _emit({
+            "schema_version": "v0.7.1", "command": command, "status": "completed",
+            "result": {
+                "snapshot_id": snapshot.snapshot_id, "subject_id": snapshot.subject_id,
+                "version": snapshot.version, "profile": snapshot.profile_data,
+                "search_scopes": [item.model_dump(mode="json") for item in scopes],
+            },
+            "next_action": None, "warnings": [], "errors": [],
+        }, json_mode=args.json_output)
+
+    session = runtime.session_service.status(args.session_id)
+    pending = None
+    thread_id = None
+    if session.latest_run_id:
+        manifest = runtime.artifact_writer.load_manifest(session.latest_run_id)
+        thread_id = manifest.thread_id
+        with runtime.open_workflow("intent") as workflow:
+            values = dict(workflow.get_state(thread_id).values or {})
+        pending = values.get("pending_interaction")
+    stored = runtime.intent_repository.get_response_result(args.response_id)
+    if pending is None and stored is not None:
+        previous = stored.get("response_payload") or {}
+        pending = {
+            "request_id": previous.get("request_id"),
+            "thread_id": previous.get("thread_id"),
+            "user_id": previous.get("user_id"),
+        }
+        thread_id = str(previous.get("thread_id") or thread_id or "")
+    if not isinstance(pending, dict) or not pending.get("request_id") or not thread_id:
+        raise CLIArgumentError("session has no pending CareerIntent review")
+    patch = None
+    if args.patch is not None:
+        try:
+            patch = IntentRevisionPatch.model_validate(json.loads(args.patch))
+        except (json.JSONDecodeError, ValueError) as exc:
+            raise CLIArgumentError(f"invalid --patch JSON: {exc}") from exc
+    response = IntentReviewResponse(
+        response_id=args.response_id, request_id=str(pending["request_id"]),
+        thread_id=str(thread_id), user_id=session.user_id,
+        action=args.action, patch=patch,
+    )
+    payload = service.resume(session_id=args.session_id, response=response)
+    return _emit(payload, json_mode=args.json_output)
+
+
 def _model(runtime: Any, args: argparse.Namespace) -> int:
     command = f"model.{args.model_command}"
     service = runtime.model_profile_service
@@ -632,7 +708,10 @@ def _next_action(stage: str) -> str:
 def _interactive_guide(*, json_mode: bool) -> int:
     payload = {
         "schema_version": "v0.7.1", "command": "guide", "status": "completed",
-        "message": "Start with `campus-agent session start`; then use candidate build and resume commands.",
+        "message": (
+            "Start with `campus-agent session start`; build/confirm the Candidate profile, "
+            "then use `campus-agent intent create` and `intent resume`."
+        ),
         "next_action": "session.start", "warnings": [], "errors": [],
     }
     return _emit(payload, json_mode=json_mode)
@@ -689,8 +768,10 @@ def _emit_error(error_type: str, message: str, exit_code: int, *, json_mode: boo
 def _handle_error(exc: Exception, *, json_mode: bool) -> int:
     from campus_job_agent.llm import LLMConfigError, LLMProviderError, StructuredOutputError
     from campus_job_agent.runtime import (
-        ArtifactWriteError, CandidateApplicationError, ModelProfileError, SessionError,
+        ArtifactWriteError, CandidateApplicationError, IntentApplicationError,
+        ModelProfileError, SessionError,
     )
+    from campus_job_agent.workflows.career_intent import CareerIntentWorkflowError
 
     if isinstance(exc, CLIArgumentError):
         return _emit_error("invalid_input", str(exc), 2, json_mode=json_mode, recovery_hint="check command arguments")
@@ -698,6 +779,8 @@ def _handle_error(exc: Exception, *, json_mode: bool) -> int:
         return _emit_error(exc.error_type, str(exc), 3, json_mode=json_mode, recovery_hint="inspect session refs and retry with the current version")
     if isinstance(exc, CandidateApplicationError):
         return _emit_error(exc.error_type, str(exc), 3, json_mode=json_mode, recovery_hint="inspect the Candidate run and retry with valid input")
+    if isinstance(exc, (IntentApplicationError, CareerIntentWorkflowError)):
+        return _emit_error("contract_violation", str(exc), 3, json_mode=json_mode, recovery_hint="inspect the CareerIntent run and resume with the current request")
     if isinstance(exc, ModelProfileError):
         return _emit_error(exc.error_type, str(exc), 3, json_mode=json_mode, recovery_hint="inspect model providers and choose a valid profile")
     if isinstance(exc, KeyError):

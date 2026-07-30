@@ -678,6 +678,47 @@ fragment_processing: fragment_id → processed_with_accepted_claims |
 `fragment_processing`，不得冒充成功处理。checkpoint 保存执行恢复状态，receipt 的 durable 事实仍在
 EvidenceRepository，Run artifact 只保存安全诊断投影。
 
+## v0.7.1 CareerIntent WP2 State
+
+WP2 使用独立 `CareerIntentState`，不将其冒充为 v1.0 ParentState：
+
+```python
+class CareerIntentState(TypedDict, total=False):
+    run_id: str
+    session_id: str
+    thread_id: str
+    user_id: str
+    candidate_profile_snapshot_id: str
+    raw_text: str | None
+    raw_artifact_id: str | None
+    raw_fragment_id: str | None
+    candidate: dict | None
+    draft: dict | None
+    validation_receipt_id: str | None
+    pending_interaction: dict | None
+    resume_input: dict | None
+    processed_response: dict | None
+    response_artifact_id: str | None
+    response_fragment_id: str | None
+    confirmed_intent: dict | None
+    career_intent_snapshot_id: str | None
+    search_scope_id: str | None
+    handoff_id: str | None
+    status: str
+    next_action: str | None
+    llm_calls: list[dict]
+    trace: list[dict]
+    errors: list[dict]
+```
+
+Reducer 与持久化规则：
+
+- `trace`、`errors`、`llm_calls` 使用 append reducer，便于跨 interrupt/resume 审计。
+- `candidate`、`draft`、pending/response 和输出 ID 使用 replace/clear。
+- `raw_text` 只在首次 checkpoint 前暂存，归档后设为 `None`；Run artifact 只记 hash 和字符数。
+- `candidate` 只是 LLM 候选，`draft` 必须经 Pydantic 与确定性 policy 处理。
+- 完成输出只传 `career_intent_snapshot_id`、`search_scope_id` 与 `handoff_id`。
+
 ## v1.0 ParentState 目标形态
 
 ```python

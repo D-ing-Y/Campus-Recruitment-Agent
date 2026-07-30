@@ -402,3 +402,36 @@ Response：
 - 用户确认不改变原 source authority。
 - 校验失败时 Claim、Impact、Directive 零写入。
 - feedback 原文已在 Graph 输入阶段归档；checkpoint 成功处理后清除 response 正文。
+
+## 15. v0.7.1 CareerIntent Review
+
+WP2 新增独立的 `review_career_intent` 请求，用于确认模型从原始求职意向中提取的候选结构：
+
+```json
+{
+  "request_id": "request-intent-<stable-hash>",
+  "schema_version": "v0.7.1",
+  "thread_id": "intent-thread-1",
+  "run_id": "intent-run-1",
+  "user_id": "user-1",
+  "interaction_type": "review_career_intent",
+  "draft_id": "intent-draft-1",
+  "summary": {
+    "target_roles": ["Agent 开发"],
+    "target_role_families": ["ai_agent_engineering"],
+    "constraints": []
+  },
+  "unresolved_fields": ["recruitment_type"],
+  "validation_issues": [],
+  "allowed_actions": ["confirm", "revise", "cancel"]
+}
+```
+
+Response 仅允许 `confirm | revise | cancel`；`revise` 必须携带 allowlist patch，其他动作不得携带 patch。
+若 draft 仍有 unresolved field 或 validation issue，`confirm` 不能发布 snapshot，Graph 必须再次
+interrupt。响应正文先归档为 Evidence Artifact/Fragment，checkpoint 中处理后清除。
+
+- `request_id` 由 thread、draft ID、revision 和当前问题集确定性生成。
+- 相同 `response_id + canonical payload` 复用首次结果；不同 payload 报 `idempotency_conflict`。
+- 只有完成人工确认才能将 constraint `status` 转为 `confirmed`。
+- WP2 完成后创建 `role_research_required` Handoff，不在本 Graph 内调用 Role Graph。

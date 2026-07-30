@@ -33,7 +33,23 @@ from campus_job_agent.schemas.evidence import (
 )
 from campus_job_agent.schemas.gap import GapAssessment, GapItem, migrate_legacy_gap_assessment
 from campus_job_agent.schemas.goal import ParsedGoal, PlanTask, SearchGoal
-from campus_job_agent.schemas.intent import CareerIntent, IntentConstraint, migrate_legacy_career_intent
+from campus_job_agent.schemas.intent import (
+    CareerIntent,
+    CareerIntentCandidate,
+    CareerIntentDraft,
+    IntentConfirmationRecord,
+    IntentConstraint,
+    IntentConstraintCandidate,
+    IntentReviewRequest,
+    IntentReviewResponse,
+    IntentRevisionPatch,
+    IntentValidationReceipt,
+    IntentValueCandidate,
+    migrate_legacy_career_intent,
+    project_constraint_fields,
+    role_family_for_query,
+    stable_intent_id,
+)
 from campus_job_agent.schemas.matching import (
     ComparisonEntry,
     ComparisonSet,
@@ -207,7 +223,19 @@ __all__ = [
     "DocumentExtraction",
     "ExtractionUnit",
     "CareerIntent",
+    "CareerIntentCandidate",
+    "CareerIntentDraft",
+    "IntentValueCandidate",
+    "IntentConstraintCandidate",
     "IntentConstraint",
+    "IntentRevisionPatch",
+    "IntentReviewRequest",
+    "IntentReviewResponse",
+    "IntentValidationReceipt",
+    "IntentConfirmationRecord",
+    "project_constraint_fields",
+    "role_family_for_query",
+    "stable_intent_id",
     "migrate_legacy_career_intent",
     "RoleProfile",
     "RoleRequirement",

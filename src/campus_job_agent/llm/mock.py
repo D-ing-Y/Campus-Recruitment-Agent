@@ -23,6 +23,11 @@ class MockLLMProvider:
             return self._response(json.dumps({"role_query": "AI Agent"}), request.model)
         if self.mode == "always_invalid_json":
             return self._response("{not valid json", request.model)
+        if request.messages and "CAREER_INTENT_EXTRACTOR_V071" in request.messages[0]["content"]:
+            return self._response(
+                json.dumps(_valid_career_intent(request.messages), ensure_ascii=False),
+                request.model,
+            )
         if request.messages and (
             "CLAIM_EXTRACTOR_V03" in request.messages[0]["content"]
             or "CLAIM_EXTRACTOR_V04" in request.messages[0]["content"]
@@ -74,6 +79,57 @@ def _valid_goal() -> dict:
         "confidence": 0.95,
         "warnings": [],
     }
+
+
+def _valid_career_intent(messages: list[dict[str, str]]) -> dict:
+    payload = json.loads(messages[1]["content"])
+    fragment = payload["fragment"]
+    fragment_id = fragment["fragment_id"]
+    text = str(fragment.get("text", ""))
+    roles = []
+    if "Agent" in text or "智能体" in text:
+        roles.append({
+            "value": "Agent 开发", "evidence_fragment_ids": [fragment_id], "confidence": 0.95,
+        })
+    if not roles:
+        roles.append({
+            "value": "unknown", "evidence_fragment_ids": [fragment_id], "confidence": 0.4,
+        })
+    constraints = []
+    if "成都" in text:
+        constraints.append({
+            "key": "location", "values": ["成都"],
+            "kind": "hard" if "必须" in text or "只" in text else "negotiable",
+            "evidence_fragment_ids": [fragment_id], "confidence": 0.98,
+        })
+    year = next((value for value in ("2026", "2027", "2028") if value in text), None)
+    if year:
+        constraints.append({
+            "key": "graduation_year", "values": [year], "kind": "hard",
+            "evidence_fragment_ids": [fragment_id], "confidence": 0.98,
+        })
+    unresolved = []
+    if "秋招" in text:
+        recruitment = "autumn_campus"
+    elif "春招" in text:
+        recruitment = "spring_campus"
+    elif "校招" in text:
+        recruitment = "campus_unspecified"
+        unresolved.append("recruitment_type")
+    else:
+        recruitment = None
+    if recruitment:
+        constraints.append({
+            "key": "recruitment_type", "values": [recruitment], "kind": "hard",
+            "evidence_fragment_ids": [fragment_id], "confidence": 0.95,
+        })
+    for company_type in ("大型企业", "互联网科技公司"):
+        if company_type in text:
+            constraints.append({
+                "key": "company_type", "values": [company_type], "kind": "negotiable",
+                "evidence_fragment_ids": [fragment_id], "confidence": 0.9,
+            })
+    return {"target_roles": roles, "constraints": constraints, "unresolved_fields": unresolved}
 
 
 def _valid_claims(messages: list[dict[str, str]]) -> dict:

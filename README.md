@@ -27,10 +27,10 @@ v0.7 准备计划与反馈闭环已于 2026-07-27 完成实现与验收，当前
 负责确定性优先级、最小准备包与容量排期；FeedbackGraph 负责 raw-first 反馈、归因门禁、
 Claim/Impact/Directive，并以本地 saga 验证 feedback→snapshot→rematch→replan 版本链。
 
-v0.7.1“子 Workflow 纵向闭环与 CLI 加固”已完成文档路线确认，状态为 Ready for
-Implementation；代码版本仍为 `0.7.0`。该版本将先建立正式 CLI、RunSession 和节点级诊断，
-再按 Candidate、CareerIntent、Role、Matching、Preparation、Feedback 顺序完成真实纵向验收与
-typed handoff 连通。版本入口见 `docs/09_versions/v0.7.1/README.md`。v0.7.1 不实现 v1.0 Parent Graph。
+v0.7.1“子 Workflow 纵向闭环与 CLI 加固”正在分工作包实施，WP0、WP1、WP1.1 与
+WP2 已通过，下一阶段为 WP3 Role live source；代码版本仍为 `0.7.0`，只在全部
+WP0-WP7 验收后升级。正式 CLI、RunSession、Candidate 和 CareerIntent 纵向闭环及相邻 typed
+handoff 已接入。版本入口见 `docs/09_versions/v0.7.1/README.md`。v0.7.1 不实现 v1.0 Parent Graph。
 
 v0.1/v0.2 保留为 Runtime 与 LLM 基座，v0.3 提供统一证据层、领域契约、版本化画像快照和证据质量评估；v0.4 已将这些能力接入第一个可循环、可中断、可恢复的候选人画像 LangGraph subgraph。
 
