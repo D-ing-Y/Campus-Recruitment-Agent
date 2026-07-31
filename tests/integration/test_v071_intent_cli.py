@@ -9,7 +9,6 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CLI = REPO_ROOT / ".venv" / "bin" / "campus-agent"
-FIXTURE = REPO_ROOT / "tests" / "fixtures" / "v04" / "candidate_sufficient.md"
 RAW_INTENT = (
     "我想找 Agent 开发岗位，工作地点必须成都，2027 年毕业，"
     "参加校招，优先大型企业以及互联网科技公司"
@@ -32,13 +31,64 @@ def _json(result: subprocess.CompletedProcess[str]) -> dict:
     return json.loads(result.stdout)
 
 
+def _text_pdf(path: Path, text: str) -> None:
+    escaped = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+    stream = f"BT /F1 10 Tf 30 740 Td ({escaped}) Tj ET".encode()
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+        f"<< /Length {len(stream)} >>\nstream\n".encode() + stream + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    output = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for object_id, body in enumerate(objects, start=1):
+        offsets.append(len(output))
+        output.extend(f"{object_id} 0 obj\n".encode())
+        output.extend(body)
+        output.extend(b"\nendobj\n")
+    xref = len(output)
+    output.extend(f"xref\n0 {len(objects) + 1}\n".encode())
+    output.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        output.extend(f"{offset:010d} 00000 n \n".encode())
+    output.extend(
+        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
+    )
+    path.write_bytes(bytes(output))
+
+
 def _seed_candidate(tmp_path: Path, user_id: str) -> tuple[str, str]:
     started = _run(tmp_path, "session", "start", "--user-id", user_id)
     assert started.returncode == 0, started.stderr
     session_id = _json(started)["session_id"]
+    resume = tmp_path / f"{user_id}.pdf"
+    _text_pdf(resume, (
+        "Anonymous University expected graduation 2027. Project Candidate Evidence Workflow. "
+        "Responsibilities implemented graph checkpoint recovery and evaluation. "
+        "Skills Python LangGraph RAG LLM. " * 2
+    ))
+    imported = _run(
+        tmp_path, "resume", "import", session_id,
+        "--candidate-id", user_id, "--input", str(resume),
+    )
+    assert imported.returncode == 0, imported.stderr
+    resume_payload = _json(imported)
+    for index in range(30):
+        if resume_payload["status"] != "interrupted":
+            break
+        reviewed = _run(
+            tmp_path, "resume", "resume", session_id,
+            "--action", "confirm", "--response-id", f"resume-{user_id}-{index}",
+        )
+        assert reviewed.returncode == 0, reviewed.stderr
+        resume_payload = _json(reviewed)
+    assert resume_payload["status"] == "completed"
     built = _run(
         tmp_path, "candidate", "build", session_id,
-        "--candidate-id", user_id, "--input", str(FIXTURE),
+        "--candidate-id", user_id,
+        "--resume-evidence", resume_payload["output_refs"]["resume_evidence_id"],
     )
     assert built.returncode == 0, built.stderr
     payload = _json(built)

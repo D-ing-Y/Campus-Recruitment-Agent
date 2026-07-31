@@ -37,16 +37,28 @@ class CandidateApplicationService:
         *,
         session_id: str,
         candidate_id: str,
-        input_paths: list[str],
+        resume_evidence_id: str,
         budgets: dict[str, int] | None = None,
     ) -> dict[str, Any]:
         session = self.runtime.session_service.status(session_id)
+        if session.status != "active" or session.pending_request is not None:
+            raise CandidateApplicationError(
+                "candidate build requires an active session without a pending request"
+            )
+        if session.current_stage != "candidate":
+            raise CandidateApplicationError("candidate build requires the candidate session stage")
         if not candidate_id.strip():
             raise CandidateApplicationError("candidate_id is required")
-        resolved_paths = [str(Path(value).expanduser().resolve()) for value in input_paths]
-        missing = [value for value in resolved_paths if not Path(value).is_file()]
-        if missing:
-            raise CandidateApplicationError(f"candidate input does not exist: {missing[0]}")
+        snapshot = self.runtime.evidence_repository.get_resume_evidence_snapshot(
+            resume_evidence_id
+        )
+        if snapshot is None or snapshot.status != "confirmed":
+            raise CandidateApplicationError("confirmed ResumeEvidence snapshot is required")
+        if snapshot.owner_id != session.user_id or snapshot.candidate_id != candidate_id:
+            raise CandidateApplicationError("ResumeEvidence identity mismatch")
+        current_resume = session.current_refs.get("resume_evidence_snapshot_id")
+        if current_resume != resume_evidence_id:
+            raise CandidateApplicationError("ResumeEvidence snapshot is not current for this session")
         thread_id = f"thread-{uuid4()}"
         manifest = self.runtime.artifact_writer.initialize_run(
             session_id=session.session_id,
@@ -56,8 +68,7 @@ class CandidateApplicationService:
             parent_run_id=session.latest_run_id,
             input_refs={
                 "candidate_id": candidate_id,
-                "material_count": len(resolved_paths),
-                "material_names": [Path(value).name for value in resolved_paths],
+                "resume_evidence_id": resume_evidence_id,
             },
         )
         state = create_candidate_profile_state(
@@ -65,8 +76,9 @@ class CandidateApplicationService:
             thread_id=thread_id,
             user_id=session.user_id,
             candidate_id=candidate_id,
-            input_paths=resolved_paths,
-            allowed_path_roots=[str(Path(value).parent) for value in resolved_paths] or [str(Path.cwd())],
+            resume_evidence_id=resume_evidence_id,
+            input_paths=[],
+            allowed_path_roots=[str(Path.cwd())],
             budgets=budgets,
         )
         try:
@@ -119,6 +131,8 @@ class CandidateApplicationService:
             with self.runtime.open_workflow("candidate") as workflow:
                 previous = workflow.get_state(thread_id)
                 previous_values = dict(previous.values or {})
+                if not previous_values.get("resume_evidence_id"):
+                    raise CandidateApplicationError("legacy_session_incompatible")
                 workflow.authorize_upload_paths(thread_id, response.file_paths)
                 result = workflow.resume(
                     thread_id=thread_id, response=response, run_id=manifest.run_id
@@ -164,6 +178,7 @@ class CandidateApplicationService:
         self._index_objects(manifest.run_id, result, snapshot_id, session.user_id)
         safe_state = {
             "candidate_id": result.get("candidate_id"),
+            "resume_evidence_id": result.get("resume_evidence_id"),
             "status": status,
             "active_artifact_ids": result.get("active_artifact_ids", []),
             "fragment_ids": result.get("fragment_ids", []),
@@ -377,6 +392,14 @@ class CandidateApplicationService:
             )
             for item in accepted
         )
+        resume_evidence_id = str(result.get("resume_evidence_id") or "")
+        resume_trace_valid = sum(
+            bool(item.persisted_claim_id)
+            and (claim := self.runtime.evidence_repository.get_claim(str(item.persisted_claim_id))) is not None
+            and resume_evidence_id in claim.source_evidence_ids
+            and bool(claim.evidence_fragment_ids)
+            for item in accepted
+        ) if resume_evidence_id else 0
         artifacts = [
             self.runtime.evidence_repository.get_artifact(value)
             for value in result.get("active_artifact_ids", [])
@@ -392,6 +415,10 @@ class CandidateApplicationService:
             "fragment_locator_trace_rate": _rate(sum(item is not None and bool(item.locator) for item in fragments), len(fragments)),
             "model_item_receipt_rate": _rate(len(receipts), len(expected_receipts)),
             "accepted_claim_reference_valid_rate": _rate(reference_valid, len(accepted)),
+            "resume_evidence_claim_trace_rate": (
+                _rate(resume_trace_valid, len(accepted))
+                if resume_evidence_id and accepted else None
+            ),
             "accepted_candidate_predicate_supported_rate": _rate(supported, len(accepted)),
             "accepted_claim_projection_rate": _rate(len(accepted_ids & projected), len(accepted_ids)),
             "rejected_claim_reason_coverage_rate": _rate(

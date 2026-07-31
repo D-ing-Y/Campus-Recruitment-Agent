@@ -306,3 +306,14 @@ feedback_attribution_unconfirmed
 single_event_family_mutation_blocked
 directive_resolution_invalid
 ```
+
+## v0.7.1 WP1.3 Resume Evidence Tools
+
+- PDF 提取由内部 Tool 使用 pypdf layout mode，只有质量门禁失败才调用 pdfplumber；两者失败返回
+  `unsupported_input`，不创建半成品 Snapshot；
+- Resume 模型边界只暴露 `ResumeExtractionBatch` Tool Schema，不含 personal_information、任意 JSON
+  Pointer 或 Profile/Claim 字段；个人信息由本地代码提取并在调用 Provider 前脱敏；
+- 模型只能引用当前 PDF 的 Fragment ID，应用根据 Pydantic 对象生成 canonical field pointers；
+- 应用使用 NFKC/空白/隐形格式字符归一化生成字段级 span，无精确 span 的 Draft 拒绝进入审核；
+- Candidate 初始 Claim Tool 接受 `resume_evidence_id`，把 confirmed 结构化视图与原 Fragment ID 一起
+  送入抽取器；后续 conversation_response 上传仍按独立 Artifact 处理，不伪装成 ResumeEvidence。

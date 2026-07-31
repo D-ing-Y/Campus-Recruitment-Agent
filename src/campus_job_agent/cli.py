@@ -64,12 +64,32 @@ def _build_parser() -> argparse.ArgumentParser:
     handoff.add_argument("--run-id")
     handoff.add_argument("--session-id")
 
+    resume_evidence = commands.add_parser("resume", help="import and confirm structured resume evidence")
+    resume_commands = resume_evidence.add_subparsers(dest="resume_command", required=True)
+    resume_import = resume_commands.add_parser("import")
+    resume_import.add_argument("session_id")
+    resume_import.add_argument("--candidate-id", required=True)
+    resume_import.add_argument("--input", required=True)
+    resume_import.add_argument(
+        "--reparse", action="store_true",
+        help="create a new draft version from the same PDF artifact",
+    )
+    resume_resume = resume_commands.add_parser("resume")
+    resume_resume.add_argument("session_id")
+    resume_resume.add_argument(
+        "--action", choices=("confirm", "correct", "remove", "retry", "cancel")
+    )
+    resume_resume.add_argument("--response-id")
+    resume_resume.add_argument("--patch")
+    resume_show = resume_commands.add_parser("show")
+    resume_show.add_argument("object_id")
+
     candidate = commands.add_parser("candidate", help="build and resume CandidateProfileGraph")
     candidate_commands = candidate.add_subparsers(dest="candidate_command", required=True)
     candidate_build = candidate_commands.add_parser("build")
     candidate_build.add_argument("session_id")
     candidate_build.add_argument("--candidate-id", required=True)
-    candidate_build.add_argument("--input", action="append", default=[])
+    candidate_build.add_argument("--resume-evidence", required=True)
     candidate_resume = candidate_commands.add_parser("resume")
     candidate_resume.add_argument("session_id")
     candidate_resume.add_argument(
@@ -205,6 +225,8 @@ def _dispatch(args: argparse.Namespace) -> int:
         return _session(runtime, args)
     if args.command == "inspect":
         return _inspect(runtime, args)
+    if args.command == "resume":
+        return _resume_evidence(runtime, args)
     if args.command == "candidate":
         return _candidate(runtime, args)
     if args.command == "intent":
@@ -260,7 +282,9 @@ def _session(runtime: Any, args: argparse.Namespace) -> int:
                     session.session_id, expected_version=args.expected_version,
                     latest_run_id=manifest.run_id,
                 )
-                next_action = _next_action(updated.current_stage)
+                next_action = _next_action(
+                    updated.current_stage, updated.pending_request
+                )
             observed.finish(
                 output_refs={"session_id": updated.session_id},
                 counts={"session_version": updated.session_version}, route=next_action,
@@ -334,6 +358,7 @@ def _inspect(runtime: Any, args: argparse.Namespace) -> int:
                 "claim_id": item.claim_id, "subject_id": item.subject_id,
                 "predicate": item.predicate, "claim_type": item.claim_type,
                 "evidence_fragment_ids": item.evidence_fragment_ids,
+                "source_evidence_ids": item.source_evidence_ids,
                 "confidence": item.confidence, "schema_version": item.schema_version,
                 "status": item.status,
             }
@@ -392,7 +417,7 @@ def _candidate(runtime: Any, args: argparse.Namespace) -> int:
         payload = service.build(
             session_id=args.session_id,
             candidate_id=args.candidate_id,
-            input_paths=args.input,
+            resume_evidence_id=args.resume_evidence,
         )
         return _emit(
             payload, json_mode=args.json_output,
@@ -483,6 +508,151 @@ def _candidate(runtime: Any, args: argparse.Namespace) -> int:
         payload, json_mode=args.json_output,
         exit_code=_candidate_exit_code(payload),
     )
+
+
+def _resume_evidence(runtime: Any, args: argparse.Namespace) -> int:
+    from campus_job_agent.schemas import ResumeReviewResponse
+
+    service = runtime.application_services["resume"]
+    command = f"resume.{args.resume_command}"
+    if args.resume_command == "show":
+        draft = runtime.evidence_repository.get_resume_draft(args.object_id)
+        snapshot = runtime.evidence_repository.get_resume_evidence_snapshot(args.object_id)
+        if draft is None and snapshot is None:
+            raise KeyError(f"resume evidence object not found: {args.object_id}")
+        value = draft or snapshot
+        return _emit({
+            "schema_version": "v0.7.1", "command": command,
+            "status": "completed", "result": value.model_dump(mode="json"),
+            "next_action": None, "warnings": [], "errors": [],
+        }, json_mode=args.json_output)
+    if args.resume_command == "import":
+        payload = service.import_pdf(
+            session_id=args.session_id, candidate_id=args.candidate_id,
+            input_path=args.input, reparse=args.reparse,
+        )
+        if not args.json_output and sys.stdin.isatty() and payload.get("status") == "interrupted":
+            payload = _interactive_resume_loop(runtime, args.session_id, payload)
+        return _emit(payload, json_mode=args.json_output)
+
+    session = runtime.session_service.status(args.session_id)
+    if args.response_id:
+        receipt = runtime.evidence_repository.get_resume_review_receipt(
+            args.response_id
+        )
+        if receipt is not None:
+            if not session.latest_run_id:
+                raise CLIArgumentError("resume review run is unavailable")
+            manifest = runtime.artifact_writer.load_manifest(session.latest_run_id)
+            if manifest.workflow != "resume_evidence":
+                raise CLIArgumentError("legacy_session_incompatible")
+            patch = _parse_resume_patch(args.patch, args.action)
+            replay = ResumeReviewResponse(
+                response_id=args.response_id, request_id=receipt.request_id,
+                thread_id=manifest.thread_id, user_id=session.user_id,
+                action=args.action, patch=patch,
+                attests_pdf_source=args.action == "correct",
+            )
+            return _emit(
+                service.resume(session_id=args.session_id, response=replay),
+                json_mode=args.json_output,
+            )
+    pending, thread_id = _pending_resume_request(runtime, session)
+    if pending is None or thread_id is None:
+        raise CLIArgumentError("session has no pending resume review")
+    if args.action is None:
+        if args.json_output or not sys.stdin.isatty():
+            raise CLIArgumentError("--action is required outside interactive TTY mode")
+        payload = {
+            "status": "interrupted", "pending_request": pending,
+            "thread_id": thread_id,
+        }
+        payload = _interactive_resume_loop(runtime, args.session_id, payload)
+        return _emit(payload, json_mode=False)
+    if not args.response_id:
+        raise CLIArgumentError("--response-id is required with --action")
+    patch = _parse_resume_patch(args.patch, args.action)
+    response = ResumeReviewResponse(
+        response_id=args.response_id, request_id=str(pending["request_id"]),
+        thread_id=thread_id, user_id=session.user_id, action=args.action,
+        patch=patch, attests_pdf_source=args.action == "correct",
+    )
+    payload = service.resume(session_id=args.session_id, response=response)
+    return _emit(payload, json_mode=args.json_output)
+
+
+def _pending_resume_request(runtime: Any, session: Any) -> tuple[dict[str, Any] | None, str | None]:
+    if not session.latest_run_id:
+        return None, None
+    manifest = runtime.artifact_writer.load_manifest(session.latest_run_id)
+    if manifest.workflow != "resume_evidence":
+        raise CLIArgumentError("legacy_session_incompatible")
+    with runtime.open_workflow("resume") as workflow:
+        values = dict(workflow.get_state(manifest.thread_id).values or {})
+    pending = values.get("pending_interaction")
+    return (pending if isinstance(pending, dict) else None), manifest.thread_id
+
+
+def _interactive_resume_loop(
+    runtime: Any, session_id: str, payload: dict[str, Any]
+) -> dict[str, Any]:
+    from campus_job_agent.schemas import ResumeReviewResponse
+
+    service = runtime.application_services["resume"]
+    current = payload
+    while current.get("status") == "interrupted":
+        pending = current.get("pending_request")
+        if not isinstance(pending, dict):
+            session = runtime.session_service.status(session_id)
+            pending, _ = _pending_resume_request(runtime, session)
+        if not isinstance(pending, dict):
+            raise CLIArgumentError("resume review request is unavailable")
+        view = service.review_view(pending)
+        print(f"\n[{view['section']}] {view['target_kind']}")
+        print(json.dumps(view["value"], ensure_ascii=False, indent=2))
+        if view["source_excerpts"]:
+            print("Source:")
+            for excerpt in view["source_excerpts"]:
+                print(f"  page {excerpt['page']}: {excerpt['text']}")
+        allowed = set(pending["allowed_actions"])
+        suffix = "[Y/e/d/r/c]" if "remove" in allowed else "[Y/e/r/c]"
+        answer = input(f"Confirm this resume item? {suffix} ").strip().lower()
+        action = {
+            "": "confirm", "y": "confirm", "yes": "confirm",
+            "e": "correct", "d": "remove", "r": "retry", "c": "cancel",
+        }.get(answer)
+        if action is None or action not in allowed:
+            print("Invalid action. Please choose one of the displayed options.")
+            continue
+        patch = None
+        if action == "correct":
+            raw = input("Correction JSON patch : ").strip()
+            patch = _parse_resume_patch(raw, action)
+        response = ResumeReviewResponse(
+            response_id=f"resume-response-{uuid4()}",
+            request_id=str(pending["request_id"]),
+            thread_id=str(pending["thread_id"]),
+            user_id=str(pending["user_id"]), action=action,
+            patch=patch, attests_pdf_source=action == "correct",
+        )
+        current = service.resume(session_id=session_id, response=response)
+    return current
+
+
+def _parse_resume_patch(raw: str | None, action: str) -> dict[str, Any] | None:
+    if action != "correct":
+        if raw is not None:
+            raise CLIArgumentError("--patch is only valid with --action correct")
+        return None
+    if raw is None:
+        raise CLIArgumentError("correct action requires --patch JSON")
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise CLIArgumentError(f"invalid --patch JSON: {exc}") from exc
+    if not isinstance(value, dict):
+        raise CLIArgumentError("--patch must be a JSON object")
+    return value
 
 
 def _intent(runtime: Any, args: argparse.Namespace) -> int:
@@ -693,14 +863,23 @@ def _session_payload(command: str, session: Any) -> dict[str, Any]:
         "current_stage": session.current_stage, "current_refs": session.current_refs,
         "pending_request": session.pending_request,
         "pending_handoff_ids": session.pending_handoff_ids,
-        "next_action": _next_action(session.current_stage),
+        "next_action": _next_action(
+            session.current_stage, session.pending_request
+        ),
         "artifact_paths": {}, "warnings": [], "errors": [],
     }
 
 
-def _next_action(stage: str) -> str:
+def _next_action(stage: str, pending_request: str | None = None) -> str:
+    if pending_request:
+        if pending_request.startswith("request-resume-"):
+            return "resume.resume"
+        if pending_request.startswith("request-intent-"):
+            return "intent.resume"
+        if stage == "candidate":
+            return "candidate.resume"
     return {
-        "candidate": "candidate.build", "intent": "intent.create", "role": "role.research",
+        "candidate": "resume.import", "intent": "intent.create", "role": "role.research",
         "matching": "match.run", "preparation": "plan.build", "feedback": "feedback.add",
     }.get(stage, "session.status")
 
@@ -709,7 +888,8 @@ def _interactive_guide(*, json_mode: bool) -> int:
     payload = {
         "schema_version": "v0.7.1", "command": "guide", "status": "completed",
         "message": (
-            "Start with `campus-agent session start`; build/confirm the Candidate profile, "
+            "Start with `campus-agent session start`; import and confirm resume evidence, "
+            "then build/confirm the Candidate profile, "
             "then use `campus-agent intent create` and `intent resume`."
         ),
         "next_action": "session.start", "warnings": [], "errors": [],
@@ -769,9 +949,11 @@ def _handle_error(exc: Exception, *, json_mode: bool) -> int:
     from campus_job_agent.llm import LLMConfigError, LLMProviderError, StructuredOutputError
     from campus_job_agent.runtime import (
         ArtifactWriteError, CandidateApplicationError, IntentApplicationError,
-        ModelProfileError, SessionError,
+        ModelProfileError, ResumeApplicationError, SessionError,
+        exit_code_for_error,
     )
     from campus_job_agent.workflows.career_intent import CareerIntentWorkflowError
+    from campus_job_agent.workflows.resume_evidence import ResumeEvidenceWorkflowError
 
     if isinstance(exc, CLIArgumentError):
         return _emit_error("invalid_input", str(exc), 2, json_mode=json_mode, recovery_hint="check command arguments")
@@ -779,6 +961,13 @@ def _handle_error(exc: Exception, *, json_mode: bool) -> int:
         return _emit_error(exc.error_type, str(exc), 3, json_mode=json_mode, recovery_hint="inspect session refs and retry with the current version")
     if isinstance(exc, CandidateApplicationError):
         return _emit_error(exc.error_type, str(exc), 3, json_mode=json_mode, recovery_hint="inspect the Candidate run and retry with valid input")
+    if isinstance(exc, (ResumeApplicationError, ResumeEvidenceWorkflowError)):
+        error_type = str(getattr(exc, "error_type", "contract_violation"))
+        return _emit_error(
+            error_type, str(exc), exit_code_for_error(error_type),
+            json_mode=json_mode,
+            recovery_hint="inspect the ResumeEvidence run and resume with the current request",
+        )
     if isinstance(exc, (IntentApplicationError, CareerIntentWorkflowError)):
         return _emit_error("contract_violation", str(exc), 3, json_mode=json_mode, recovery_hint="inspect the CareerIntent run and resume with the current request")
     if isinstance(exc, ModelProfileError):

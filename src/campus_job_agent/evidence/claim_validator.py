@@ -106,6 +106,23 @@ class CandidateClaimValidator(ClaimValidator):
     ) -> EvidenceClaim:
         try:
             super().validate(claim, allowed_artifact_ids, expected_owner_id)
+            for evidence_id in claim.source_evidence_ids:
+                snapshot = self.repository.get_resume_evidence_snapshot(evidence_id)
+                if snapshot is None or snapshot.status != "confirmed":
+                    raise CandidateClaimValidationError(
+                        "claim references an unconfirmed structured evidence object",
+                        reason_code="invalid_source_evidence",
+                    )
+                if expected_owner_id is not None and snapshot.owner_id != expected_owner_id:
+                    raise CandidateClaimValidationError(
+                        "structured evidence owner mismatch",
+                        reason_code="source_evidence_owner_mismatch",
+                    )
+                if snapshot.candidate_id != claim.subject_id:
+                    raise CandidateClaimValidationError(
+                        "structured evidence subject mismatch",
+                        reason_code="source_evidence_subject_mismatch",
+                    )
             parsed = parse_candidate_predicate(
                 claim.predicate,
                 allow_legacy=claim.schema_version not in CURRENT_CANDIDATE_CLAIM_SCHEMAS,

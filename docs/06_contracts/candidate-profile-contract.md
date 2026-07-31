@@ -293,3 +293,12 @@ experience:<record_id>.kind|title|description|responsibilities|technologies|outp
 
 CandidateProfile snapshot 仍保持 v0.4 业务对象兼容版本；本节升级的是输入 Claim/predicate 和
 validation contract，不提前改变 Matching 等下游 snapshot 语义。
+
+## v0.7.1 WP1.3 Confirmed Resume Handoff
+
+首次 `CandidateProfileGraph` 不再接受 PDF/Markdown 路径，必须输入 confirmed ResumeEvidenceSnapshot
+ID，并验证 owner、candidate 与 session current ref。简历陈述生成 `user_reported` Claim；能力等级等
+推导项可为 `model_inference`。`EvidenceClaim.source_evidence_ids` 保存 Snapshot ID，
+`evidence_fragment_ids` 保留原 PDF Fragment 追溯。期望职位不投影 CandidateProfile；个人优势与专业
+技能在证据层保持分离、仅在画像阶段允许联合分析。Agent 后续问答仍归档为 conversation_response，
+不回写不可变 ResumeEvidence。

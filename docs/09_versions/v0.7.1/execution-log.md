@@ -1,6 +1,6 @@
 # v0.7.1 执行日志
 
-状态：WP0 Passed；WP1 Passed
+状态：WP1.3.1 Implementation Passed；WP1/WP2 Revalidation Partial
 创建日期：2026-07-28
 
 本文件只记录实际执行事实，不记录计划性成功。每个工作包追加一节，保留失败、修复、命令、结果、
@@ -414,3 +414,54 @@ Next action:
   通过。
 - Boundary：本补丁解决经历分类和固定值暴露，不声称已覆盖荣誉或所有技能 ontology；这些信息
   保留在原始 Evidence，未建模模型项有 rejection receipt。WP2 保持 Passed，下一工作包仍为 WP3。
+
+## WP1.3 Structured Resume Evidence / 2026-07-31 / working tree（未提交）
+
+- Doc-first：新增 Requirements/Tasks、RFC-0012、ADR-0012、Resume Evidence Contract、Eval Plan，
+  随后更新 State/HITL/Tool/LLM/CLI/Candidate/版本验收文档。
+- Problem：旧 PDF→Claim→Profile 直通流程把忠实转录和画像推断混在一个模型协议中，用户无法在
+  Claim 生成前确认 PDF 解析结果，BOSS 风格字段也受 Candidate predicate 反向限制。
+- Code：新增 ResumeDraft、ResumeReview、ResumeEvidenceSnapshot、SourceRef、additive migration、
+  ResumeEvidenceGraph、Runtime/CLI；Candidate build 改为 confirmed Snapshot typed handoff。
+- Safety：pypdf 主解析、pdfplumber 条件回退、无 OCR；PII 本地提取与模型输入脱敏；run artifacts
+  不保存原文件名、完整正文或未脱敏 Prompt；Review Draft CAS 与 Receipt 单事务提交。
+- Failure repaired：非法审核输入曾在 LangGraph interrupt 消费后污染 checkpoint；现已在 resume 前
+  preflight。retry 曾因 owner/artifact 唯一键复用旧 extracting Draft；现对同 Draft 做 CAS 重建。
+  Candidate 后续 upload 曾被错误套用 ResumeEvidence fragment scope；现拆分 confirmed resume 与
+  conversation evidence batch。Session status 曾仅按 `current_stage=candidate` 误报
+  `resume.import`；现优先按 pending request 类型返回 `resume.resume/candidate.resume/intent.resume`。
+- Automated verification：全量 `439 passed`；`compileall` 与 `git diff --check` 通过；installed
+  CLI `doctor` 完成且本地 DeepSeek profile 配置完整。
+- Real DeepSeek：`run-13496fb4-f439-411e-be4d-73e7c9a34f7c` 成功生成 Draft
+  `resume-draft-b51904fa-985d-49e3-bca5-7a80c90f51bd`，pypdf 质量通过，31 个非空叶子字段均有
+  SourceRef；LangChain DeepSeek effective strategy 为 Tool Calling、cache miss、0 retry、Pydantic
+  accepted；已识别 PII 与原 PDF 文件名在 run artifacts 中 0 命中。
+- Current boundary：真实 E4 停在 `personal_information` 人工审核点；尚未发布 Snapshot，也未使用
+  新 CandidateSnapshot 重跑 WP2。WP1/WP2 当前状态为 partial，不把代码通过冒充人工验收通过。
+
+## WP1.3.1 Resume Fidelity Correction / 2026-07-31 / working tree（未提交）
+
+- Problem：WP1.3 首轮真实审核暴露四类问题：pypdf 默认流式文本使双栏教育内容串位；无标签出生日期/
+  籍贯未进入个人信息；列表逐条确认后仍要求整体确认；Source 展示来自整页兜底，既不精确也不适合 CLI。
+- Contract correction：新增 WP1.3.1 Requirements 与 Eval Plan；规定 layout-aware 解析、字段级精确
+  SourceRef、非空列表末项自动完成、空列表显式 `confirmed_empty`、显式 `--reparse` 和不可变版本链。
+- Parser and extraction：pypdf 改用 layout extraction，低质量时仍只回退 pdfplumber；本地个人信息提取器
+  在简历首部识别无标签出生日期和籍贯；DeepSeek Prompt 保留“至今”并按视觉邻接绑定教育附加信息；
+  确定性后处理将组合奖项拆为独立记录。
+- Provenance：移除整页 SourceRef 兜底；应用按 canonical JSON Pointer 为每个非空叶子字段定位归一化
+  精确 span，无法定位则阻止进入审核及发布。CLI 仅显示当前字段附近的有限片段和页码。
+- Review and versioning：非空列表确认最后一条后自动完成区块，空区块仍需用户确认；新增
+  `resume import --reparse`，新 Draft 记录 predecessor，旧 Draft/Snapshot 不覆盖，新 Snapshot 只会在
+  全部区块确认后以递增版本发布。跨进程 Claim 基线固定在 Draft，确认前增量 Claim 保持 0。
+- Database：新增 additive migration `0008_resume_reparse_versions.sql`，在保留既有 Draft、Receipt、
+  Snapshot 和外键完整性的前提下移除 owner/artifact 单 Draft 唯一限制；真实数据库副本迁移后
+  `foreign_key_check` 为空。
+- Automated verification：全量 `444 passed`；`compileall` 与 `git diff --check` 通过。
+- Real DeepSeek：cache-miss Tool Calling run `run-ceb5ff01-4ab0-4dc6-9dd7-e3f6bf6a0b8a` 通过
+  Pydantic；最终审核 run `run-82482f23-7a67-4545-b476-e98c82c6935f` 生成 Draft
+  `resume-draft-6d718b55-ade8-406b-97ab-3d8df888ae67`。审计结果为 36/36 非空字段具有精确
+  SourceRef，个人信息、两段项目、两段教育、技能和两条独立奖项与 PDF 对齐；缺失的个人优势、
+  期望职位和工作经历保持空值，PII leak=0，pre-confirmation Claim delta=0。
+- Current boundary：新 Draft 停在 `personal_information`，等待用户按八区块完成确认；旧 Snapshot
+  保持不可变且不作为新链路输入。新 ResumeEvidenceSnapshot、CandidateSnapshot 和 WP2 replay 尚未
+  发生，因此 WP1/WP2 保持 partial，v0.7.1 整体仍为实施中。

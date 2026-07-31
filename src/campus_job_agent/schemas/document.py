@@ -20,3 +20,4 @@ class DocumentExtraction(BaseModel):
     text_hash: str
     locator_type: str
     units: list[ExtractionUnit] = Field(default_factory=list)
+    diagnostics: dict[str, Any] = Field(default_factory=dict)

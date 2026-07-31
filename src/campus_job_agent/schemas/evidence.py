@@ -104,6 +104,7 @@ class EvidenceClaim(BaseModel):
     value: Any
     claim_type: ClaimType
     evidence_fragment_ids: list[str] = Field(default_factory=list)
+    source_evidence_ids: list[str] = Field(default_factory=list)
     confidence: float = Field(ge=0.0, le=1.0)
     extractor: ClaimExtractor
     prompt_version: str
@@ -119,6 +120,7 @@ class EvidenceClaim(BaseModel):
             "value": self.value,
             "claim_type": self.claim_type,
             "evidence_fragment_ids": sorted(self.evidence_fragment_ids),
+            "source_evidence_ids": sorted(self.source_evidence_ids),
             "schema_version": self.schema_version,
             "supersedes_claim_id": self.supersedes_claim_id,
         }
@@ -139,6 +141,7 @@ class ExtractedClaim(BaseModel):
     value: Any
     claim_type: ClaimType
     evidence_fragment_ids: list[str] = Field(min_length=1)
+    source_evidence_ids: list[str] = Field(default_factory=list)
     confidence: float = Field(ge=0.0, le=1.0)
 
     @field_validator("confidence", mode="before")

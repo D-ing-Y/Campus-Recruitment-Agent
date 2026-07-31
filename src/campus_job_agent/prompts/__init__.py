@@ -35,6 +35,13 @@ from campus_job_agent.prompts.question_planner import (
     build_question_planner_messages,
     build_question_planner_retry_messages,
 )
+from campus_job_agent.prompts.resume_extractor import (
+    RESUME_PROMPT_NAME,
+    RESUME_PROMPT_VERSION,
+    RESUME_SCHEMA_VERSION,
+    build_resume_extractor_messages,
+    build_resume_retry_messages,
+)
 
 __all__ = [
     "PROMPT_NAME",
@@ -62,6 +69,11 @@ __all__ = [
     "QUESTION_SCHEMA_VERSION",
     "build_question_planner_messages",
     "build_question_planner_retry_messages",
+    "RESUME_PROMPT_NAME",
+    "RESUME_PROMPT_VERSION",
+    "RESUME_SCHEMA_VERSION",
+    "build_resume_extractor_messages",
+    "build_resume_retry_messages",
 ]
 from campus_job_agent.prompts.role_profile import (
     EXPERIENCE_EXTRACTOR_PROMPT_VERSION,

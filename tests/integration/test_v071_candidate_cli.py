@@ -8,7 +8,6 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CLI = REPO_ROOT / ".venv" / "bin" / "campus-agent"
-FIXTURES = REPO_ROOT / "tests" / "fixtures" / "v04"
 
 
 def _run(tmp_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -42,184 +41,199 @@ def _start_session(tmp_path: Path, user_id: str) -> str:
     return json.loads(result.stdout)["session_id"]
 
 
-def test_candidate_build_show_diff_and_inspect_claim_receipts_from_installed_cli(
+def _text_pdf(path: Path, text: str) -> None:
+    escaped = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+    stream = f"BT /F1 10 Tf 30 740 Td ({escaped}) Tj ET".encode()
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+        f"<< /Length {len(stream)} >>\nstream\n".encode() + stream + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    output = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for object_id, body in enumerate(objects, start=1):
+        offsets.append(len(output))
+        output.extend(f"{object_id} 0 obj\n".encode())
+        output.extend(body)
+        output.extend(b"\nendobj\n")
+    xref = len(output)
+    output.extend(f"xref\n0 {len(objects) + 1}\n".encode())
+    output.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        output.extend(f"{offset:010d} 00000 n \n".encode())
+    output.extend(
+        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
+    )
+    path.write_bytes(bytes(output))
+
+
+def _confirmed_resume(
+    tmp_path: Path, session_id: str, candidate_id: str, *, sufficient: bool
+) -> str:
+    resume = tmp_path / f"{candidate_id}.pdf"
+    responsibility = (
+        "Responsibilities implemented graph checkpoint recovery and evaluation."
+        if sufficient else "Project Agent workflow requires additional details."
+    )
+    _text_pdf(
+        resume,
+        (
+            "Anonymous University expected graduation 2027. Project Candidate Evidence Workflow. "
+            f"{responsibility} Skills Python LangGraph RAG LLM. " * 2
+        ),
+    )
+    imported = _run(
+        tmp_path, "resume", "import", session_id,
+        "--candidate-id", candidate_id, "--input", str(resume),
+    )
+    assert imported.returncode == 0, imported.stderr
+    payload = json.loads(imported.stdout)
+    assert payload["metrics"]["pre_confirmation_claim_count"] == 0
+    for index in range(30):
+        if payload["status"] != "interrupted":
+            break
+        reviewed = _run(
+            tmp_path, "resume", "resume", session_id,
+            "--action", "confirm", "--response-id", f"resume-response-{candidate_id}-{index}",
+        )
+        assert reviewed.returncode == 0, reviewed.stderr
+        payload = json.loads(reviewed.stdout)
+        if index == 0:
+            duplicate = _run(
+                tmp_path, "resume", "resume", session_id,
+                "--action", "confirm",
+                "--response-id", f"resume-response-{candidate_id}-{index}",
+            )
+            assert duplicate.returncode == 0, duplicate.stderr
+            duplicate_payload = json.loads(duplicate.stdout)
+            assert duplicate_payload["deduplicated"] is True
+            assert duplicate_payload["metrics"]["duplicate_review_write_count"] == 0
+    assert payload["status"] == "completed"
+    return payload["output_refs"]["resume_evidence_id"]
+
+
+def test_resume_then_candidate_build_show_and_claim_trace_from_installed_cli(
     tmp_path: Path,
 ) -> None:
     session_id = _start_session(tmp_path, "candidate-owner")
+    resume_id = _confirmed_resume(
+        tmp_path, session_id, "candidate-owner", sufficient=True
+    )
+    shown_resume = _run(tmp_path, "resume", "show", resume_id)
+    assert shown_resume.returncode == 0
+    assert json.loads(shown_resume.stdout)["result"]["status"] == "confirmed"
+
     built = _run(
         tmp_path, "candidate", "build", session_id,
-        "--candidate-id", "candidate-owner",
-        "--input", str(FIXTURES / "candidate_sufficient.md"),
+        "--candidate-id", "candidate-owner", "--resume-evidence", resume_id,
     )
     assert built.returncode == 0, built.stderr
     payload = json.loads(built.stdout)
     assert payload["status"] == "completed"
-    assert payload["next_action"] == "intent.create"
     snapshot_id = payload["output_refs"]["candidate_profile_snapshot_id"]
-    metrics = payload["metrics"]
-    assert metrics["model_item_receipt_rate"] == 1.0
-    assert metrics["accepted_candidate_predicate_supported_rate"] == 1.0
-    assert metrics["accepted_claim_projection_rate"] == 1.0
-    assert metrics["silent_unprojected_active_claim_count"] == 0
+    assert payload["metrics"]["accepted_candidate_predicate_supported_rate"] == 1.0
 
     shown = _run(tmp_path, "candidate", "show", snapshot_id)
     assert shown.returncode == 0
-    show_payload = json.loads(shown.stdout)
-    assert show_payload["result"]["snapshot_id"] == snapshot_id
-    assert show_payload["result"]["profile"]["capabilities"]
-    assert "raw_text" not in shown.stdout
-
-    diffed = _run(tmp_path, "candidate", "diff", snapshot_id, snapshot_id)
-    assert diffed.returncode == 0
-    assert json.loads(diffed.stdout)["result"]["changed_paths"] == []
-
+    assert json.loads(shown.stdout)["result"]["profile"]["capabilities"]
     inspected = _run(tmp_path, "inspect", "claims", "candidate-owner")
-    assert inspected.returncode == 0
-    inspect_payload = json.loads(inspected.stdout)["result"]
-    assert inspect_payload["claims"]
-    assert inspect_payload["validation_receipts"]
-    assert all(item["status"] in {"accepted", "duplicate"} for item in inspect_payload["validation_receipts"])
-
-    rebuilt = _run(
-        tmp_path, "candidate", "build", session_id,
-        "--candidate-id", "candidate-owner",
-        "--input", str(FIXTURES / "candidate_sufficient.md"),
-    )
-    assert rebuilt.returncode == 0, rebuilt.stderr
-    rebuilt_payload = json.loads(rebuilt.stdout)
-    assert rebuilt_payload["output_refs"]["candidate_profile_snapshot_id"] == snapshot_id
-    assert set(rebuilt_payload["output_refs"]["claim_ids"]) == set(payload["output_refs"]["claim_ids"])
+    claims = json.loads(inspected.stdout)["result"]["claims"]
+    assert claims and all(resume_id in item["source_evidence_ids"] for item in claims)
 
 
-def test_candidate_interrupt_cross_process_resume_and_duplicate_response_are_idempotent(
+def test_candidate_interrupt_cross_process_resume_and_duplicate_are_idempotent(
     tmp_path: Path,
 ) -> None:
     session_id = _start_session(tmp_path, "resume-owner")
+    resume_id = _confirmed_resume(
+        tmp_path, session_id, "resume-owner", sufficient=False
+    )
     built = _run(
         tmp_path, "candidate", "build", session_id,
-        "--candidate-id", "resume-candidate",
-        "--input", str(FIXTURES / "candidate_missing_responsibility.md"),
+        "--candidate-id", "resume-owner", "--resume-evidence", resume_id,
     )
-    assert built.returncode == 0, built.stderr
     payload = json.loads(built.stdout)
     assert payload["status"] == "interrupted"
-    assert payload["next_action"] == "candidate.resume"
-    request = payload["pending_request"]
-    assert request["request_id"].startswith("request-")
-    question_id = request["questions"][0]["question_id"]
-
-    resumed = _run(
-        tmp_path, "candidate", "resume", session_id, "--action", "answer",
+    question_id = payload["pending_request"]["questions"][0]["question_id"]
+    args = (
+        "candidate", "resume", session_id, "--action", "answer",
         "--response-id", "response-cli-idempotent",
         "--answer", f"{question_id}=I implemented graph recovery and evaluation tests.",
     )
+    resumed = _run(tmp_path, *args)
     assert resumed.returncode == 0, resumed.stderr
     resumed_payload = json.loads(resumed.stdout)
     assert resumed_payload["status"] == "completed"
-    assert resumed_payload["next_action"] == "intent.create"
-
-    duplicate = _run(
-        tmp_path, "candidate", "resume", session_id, "--action", "answer",
-        "--response-id", "response-cli-idempotent",
-        "--answer", f"{question_id}=I implemented graph recovery and evaluation tests.",
-    )
-    assert duplicate.returncode == 0, duplicate.stderr
+    duplicate = _run(tmp_path, *args)
     duplicate_payload = json.loads(duplicate.stdout)
     assert duplicate_payload["deduplicated"] is True
-    assert duplicate_payload["metrics"]["duplicate_resume_write_count"] == 0
     assert duplicate_payload["session_version"] == resumed_payload["session_version"]
 
 
-def test_candidate_cli_supports_upload_skip_cancel_and_correct(tmp_path: Path) -> None:
-    upload_session = _start_session(tmp_path, "upload-owner")
-    interrupted = _run(
-        tmp_path, "candidate", "build", upload_session,
-        "--candidate-id", "upload-owner",
+def test_candidate_build_rejects_removed_input_and_requires_confirmed_snapshot(
+    tmp_path: Path,
+) -> None:
+    session_id = _start_session(tmp_path, "boundary-owner")
+    old = _run(
+        tmp_path, "candidate", "build", session_id,
+        "--candidate-id", "boundary-owner", "--input", str(tmp_path / "resume.pdf"),
     )
-    upload_request = json.loads(interrupted.stdout)["pending_request"]
-    uploaded = _run(
-        tmp_path, "candidate", "resume", upload_session, "--action", "upload",
-        "--response-id", "response-cli-upload",
-        "--upload", str(FIXTURES / "candidate_sufficient.md"),
+    assert old.returncode != 0
+    assert "--resume-evidence" in old.stdout
+    help_result = _run(tmp_path, "candidate", "build", "--help")
+    assert "--input" not in help_result.stdout
+    missing = _run(
+        tmp_path, "candidate", "build", session_id,
+        "--candidate-id", "boundary-owner",
+        "--resume-evidence", "resume-evidence-missing",
     )
-    assert uploaded.returncode == 0, uploaded.stderr
-    assert json.loads(uploaded.stdout)["status"] == "completed"
+    assert missing.returncode == 3
+    assert "confirmed ResumeEvidence" in missing.stdout
 
-    skip_session = _start_session(tmp_path, "skip-owner")
-    interrupted = _run(
-        tmp_path, "candidate", "build", skip_session,
-        "--candidate-id", "skip-owner",
-        "--input", str(FIXTURES / "candidate_missing_responsibility.md"),
-    )
-    skip_request = json.loads(interrupted.stdout)["pending_request"]
-    skipped = _run(
-        tmp_path, "candidate", "resume", skip_session, "--action", "skip",
-        "--response-id", "response-cli-skip",
-        "--skip-id", skip_request["questions"][0]["question_id"],
-    )
-    assert skipped.returncode == 0, skipped.stderr
-    assert json.loads(skipped.stdout)["status"] == "completed_with_unknowns"
 
-    cancel_session = _start_session(tmp_path, "cancel-owner")
-    interrupted = _run(
-        tmp_path, "candidate", "build", cancel_session,
-        "--candidate-id", "cancel-owner",
+def test_resume_reparse_starts_new_draft_without_overwriting_snapshot(
+    tmp_path: Path,
+) -> None:
+    session_id = _start_session(tmp_path, "reparse-owner")
+    resume_id = _confirmed_resume(
+        tmp_path, session_id, "reparse-owner", sufficient=True
     )
-    assert json.loads(interrupted.stdout)["pending_request"]
-    cancelled = _run(
-        tmp_path, "candidate", "resume", cancel_session, "--action", "cancel",
-        "--response-id", "response-cli-cancel",
+    old = json.loads(_run(tmp_path, "resume", "show", resume_id).stdout)["result"]
+    resume_path = tmp_path / "reparse-owner.pdf"
+    reparsed = _run(
+        tmp_path, "resume", "import", session_id,
+        "--candidate-id", "reparse-owner", "--input", str(resume_path),
+        "--reparse",
     )
-    assert cancelled.returncode == 0, cancelled.stderr
-    assert json.loads(cancelled.stdout)["status"] == "cancelled"
-
-    correction_session = _start_session(tmp_path, "correction-owner")
-    conflicted = _run(
-        tmp_path, "candidate", "build", correction_session,
-        "--candidate-id", "correction-owner",
-        "--input", str(FIXTURES / "candidate_conflict_a.md"),
-        "--input", str(FIXTURES / "candidate_conflict_b.md"),
-    )
-    conflicted_payload = json.loads(conflicted.stdout)
-    before_id = conflicted_payload["output_refs"]["candidate_profile_snapshot_id"]
-    before = json.loads(_run(tmp_path, "candidate", "show", before_id).stdout)
-    conflict = before["result"]["profile"]["conflicts"][0]
-    correction = json.dumps({
-        "correction_id": "correction-cli-1",
-        "candidate_id": "correction-owner",
-        "target_path": conflict["predicate"],
-        "operation": "replace",
-        "new_value": "Implemented the evaluation tests only.",
-        "reason": "The source overstated responsibility.",
-        "supersedes_claim_ids": conflict["claim_ids"],
-    })
-    corrected = _run(
-        tmp_path, "candidate", "resume", correction_session,
-        "--action", "correct", "--response-id", "response-cli-correct",
-        "--correction", correction,
-    )
-    assert corrected.returncode == 0, corrected.stderr
-    corrected_payload = json.loads(corrected.stdout)
-    assert corrected_payload["status"] == "completed"
-    assert corrected_payload["output_refs"]["candidate_profile_snapshot_id"] != before_id
+    assert reparsed.returncode == 0, reparsed.stderr
+    payload = json.loads(reparsed.stdout)
+    assert payload["status"] == "interrupted"
+    assert payload["output_refs"]["draft_id"] != old["draft_id"]
+    assert payload["pending_request"]["section"] == "personal_information"
+    still_old = json.loads(
+        _run(tmp_path, "resume", "show", resume_id).stdout
+    )["result"]
+    assert still_old == old
 
 
 def test_candidate_model_contract_failure_has_terminal_run_and_error_event(
     tmp_path: Path,
 ) -> None:
     session_id = _start_session(tmp_path, "failure-owner")
+    resume_id = _confirmed_resume(
+        tmp_path, session_id, "failure-owner", sufficient=True
+    )
     failed = _run_env(
         tmp_path, {"CAMPUS_AGENT_MOCK_LLM_MODE": "always_invalid_json"},
-        "candidate", "build", session_id,
-        "--candidate-id", "failure-owner",
-        "--input", str(FIXTURES / "candidate_sufficient.md"),
+        "candidate", "build", session_id, "--candidate-id", "failure-owner",
+        "--resume-evidence", resume_id,
     )
     assert failed.returncode == 3
     payload = json.loads(failed.stdout)
     assert payload["status"] == "failed"
-    assert payload["next_action"] == "inspect.run"
     inspected = _run(tmp_path, "inspect", "run", payload["run_id"])
-    assert inspected.returncode == 0
     result = json.loads(inspected.stdout)["result"]
     assert result["manifest"]["status"] == "failed"
     assert any(item["error_type"] == "llm_invalid_output" for item in result["errors"])

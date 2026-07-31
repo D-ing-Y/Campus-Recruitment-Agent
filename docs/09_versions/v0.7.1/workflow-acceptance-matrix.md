@@ -1,7 +1,7 @@
 # v0.7.1 Workflow 验收矩阵
 
-状态：WP0 Passed；WP1 Passed；WP1.1 Passed；WP2 Passed
-日期：2026-07-30
+状态：WP1.3.1 Implementation Passed；WP1/WP2 Revalidation Partial
+日期：2026-07-31
 
 状态枚举：`not_started | failing | blocked | partial | passed | not_applicable`。
 
@@ -10,8 +10,9 @@
 | Workflow | Contract | Evidence | Model | Validator | Projection/Policy | Persistence | Graph | CLI/Observability | Eval | 总状态 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Runtime/CLI | passed | not_applicable | not_applicable | passed | passed | passed | not_applicable | passed | passed | passed |
-| Candidate | passed | passed | passed | passed | passed | passed | passed | passed | passed | passed |
-| CareerIntent | passed | passed | passed | passed | passed | passed | passed | passed | passed | passed |
+| ResumeEvidence | passed | passed | passed | passed | passed | passed | passed | passed | partial | partial |
+| Candidate | passed | partial | passed | passed | passed | passed | passed | passed | partial | partial |
+| CareerIntent | passed | passed | passed | passed | passed | passed | passed | passed | partial | partial |
 | Role | partial | partial | partial | partial | partial | partial | partial | failing | partial | partial |
 | Matching/Decision | partial | not_applicable | partial | partial | partial | partial | partial | failing | partial | partial |
 | Preparation | partial | not_applicable | partial | partial | partial | partial | partial | failing | partial | partial |
@@ -99,7 +100,8 @@ MCP 配置尚未开放到 CLI UI。
 
 WP1 全量回归：398 passed in 40.11s，`compileall` 与 `git diff --check` 通过。DeepSeek Provider
 健康检查、真实简历 E4 与断网缓存回放已通过；用户已完成真实画像人工确认。WP1
-退出门禁已满足，但本结论不代表 WP3 已开始或 v0.7.1 整体已完成。
+退出门禁曾按旧的 PDF→Claim 契约满足；WP1.3 替换该入口后，本段只作为历史证据。新 E4 与
+CandidateSnapshot 重验完成前，WP1 当前状态为 partial。
 
 ### 4.1 WP1.2 经历 Taxonomy 与 typed Claim 补丁
 
@@ -117,6 +119,22 @@ WP1 全量回归：398 passed in 40.11s，`compileall` 与 `git diff --check` �
 capability。荣誉奖项和更细粒度语言/库/工具仍不属于当前 Candidate projection contract；原始 PDF
 仍在 Evidence Store，扩展它们需要独立 taxonomy/ontology 变更，不能把本补丁表述为完整简历语义覆盖。
 
+### 4.2 WP1.3 结构化简历证据纠偏
+
+| Gate | 预期 | 状态 | 证据 |
+| --- | --- | --- | --- |
+| Contract | ResumeDraft/Review/Snapshot/SourceRef 分层 | passed | RFC/ADR-0012 + resume-evidence-contract |
+| PDF/PII | 双解析门禁、本地 PII、模型输入脱敏 | passed | resume unit/integration；真实 run PII/文件名 0 命中 |
+| Review | 固定顺序、非空列表无重复整体确认、空区块确认、CAS+Receipt 原子幂等 | passed | `test_v071_resume_evidence_graph.py` |
+| Candidate handoff | 仅 confirmed Snapshot；旧 --input 拒绝 | passed | Graph + installed CLI tests |
+| Fidelity patch | layout、无标签头部、“至今”、奖项边界、字段 span | passed | 444 tests + `v0.7.1-wp1.3.1-eval-report.md` |
+| Real extraction | DeepSeek 生成字段对齐 Draft，36/36 精确 SourceRef | passed | `run-ceb5ff01-4ab0-4dc6-9dd7-e3f6bf6a0b8a` + `run-82482f23-7a67-4545-b476-e98c82c6935f` |
+| Human review | 八区块全部由用户确认 | partial | 新 Draft `resume-draft-6d718b55-ade8-406b-97ab-3d8df888ae67` 停在 personal_information |
+| WP1/WP2 replay | 新 CandidateSnapshot 与 CareerIntent 重验 | partial | 等待 confirmed ResumeEvidence |
+
+WP1.3.1 阶段结果见 `docs/07_evaluation/v0.7.1-wp1.3.1-eval-report.md`；原 WP1.3 报告仅保留为
+修复前基线。代码实现通过不等于 E4 人工验收通过。
+
 ## 5. WP2 CareerIntent
 
 | Gate | 预期 | 状态 | 证据 |
@@ -130,6 +148,9 @@ capability。荣誉奖项和更细粒度语言/库/工具仍不属于当前 Cand
 | Graph | checkpoint interrupt/revise/confirm/cancel/failure | passed | WP2 Graph integration tests |
 | CLI/Observability | installed create/resume/show/inspect 和 8 件套 | passed | installed CLI E3 + E4 run artifacts |
 | Eval | E0-E4 与全量回归 | passed | `v0.7.1-wp2-eval-report.md`；424 tests |
+
+WP2 上表是旧 CandidateSnapshot 的历史验收；WP1.3 要求用新 confirmed ResumeEvidence 生成的
+CandidateSnapshot 重跑，因此当前总状态暂记 partial，代码本身未重写。
 
 ## 6. WP3-WP7
 

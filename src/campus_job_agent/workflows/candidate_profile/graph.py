@@ -177,6 +177,7 @@ def create_candidate_profile_state(
     thread_id: str,
     user_id: str,
     candidate_id: str,
+    resume_evidence_id: str,
     input_paths: list[str] | None = None,
     run_id: str | None = None,
     budgets: BudgetState | dict[str, Any] | None = None,
@@ -203,6 +204,7 @@ def create_candidate_profile_state(
         "thread_id": thread_id,
         "user_id": user_id,
         "candidate_id": candidate_id,
+        "resume_evidence_id": resume_evidence_id,
         "status": "initialized",
         "allowed_path_roots": authorized_roots,
         "input_paths": submitted_paths,
@@ -256,6 +258,7 @@ def build_candidate_profile_graph(
     )
     graph = StateGraph(CandidateProfileGraphState)
     graph.add_node("initialize_profile_run", _observable_node("initialize_profile_run", handlers.initialize_profile_run))
+    graph.add_node("load_resume_evidence", _observable_node("load_resume_evidence", handlers.load_resume_evidence))
     graph.add_node("ingest_pending_materials", _observable_node("ingest_pending_materials", handlers.ingest_pending_materials))
     graph.add_node(
         "extract_and_validate_claims", _observable_node("extract_and_validate_claims", handlers.extract_and_validate_claims)
@@ -271,7 +274,8 @@ def build_candidate_profile_graph(
     graph.add_node("finalize_profile", _observable_node("finalize_profile", handlers.finalize_profile))
 
     graph.add_edge(START, "initialize_profile_run")
-    graph.add_edge("initialize_profile_run", "ingest_pending_materials")
+    graph.add_edge("initialize_profile_run", "load_resume_evidence")
+    graph.add_edge("load_resume_evidence", "extract_and_validate_claims")
     graph.add_edge("ingest_pending_materials", "extract_and_validate_claims")
     graph.add_edge("extract_and_validate_claims", "project_candidate_profile")
     graph.add_edge("project_candidate_profile", "assess_profile_sufficiency")
@@ -327,7 +331,9 @@ class _CandidateProfileNodes:
     def initialize_profile_run(
         self, state: CandidateProfileGraphState, config: RunnableConfig
     ) -> dict[str, Any]:
-        required = ["run_id", "thread_id", "user_id", "candidate_id"]
+        required = [
+            "run_id", "thread_id", "user_id", "candidate_id", "resume_evidence_id"
+        ]
         missing = [name for name in required if not str(state.get(name, "")).strip()]
         if missing:
             raise CandidateProfileWorkflowError(
@@ -364,6 +370,36 @@ class _CandidateProfileNodes:
                 or (latest.snapshot_id if latest else None)
             ),
             "trace": [_trace("initialize_profile_run", state, counters)],
+        }
+
+    def load_resume_evidence(
+        self, state: CandidateProfileGraphState
+    ) -> dict[str, Any]:
+        snapshot = self.evidence_repository.get_resume_evidence_snapshot(
+            str(state["resume_evidence_id"])
+        )
+        if snapshot is None or snapshot.status != "confirmed":
+            raise CandidateProfileWorkflowError(
+                "confirmed ResumeEvidence snapshot is required"
+            )
+        if snapshot.owner_id != state["user_id"]:
+            raise CandidateProfileWorkflowError("ResumeEvidence owner mismatch")
+        if snapshot.candidate_id != state["candidate_id"]:
+            raise CandidateProfileWorkflowError("ResumeEvidence candidate mismatch")
+        fragment_ids = list(dict.fromkeys(
+            ref.fragment_id
+            for path, refs in snapshot.field_sources.items()
+            if not path.startswith(("/personal_information", "/career_expectations"))
+            for ref in refs
+        ))
+        return {
+            "active_artifact_ids": [snapshot.artifact_id],
+            "processed_artifact_ids": [snapshot.artifact_id],
+            "fragment_ids": fragment_ids,
+            "trace": [_trace(
+                "load_resume_evidence", state,
+                CounterState.model_validate(state["counters"]),
+            )],
         }
 
     def ingest_pending_materials(
@@ -495,6 +531,7 @@ class _CandidateProfileNodes:
                 "subject_id": state["candidate_id"],
                 "owner_id": state["user_id"],
                 "fragment_ids": new_fragments,
+                "resume_evidence_id": state.get("resume_evidence_id"),
                 "remaining_llm_calls": (
                     budgets.max_llm_calls - counters.llm_calls
                 ),

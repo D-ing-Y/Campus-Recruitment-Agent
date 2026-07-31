@@ -81,6 +81,32 @@ def test_session_start_status_resume_history_and_inspect(tmp_path: Path) -> None
         json.loads(result.stdout)
 
 
+def test_session_status_routes_pending_workflow_review(tmp_path: Path) -> None:
+    runtime = RuntimeFactory(data_root=tmp_path / "shared-data").build(
+        owner_id="route-user"
+    )
+    cases = (
+        ("request-resume-review", "resume.resume"),
+        ("request-intent-review", "intent.resume"),
+        ("request-candidate-opaque", "candidate.resume"),
+    )
+    for pending_request, expected_action in cases:
+        session = runtime.session_service.start(user_id="route-user")
+        interrupted = runtime.session_repository.update_navigation(
+            session.session_id,
+            expected_version=session.session_version,
+            operation="test_interrupted_route",
+            status="interrupted",
+            current_stage="candidate",
+            pending_request=pending_request,
+        )
+        result = _run(
+            tmp_path, "--json", "session", "status", interrupted.session_id
+        )
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout)["next_action"] == expected_action
+
+
 def test_cli_errors_and_legacy_label_are_stable(tmp_path: Path) -> None:
     missing = _run(tmp_path, "--json", "session", "status", "session-missing")
     assert missing.returncode == 3

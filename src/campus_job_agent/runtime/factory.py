@@ -38,10 +38,15 @@ from campus_job_agent.workflows.preparation_plan.service import PreparationServi
 from campus_job_agent.workflows.profile_matching import ProfileMatchingGraphRuntime, SQLiteMatchingRepository
 from campus_job_agent.workflows.profile_matching.service import MatchingService
 from campus_job_agent.workflows.role_profile import RoleProfileGraphRuntime
+from campus_job_agent.workflows.resume_evidence import (
+    ResumeEvidenceExtractor,
+    ResumeEvidenceGraphRuntime,
+)
 
 from campus_job_agent.runtime.artifacts import RunArtifactWriter
 from campus_job_agent.runtime.candidate import CandidateApplicationService
 from campus_job_agent.runtime.intent import IntentApplicationService
+from campus_job_agent.runtime.resume import ResumeApplicationService
 from campus_job_agent.runtime.model_profiles import (
     ModelProfileError,
     ModelProfileService,
@@ -125,6 +130,15 @@ class Runtime:
                     registry=self.tool_registry,
                     evidence_repository=self.evidence_repository,
                     profile_repository=self.profile_repository,
+                    checkpointer=checkpointer,
+                )
+            elif workflow == "resume":
+                yield ResumeEvidenceGraphRuntime(
+                    blob_store=self.blob_store,
+                    repository=self.evidence_repository,
+                    extractor=ResumeEvidenceExtractor(
+                        self.llm_config, self.llm_provider, self.llm_cache
+                    ),
                     checkpointer=checkpointer,
                 )
             elif workflow == "intent":
@@ -218,7 +232,7 @@ class Runtime:
             "source_adapters": self.source_adapter_registry.capabilities(),
             "console_script": str(Path(sys.argv[0]).resolve()),
             "legacy_cli": "legacy-mini-runtime",
-            "feature_stage": "v0.7.1-wp2",
+            "feature_stage": "v0.7.1-wp1.3.1",
         }
 
 
@@ -329,7 +343,7 @@ class RuntimeFactory:
         writer = RunArtifactWriter(self.paths.run_root, software_version="0.7.0")
         checkpoints = {
             name: self.paths.checkpoint_root / f"{name}.sqlite3"
-            for name in ("candidate", "intent", "role", "matching", "preparation", "feedback")
+            for name in ("resume", "candidate", "intent", "role", "matching", "preparation", "feedback")
         }
         runtime = Runtime(
             paths=self.paths, owner_id=owner_id, blob_store=blob,
@@ -348,6 +362,7 @@ class RuntimeFactory:
             checkpoint_paths=checkpoints,
         )
         runtime.application_services["candidate"] = CandidateApplicationService(runtime)
+        runtime.application_services["resume"] = ResumeApplicationService(runtime)
         runtime.application_services["intent"] = IntentApplicationService(runtime)
         runtime.application_services["model"] = model_profile_service
         return runtime

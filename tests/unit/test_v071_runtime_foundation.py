@@ -28,7 +28,7 @@ def test_runtime_factory_uses_explicit_absolute_data_root(tmp_path: Path) -> Non
     assert runtime.paths.run_root == (tmp_path / "data" / "runs").resolve()
     assert runtime.evidence_repository.database_path.is_absolute()
     assert set(runtime.checkpoint_paths) == {
-        "candidate", "intent", "role", "matching", "preparation", "feedback"
+        "resume", "candidate", "intent", "role", "matching", "preparation", "feedback"
     }
     for workflow in runtime.checkpoint_paths:
         with runtime.open_workflow(workflow) as graph_runtime:

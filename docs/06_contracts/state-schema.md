@@ -743,3 +743,17 @@ class RecruitmentAgentState(TypedDict, total=False):
     trace: list[dict]
     errors: list[dict]
 ```
+
+## v0.7.1 WP1.3 Resume Evidence State
+
+`ResumeEvidenceGraphState` 独立于 Candidate State，保存 PDF Artifact/Fragment、Draft、当前审核请求和
+最终 ResumeEvidenceSnapshot ID。固定节点为 `archive_pdf → extract_text → assess_quality →
+build_draft → validate_schema → review loop → finalize_snapshot`；本 State 不包含 Claim 或 Profile。
+
+- `candidate_claim_count_at_start` 是进入图时的实际基线，运行指标以当前值减基线证明本图没有创建 Claim；
+- `force_reparse` 只由显式 CLI 参数设置；Draft 持久化 `predecessor_draft_id` 和
+  `candidate_claim_count_at_import`，保证跨进程版本链和指标基线不丢失；
+- `pending_interaction/resume_input` 使用 replace/clear，`trace/llm_calls/errors` 使用 append reducer；
+- Draft 通过 `revision` CAS 更新；ReviewReceipt append-only；Snapshot immutable；
+- Candidate State 新增必填 `resume_evidence_id`，首节点验证 confirmed、owner 和 candidate 后，仅把
+  画像相关的已确认字段转成模型可见结构；个人信息与期望职位不进入 Candidate 推导。

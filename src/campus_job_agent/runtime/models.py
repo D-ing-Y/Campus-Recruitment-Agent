@@ -33,7 +33,7 @@ def new_id(prefix: str) -> str:
 
 
 def exit_code_for_error(error_type: str) -> int:
-    if error_type in {"invalid_input", "config_error"}:
+    if error_type in {"invalid_input", "config_error", "unsupported_input"}:
         return 2
     if error_type in {"contract_violation", "permission_denied", "not_found", "stale_input"}:
         return 3

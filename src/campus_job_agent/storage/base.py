@@ -8,6 +8,9 @@ from campus_job_agent.schemas import (
     EvidenceClaim,
     EvidenceFragment,
     ProfileSnapshot,
+    ResumeDraft,
+    ResumeEvidenceSnapshot,
+    ResumeReviewReceipt,
     ValidationReceipt,
 )
 
@@ -74,6 +77,51 @@ class EvidenceRepository(Protocol):
     ) -> dict: ...
 
     def get_response_receipt(self, response_id: str) -> dict | None: ...
+
+    def save_resume_draft(
+        self, draft: ResumeDraft, *, expected_revision: int | None = None
+    ) -> ResumeDraft: ...
+
+    def get_resume_draft(self, draft_id: str) -> ResumeDraft | None: ...
+
+    def find_resume_draft(
+        self, *, owner_id: str, artifact_id: str
+    ) -> ResumeDraft | None: ...
+
+    def save_resume_review_receipt(
+        self, receipt: ResumeReviewReceipt, *, payload_hash: str
+    ) -> ResumeReviewReceipt: ...
+
+    def save_resume_review_update(
+        self,
+        draft: ResumeDraft,
+        *,
+        expected_revision: int,
+        receipt: ResumeReviewReceipt,
+        payload_hash: str,
+    ) -> tuple[ResumeDraft, ResumeReviewReceipt, bool]: ...
+
+    def get_resume_review_payload_hash(self, response_id: str) -> str | None: ...
+
+    def get_resume_review_receipt(
+        self, response_id: str
+    ) -> ResumeReviewReceipt | None: ...
+
+    def save_resume_evidence_snapshot(
+        self, snapshot: ResumeEvidenceSnapshot
+    ) -> ResumeEvidenceSnapshot: ...
+
+    def get_resume_evidence_snapshot(
+        self, resume_evidence_id: str
+    ) -> ResumeEvidenceSnapshot | None: ...
+
+    def get_resume_evidence_for_draft(
+        self, draft_id: str
+    ) -> ResumeEvidenceSnapshot | None: ...
+
+    def get_latest_resume_evidence(
+        self, *, owner_id: str, candidate_id: str
+    ) -> ResumeEvidenceSnapshot | None: ...
 
 
 class ProfileRepository(Protocol):

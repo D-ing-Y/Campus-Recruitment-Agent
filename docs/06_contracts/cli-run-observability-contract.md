@@ -351,3 +351,15 @@ notes, icon, iconColor, isCurrent
 - `httpx.TimeoutException` 映射 `network_timeout/retryable=true`，401/403 映射 `auth_required`，429 映射
   `rate_limited/retryable=true`；Candidate 必须保留该分类并返回外部依赖 exit 4；
 - `--json` 不启动交互 UI；需要输入却未提供 stdin 时返回 `invalid_input/2`。
+
+## v0.7.1 WP1.3 Resume CLI
+
+- `resume import SESSION --candidate-id ID --input FILE [--reparse]`；`--reparse` 显式创建新 Draft，
+  不覆写旧 Snapshot；
+- `resume resume SESSION` 在 TTY 连续显示结构化值、页码和有限原文片段；JSON 模式使用
+  `--action/--response-id/--patch`；
+- `resume show OBJECT_ID`；
+- `candidate build SESSION --candidate-id ID --resume-evidence SNAPSHOT_ID`；旧 `--input` 不再出现在 help；
+- Ctrl-C 只退出当前进程，SQLite checkpoint 与 Draft 保留；同一 session 可继续；
+- run artifacts 只记录文件扩展名、hash、对象 ID、安全计数和请求元数据，不记录原文件名、完整简历、
+  PII、未脱敏 Prompt 或 API key。

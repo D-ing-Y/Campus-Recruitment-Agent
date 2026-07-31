@@ -47,6 +47,7 @@ class ClaimExtractorService:
         fragments: list[EvidenceFragment],
         *,
         max_attempts: int | None = None,
+        source_evidence_ids: list[str] | None = None,
     ) -> tuple[list[EvidenceClaim], list[LLMCallRecord]]:
         def retry(previous: str, error: str) -> list[dict[str, str]]:
             return build_claim_retry_messages(
@@ -82,8 +83,13 @@ class ClaimExtractorService:
                 subject_id=subject_id,
                 predicate=item.predicate,
                 value=item.value,
-                claim_type=item.claim_type,
+                claim_type=(
+                    "user_reported"
+                    if source_evidence_ids and item.claim_type == "observed_fact"
+                    else item.claim_type
+                ),
                 evidence_fragment_ids=item.evidence_fragment_ids,
+                source_evidence_ids=list(source_evidence_ids or []),
                 confidence=item.confidence,
                 extractor=extractor,
                 prompt_version=CLAIM_PROMPT_VERSION,

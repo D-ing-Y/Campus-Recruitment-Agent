@@ -370,3 +370,12 @@ schema 边界可在其他字段合法时将这三个精确别名确定性归一�
 
 模型不得输出 contact、award、任意 profile path、完整简历摘要或没有投影语义的扩展字段。一个 item
 不合法不得使其他 item 的验证证据消失；所有 item 都必须出现在 ValidationReceipt 集合中。
+
+## v0.7.1 WP1.3 ResumeExtractionBatch
+
+ResumeEvidenceGraph 使用 `resume_evidence_extractor_v2 / resume_evidence_v0.7.1`。Provider 输出仅包含
+个人优势、期望职位、工作/实习经历、项目经历、教育经历、专业技能和自定义内容；个人信息不在 Tool
+Schema 中。缺失字段保持 null/空列表，不允许概括、推断熟练度、补全日期或重建脱敏值。每个非空块或
+记录至少引用一个输入 Fragment ID；应用验证引用范围并生成字段 SourceRef。该输出只是待确认 Draft，
+不是 Claim，也不能直接投影 CandidateProfile。教育附属内容按 layout 相邻记录绑定，“至今”等原文
+时间不得转为 null，每条奖项/证书项目必须保持独立记录边界。

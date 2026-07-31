@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,7 @@ from campus_job_agent.schemas import (
     HumanInteractionRequest,
     HumanInteractionResponse,
     ProfileVersionDiff,
+    ResumeEvidenceSnapshot,
     ToolResult,
     ValidationReceipt,
 )
@@ -40,6 +42,7 @@ from campus_job_agent.tools.registry import ToolRegistry
 
 
 PARSER_VERSION = "v0.4.0"
+RESUME_PARSER_VERSION = "resume_evidence_v2"
 SUPPORTED_PLAIN_SUFFIXES = {".md", ".markdown", ".txt"}
 
 
@@ -241,12 +244,23 @@ class ExtractPdfTextTool:
                 needs_user_action=True,
                 evidence_ids=[artifact.artifact_id],
             )
+        enforce_quality = bool(args.get("enforce_quality", False))
+        require_quality_diagnostics = bool(
+            args.get("require_quality_diagnostics", False)
+        )
+        preserve_layout = bool(args.get("preserve_layout", False))
+        force_reparse = bool(args.get("force_reparse", False))
         existing = self.repository.get_extraction(artifact.artifact_id)
-        if existing is not None:
+        if existing is not None and not force_reparse and (
+            (not require_quality_diagnostics or "quality_passed" in existing.diagnostics)
+            and (not enforce_quality or bool(existing.diagnostics.get("quality_passed")))
+        ):
             return _extraction_result(self.name, existing, deduplicated=True)
         try:
-            reader = PdfReader(io.BytesIO(self.blob_store.get(artifact.raw_uri)))
-            pages = [(page.extract_text() or "").replace("\x00", "") for page in reader.pages]
+            raw = self.blob_store.get(artifact.raw_uri)
+            pages, parser_name, diagnostics = _extract_pdf_pages(
+                raw, preserve_layout=preserve_layout
+            )
         except Exception as exc:
             return _failure(
                 self.name,
@@ -255,17 +269,29 @@ class ExtractPdfTextTool:
                 needs_user_action=True,
                 evidence_ids=[artifact.artifact_id],
             )
-        if not pages or not any(page.strip() for page in pages):
+        if not any(page.strip() for page in pages):
             return _failure(
                 self.name,
-                "PDF has no extractable text layer; OCR is outside v0.4",
+                "PDF has no usable text layer; OCR is outside v0.7.1",
+                "unsupported_input",
+                needs_user_action=True,
+                evidence_ids=[artifact.artifact_id],
+            )
+        if enforce_quality and not diagnostics["quality_passed"]:
+            return _failure(
+                self.name,
+                "PDF text quality failed for pypdf and pdfplumber; OCR is outside v0.7.1",
                 "unsupported_input",
                 needs_user_action=True,
                 evidence_ids=[artifact.artifact_id],
             )
         try:
             extraction = _save_pdf_extraction(
-                artifact, pages, self.blob_store, self.repository
+                artifact, pages, parser_name, diagnostics,
+                self.blob_store, self.repository,
+                parser_version=(
+                    RESUME_PARSER_VERSION if preserve_layout else PARSER_VERSION
+                ),
             )
             return _extraction_result(self.name, extraction, deduplicated=False)
         except OSError as exc:
@@ -346,6 +372,7 @@ class ExtractCandidateClaimsTool:
         owner_id = str(args.get("owner_id", "")).strip()
         run_id = str(args.get("run_id", "run-unscoped")).strip()
         fragment_ids = [str(value) for value in args.get("fragment_ids", [])]
+        resume_evidence_id = str(args.get("resume_evidence_id") or "").strip()
         if not subject_id or not owner_id or not fragment_ids:
             return _candidate_claim_failure(
                 self.name,
@@ -370,16 +397,58 @@ class ExtractCandidateClaimsTool:
                 )
             fragments.append(fragment)
             allowed_artifacts.add(fragment.artifact_id)
+        extraction_batches: list[tuple[list[EvidenceFragment], list[str]]] = [
+            (fragments, [])
+        ]
+        if resume_evidence_id:
+            snapshot = self.repository.get_resume_evidence_snapshot(resume_evidence_id)
+            if (
+                snapshot is None or snapshot.status != "confirmed"
+                or snapshot.owner_id != owner_id
+                or snapshot.candidate_id != subject_id
+            ):
+                return _candidate_claim_failure(
+                    self.name, "confirmed ResumeEvidence identity mismatch",
+                    "validation_error", fragment_ids,
+                )
+            allowed_resume_fragments = {
+                ref.fragment_id
+                for path, refs in snapshot.field_sources.items()
+                if not path.startswith(("/personal_information", "/career_expectations"))
+                for ref in refs
+            }
+            resume_fragments = [
+                item for item in fragments if item.fragment_id in allowed_resume_fragments
+            ]
+            conversation_fragments = [
+                item for item in fragments if item.fragment_id not in allowed_resume_fragments
+            ]
+            extraction_batches = []
+            structured_resume = _resume_profile_fragments(snapshot, resume_fragments)
+            if structured_resume:
+                extraction_batches.append((structured_resume, [resume_evidence_id]))
+            if conversation_fragments:
+                extraction_batches.append((conversation_fragments, []))
+        claims = []
+        calls = []
         try:
-            claims, calls = self.extractor.extract(
-                subject_id,
-                fragments,
-                max_attempts=(
-                    int(args["remaining_llm_calls"])
-                    if "remaining_llm_calls" in args
-                    else None
-                ),
+            remaining = (
+                int(args["remaining_llm_calls"])
+                if "remaining_llm_calls" in args else None
             )
+            for batch_fragments, source_evidence_ids in extraction_batches:
+                batch_claims, batch_calls = self.extractor.extract(
+                    subject_id, batch_fragments, max_attempts=remaining,
+                    source_evidence_ids=source_evidence_ids,
+                )
+                claims.extend(batch_claims)
+                calls.extend(batch_calls)
+                if remaining is not None:
+                    remaining -= sum(
+                        1 + int(item.retry_count) for item in batch_calls
+                    )
+                    if remaining <= 0 and extraction_batches[-1][0] is not batch_fragments:
+                        raise ValueError("max_llm_calls exhausted before all evidence batches")
         except Exception as exc:
             structured_error = exc.__class__.__name__ == "StructuredOutputError"
             structured_type = str(
@@ -395,15 +464,18 @@ class ExtractCandidateClaimsTool:
                 else "validation_error"
             )
             retryable = bool(getattr(exc, "retryable", False))
-            calls = [
+            failed_calls = [
                 item.model_dump(mode="json")
                 for item in getattr(exc, "call_records", [])
             ]
+            failed_calls = [
+                item.model_dump(mode="json") for item in calls
+            ] + failed_calls
             failed = _failure(
                 self.name, str(exc), error_type, retryable=retryable
             )
             failed.records = [{
-                "claim_ids": [], "llm_calls": calls,
+                "claim_ids": [], "llm_calls": failed_calls,
                 "validation_receipts": [],
                 "fragment_processing": {
                     fragment_id: "retryable_extraction_failure"
@@ -906,8 +978,12 @@ def _save_plain_extraction(
 def _save_pdf_extraction(
     artifact: EvidenceArtifact,
     pages: list[str],
+    parser_name: str,
+    diagnostics: dict[str, Any],
     blob_store: BlobStore,
     repository: EvidenceRepository,
+    *,
+    parser_version: str = PARSER_VERSION,
 ) -> DocumentExtraction:
     parts: list[str] = []
     units: list[ExtractionUnit] = []
@@ -930,11 +1006,13 @@ def _save_pdf_extraction(
     return _persist_extraction(
         artifact,
         "".join(parts),
-        "pypdf_text",
+        parser_name,
         "page_and_char_range",
         units,
         blob_store,
         repository,
+        parser_version=parser_version,
+        diagnostics=diagnostics,
     )
 
 
@@ -946,24 +1024,28 @@ def _persist_extraction(
     units: list[ExtractionUnit],
     blob_store: BlobStore,
     repository: EvidenceRepository,
+    *,
+    parser_version: str = PARSER_VERSION,
+    diagnostics: dict[str, Any] | None = None,
 ) -> DocumentExtraction:
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
     owner_segment = hashlib.sha256(
         artifact.owner_id.encode("utf-8")
     ).hexdigest()[:24]
     uri = blob_store.put(
-        f"derived/{owner_segment}/{artifact.artifact_id}/{parser_name}-{PARSER_VERSION}.txt",
+        f"derived/{owner_segment}/{artifact.artifact_id}/{parser_name}-{parser_version}.txt",
         text.encode("utf-8"),
     )
     return repository.save_extraction(
         DocumentExtraction(
             artifact_id=artifact.artifact_id,
             parser_name=parser_name,
-            parser_version=PARSER_VERSION,
+            parser_version=parser_version,
             text_uri=uri,
             text_hash=digest,
             locator_type=locator_type,
             units=units,
+            diagnostics=diagnostics or {},
         )
     )
 
@@ -986,8 +1068,86 @@ def _extraction_result(
             "parser_name": extraction.parser_name,
             "parser_version": extraction.parser_version,
             "text_hash": extraction.text_hash,
+            "diagnostics": extraction.diagnostics,
         },
     )
+
+
+def _extract_pdf_pages(
+    raw: bytes, *, preserve_layout: bool = False
+) -> tuple[list[str], str, dict[str, Any]]:
+    attempts: list[str] = []
+    candidates: list[tuple[list[str], str, dict[str, Any]]] = []
+    pypdf_parser = "pypdf_layout" if preserve_layout else "pypdf_text"
+    attempts.append(pypdf_parser)
+    try:
+        reader = PdfReader(io.BytesIO(raw))
+        pages = [
+            (
+                page.extract_text(extraction_mode="layout")
+                if preserve_layout else page.extract_text()
+            ) or ""
+            for page in reader.pages
+        ]
+        pages = [page.replace("\x00", "") for page in pages]
+        quality = _pdf_quality(pages, pypdf_parser, attempts)
+        candidates.append((pages, pypdf_parser, quality))
+        if quality["quality_passed"]:
+            return pages, pypdf_parser, quality
+    except Exception:
+        pass
+
+    attempts.append("pdfplumber_text")
+    try:
+        import pdfplumber
+
+        with pdfplumber.open(io.BytesIO(raw)) as document:
+            pages = [
+                (page.extract_text(x_tolerance=2, y_tolerance=3) or "").replace("\x00", "")
+                for page in document.pages
+            ]
+        quality = _pdf_quality(pages, "pdfplumber_text", attempts)
+        candidates.append((pages, "pdfplumber_text", quality))
+    except Exception:
+        pass
+    if not candidates:
+        return [], "none", _pdf_quality([], "none", attempts)
+    passed = [item for item in candidates if item[2]["quality_passed"]]
+    pool = passed or candidates
+    pages, parser_name, quality = max(
+        pool,
+        key=lambda item: (
+            int(item[2]["total_non_whitespace_chars"]),
+            float(item[2]["nonempty_page_ratio"]),
+            -float(item[2]["invalid_character_ratio"]),
+        ),
+    )
+    quality["attempted_parsers"] = attempts
+    return pages, parser_name, quality
+
+
+def _pdf_quality(
+    pages: list[str], selected_parser: str, attempts: list[str]
+) -> dict[str, Any]:
+    joined = "".join(pages)
+    non_whitespace = sum(not char.isspace() for char in joined)
+    nonempty = sum(bool(page.strip()) for page in pages)
+    invalid = sum(
+        char == "\ufffd" or (ord(char) < 32 and char not in "\n\r\t")
+        for char in joined
+    )
+    ratio = nonempty / len(pages) if pages else 0.0
+    invalid_ratio = invalid / max(1, len(joined))
+    return {
+        "selected_parser": selected_parser,
+        "attempted_parsers": list(attempts),
+        "total_non_whitespace_chars": non_whitespace,
+        "nonempty_page_ratio": round(ratio, 6),
+        "invalid_character_ratio": round(invalid_ratio, 6),
+        "quality_passed": (
+            non_whitespace >= 100 and ratio >= 0.8 and invalid_ratio <= 0.02
+        ),
+    }
 
 
 def _fragments_from_extraction(
@@ -1065,6 +1225,67 @@ def _validate_response_against_request(
     targets = set(request.target_paths)
     if any(item.target_path not in targets for item in response.corrections):
         raise ValueError("correction target is outside the pending interaction")
+
+
+def _resume_profile_fragments(
+    snapshot: ResumeEvidenceSnapshot, fragments: list[EvidenceFragment]
+) -> list[EvidenceFragment]:
+    """Expose confirmed profile-relevant fields, never raw PDF text, to the LLM."""
+
+    by_fragment: dict[str, list[str]] = {item.fragment_id: [] for item in fragments}
+    payload = snapshot.data.model_dump(mode="json")
+    for path, refs in snapshot.field_sources.items():
+        if path.startswith(("/personal_information", "/career_expectations")):
+            continue
+        try:
+            value = _json_pointer_value(payload, path)
+        except (KeyError, IndexError, TypeError, ValueError):
+            continue
+        if value in (None, "", []):
+            continue
+        line = f"{path}: {value}"
+        for ref in refs:
+            if ref.fragment_id in by_fragment:
+                by_fragment[ref.fragment_id].append(line)
+    result: list[EvidenceFragment] = []
+    personal_values = [
+        value for value in snapshot.data.personal_information.model_dump().values()
+        if isinstance(value, str) and value.strip()
+    ]
+    for fragment in fragments:
+        text = "\n".join(dict.fromkeys(by_fragment[fragment.fragment_id]))
+        text = _redact_profile_text(text, personal_values)
+        if not text.strip():
+            continue
+        result.append(fragment.model_copy(update={
+            "text": text,
+            "text_hash": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            "metadata": {
+                **fragment.metadata,
+                "source_resume_evidence_id": snapshot.resume_evidence_id,
+                "structured_confirmed_view": True,
+            },
+        }))
+    return result
+
+
+def _json_pointer_value(payload: Any, pointer: str) -> Any:
+    value = payload
+    for token in pointer.lstrip("/").split("/") if pointer else []:
+        key = token.replace("~1", "/").replace("~0", "~")
+        value = value[int(key)] if isinstance(value, list) else value[key]
+    return value
+
+
+def _redact_profile_text(text: str, personal_values: list[str]) -> str:
+    text = re.sub(r"(?<!\d)(?:\+?86[- ]?)?1[3-9]\d{9}(?!\d)", "[REDACTED_PHONE]", text)
+    text = re.sub(
+        r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}",
+        "[REDACTED_EMAIL]", text,
+    )
+    for value in sorted(personal_values, key=len, reverse=True):
+        text = text.replace(value, "[REDACTED_PII]")
+    return text
 
 
 def _archive_response_artifact(

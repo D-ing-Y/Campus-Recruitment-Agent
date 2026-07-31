@@ -435,3 +435,14 @@ interrupt。响应正文先归档为 Evidence Artifact/Fragment，checkpoint 中
 - 相同 `response_id + canonical payload` 复用首次结果；不同 payload 报 `idempotency_conflict`。
 - 只有完成人工确认才能将 constraint `status` 转为 `confirmed`。
 - WP2 完成后创建 `role_research_required` Handoff，不在本 Graph 内调用 Role Graph。
+
+## v0.7.1 WP1.3 Resume Review
+
+Resume 审核使用独立 `ResumeReviewRequest/Response/Receipt`，不复用 Candidate 的 Agent 问答请求。
+顺序固定为 BOSS 八区块；简单区块整块审核，非空列表逐记录审核并在最后一条后自动完成区块。动作仅允许
+`confirm | correct | remove | retry | cancel`，没有 skip；空区块必须显式确认成 `confirmed_empty`。
+
+`correct` 必须携带 JSON merge patch 和 PDF-source attestation，应用还会验证所有新增非空标量可在
+当前 PDF Fragment 文本中找到。非法 identity/request/revision/patch 在消费 LangGraph interrupt 前
+拒绝，保证失败输入不会污染 checkpoint。相同 response ID 的 canonical payload（排除提交时间）只写
+一次；不同 payload 返回 `idempotency_conflict`。Draft CAS 与 Receipt 插入必须在同一 SQLite 事务。

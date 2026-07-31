@@ -1,6 +1,6 @@
 # v0.7.1 版本入口：子 Workflow 纵向闭环与 CLI 加固
 
-状态：Ready for Implementation（WP0 Passed；WP1 Passed；WP1.1 Passed；WP2 Passed）
+状态：Implementation In Progress（WP1.3.1 忠实度补丁通过；新 Draft 人工审核及 WP1/WP2 重验进行中）
 路线确认日期：2026-07-28  
 代码版本：仍为 0.7.0；完成实现、测试和 Eval 后才升级 0.7.1
 
@@ -37,6 +37,9 @@ v0.7.1 的唯一目标是把现有 v0.3-v0.7 能力从“独立子图与离线�
 - WP1.2 经历 Taxonomy 补丁：`docs/03_requirements/v0.7.1-wp1.2-candidate-experience-taxonomy.md`、
   RFC-0011、ADR-0011、Candidate Profile Contract 与
   `docs/07_evaluation/v0.7.1-wp1.2-eval-report.md`
+- WP1.3 结构化简历证据：Requirements/Tasks、RFC-0012、ADR-0012、
+  `docs/06_contracts/resume-evidence-contract.md`、Eval plan 与阶段性 Eval report
+- WP1.3.1 忠实度纠错：layout 解析、字段级 span、简化审核、reparse 版本链与真实 Draft 复验
 - WP2 文档包：`docs/03_requirements/v0.7.1-wp2-career-intent-intake.md`、RFC-0010、ADR-0010 与
   `docs/06_contracts/career-intent-contract.md`
 - WP2 Eval report：`docs/07_evaluation/v0.7.1-wp2-eval-report.md`
@@ -54,6 +57,7 @@ v0.7.1 的唯一目标是把现有 v0.3-v0.7 能力从“独立子图与离线�
 | WP0 | RuntimeFactory、RunSession、CLI、events、inspect | 文档门禁完成 | CLI 黑盒与可观测契约通过 |
 | WP1 | Evidence + Candidate 真实材料/DeepSeek | WP0 可定位节点失败 | 支持 Claim 100% 可投影/追溯 |
 | WP1.1 | LangChain Model/Tool/MCP 接入层规范化 | WP1 真实失败已定位 | 标准 provider/tool/MCP 协议与策略可诊断 |
+| WP1.3 | ResumeEvidence 与 CandidateProfile 解耦 | WP1.2 历史验收完成 | confirmed ResumeEvidence typed handoff 与人工审核 |
 | WP2 | CareerIntent 首次采集/确认/snapshot | Candidate 可用 | Passed；已产生 WP3 typed handoff |
 | WP3 | Role 非本地 JD 真实来源 | Intent 已确认 | search→detail raw→official status→Profile 或诚实阻塞 |
 | WP4 | Matching + TargetDecision | Candidate/Intent/Role current | 四类 Gap、解释、决策和 handoff 通过 |
@@ -67,10 +71,9 @@ v0.7.1 的唯一目标是把现有 v0.3-v0.7 能力从“独立子图与离线�
 
 1. 正式 Runtime/Session/doctor/inspect CLI 基座与 Candidate build/resume/show/diff 已完成；其他业务
    workflow 命令尚未接入，旧 `run` 仅作为明确标记的 `legacy-mini-runtime` 保留。
-2. Candidate predicate、逐项 receipt、原子 batch、代码派生稳定 record ID、多记录投影与重复 build
-   已完成修复；CLI UI 和 CC Switch 风格 Model Provider 配置已可用。真实 DeepSeek 简历 E4 已通过，
-   断网回放命中缓存并复用同一 snapshot/Claim IDs。项目 README 经用户明确省略，未读取、未写入
-   项目 Agent 经历；用户已完成真实 CandidateProfile 的人工复核。
+2. WP1.2 以前的 Candidate/DeepSeek 历史验收保留；WP1.3 已将 PDF 转录与画像分析拆图。新的真实
+   DeepSeek E4 已生成 Draft 并停在首个人工审核点，在用户完成八区块确认、新 CandidateSnapshot 与
+   WP2 重验以前，WP1/WP2 当前契约状态保持 partial。
 3. CareerIntent 已有首次生产入口；PreparationConstraints 仍没有首次生产入口。
 4. Role live 必须要求真实 detail raw，搜索页不能冒充详情。
 5. Matching/Preparation/Feedback 存在名义节点与真实业务边界不一致的问题。
@@ -124,6 +127,7 @@ v0.7.1 的唯一目标是把现有 v0.3-v0.7 能力从“独立子图与离线�
 
 ## 7. 下一步
 
-WP0、WP1、WP1.1 与 WP2 已通过。CareerIntent 已通过真实 DeepSeek Tool Calling、
-Pydantic/领域校验、人工修订、snapshot/SearchScope 和 typed handoff 闭环。下一工作包是
-WP3 Role live source，仍不实现 v1.0 Parent Graph。
+WP1.3.1 代码、自动化验收和真实 Draft 内容对齐已完成，新 DeepSeek Draft 正在等待用户
+逐区块审核。下一步是继续该
+ResumeEvidence session，随后用新 CandidateSnapshot 重跑 WP2；完成前不进入 WP3，也不实现
+v1.0 Parent Graph。

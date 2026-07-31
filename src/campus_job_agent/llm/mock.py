@@ -28,6 +28,11 @@ class MockLLMProvider:
                 json.dumps(_valid_career_intent(request.messages), ensure_ascii=False),
                 request.model,
             )
+        if request.messages and "RESUME_EVIDENCE_EXTRACTOR_V071" in request.messages[0]["content"]:
+            return self._response(
+                json.dumps(_valid_resume(request.messages), ensure_ascii=False),
+                request.model,
+            )
         if request.messages and (
             "CLAIM_EXTRACTOR_V03" in request.messages[0]["content"]
             or "CLAIM_EXTRACTOR_V04" in request.messages[0]["content"]
@@ -132,6 +137,89 @@ def _valid_career_intent(messages: list[dict[str, str]]) -> dict:
     return {"target_roles": roles, "constraints": constraints, "unresolved_fields": unresolved}
 
 
+def _valid_resume(messages: list[dict[str, str]]) -> dict:
+    payload = json.loads(messages[1]["content"])
+    fragments = payload.get("fragments", [])
+    if not fragments:
+        return {}
+    fragment_id = fragments[0]["fragment_id"]
+    text = "\n".join(str(item.get("text", "")) for item in fragments)
+    result = {
+        "personal_advantage": {"text": None, "evidence_fragment_ids": []},
+        "career_expectations": [], "work_experiences": [],
+        "project_experiences": [], "education_experiences": [],
+        "professional_skills": {"text": None, "evidence_fragment_ids": []},
+        "custom_sections": [],
+    }
+    if "个人优势" in text:
+        result["personal_advantage"] = {
+            "text": _section_text(text, "个人优势"),
+            "evidence_fragment_ids": [fragment_id],
+        }
+    if any(value in text for value in ("大学", "University", "university")):
+        education_fragment = next(
+            item for item in fragments
+            if any(
+                marker in str(item.get("text", ""))
+                for marker in ("大学", "University", "university")
+            )
+        )
+        education_text = str(education_fragment.get("text", ""))
+        institution = (
+            "大学" if "大学" in education_text
+            else "University" if "University" in education_text
+            else "university"
+        )
+        result["education_experiences"].append({
+            "institution": institution,
+            "degree": "本科" if "本科" in education_text else None,
+            "major": None, "start_date": None,
+            "end_date": next(
+                (year for year in ("2026", "2027", "2028") if year in education_text),
+                None,
+            ),
+            "courses_or_research": None,
+            "evidence_fragment_ids": [education_fragment["fragment_id"]],
+        })
+    if "项目" in text or "project" in text.lower():
+        project_fragment = next(
+            item for item in fragments
+            if "项目" in str(item.get("text", ""))
+            or "project" in str(item.get("text", "")).lower()
+        )
+        project_text = str(project_fragment.get("text", ""))
+        project_marker = "项目" if "项目" in project_text else "Project"
+        result["project_experiences"].append({
+            "name": project_marker, "role": None,
+            "start_date": None, "end_date": None,
+            "raw_subtype": "项目经历" if "项目经历" in project_text else None,
+            "content": _source_tail(project_text, project_marker, 400),
+            "evidence_fragment_ids": [project_fragment["fragment_id"]],
+        })
+    skills = [value for value in ("Python", "LangGraph", "RAG", "LLM") if value.lower() in text.lower()]
+    if skills:
+        skills_fragment = next(
+            item for item in fragments
+            if skills[0].lower() in str(item.get("text", "")).lower()
+        )
+        result["professional_skills"] = {
+            "text": _source_tail(
+                str(skills_fragment.get("text", "")), skills[0], 240
+            ),
+            "evidence_fragment_ids": [skills_fragment["fragment_id"]],
+        }
+    return result
+
+
+def _section_text(text: str, marker: str) -> str:
+    lines = [line.strip() for line in text.splitlines()]
+    for index, line in enumerate(lines):
+        if marker in line:
+            following = next((value for value in lines[index + 1:] if value), "")
+            return following or line
+    return marker
+
+
 def _valid_claims(messages: list[dict[str, str]]) -> dict:
     payload = json.loads(messages[1]["content"])
     fragments = payload.get("fragments", [])
@@ -214,16 +302,32 @@ def _valid_claims(messages: list[dict[str, str]]) -> dict:
 def _line_value(text: str, markers: list[str]) -> str:
     for line in text.splitlines():
         if any(marker in line.lower() or marker in line for marker in markers):
-            return line.strip()[:240]
+            return _structured_value(line)[:240]
     return text.strip()[:240]
+
+
+def _source_tail(text: str, marker: str, limit: int) -> str:
+    index = text.casefold().find(marker.casefold())
+    tail = text[index:] if index >= 0 else marker
+    next_redaction = tail.find("[REDACTED_", 1)
+    if next_redaction > 0:
+        tail = tail[:next_redaction]
+    return tail[:limit].strip()
 
 
 def _responsibility_value(text: str) -> str:
     for line in text.splitlines():
         lower = line.lower()
         if "responsibilit" in lower or "负责" in line or "implemented" in lower:
-            return line.strip()[:400]
+            return _structured_value(line)[:400]
     return text.strip()[:400]
+
+
+def _structured_value(line: str) -> str:
+    value = line.strip()
+    if value.startswith("/") and ": " in value:
+        return value.split(": ", 1)[1].strip()
+    return value
 
 
 def _valid_sufficiency(messages: list[dict[str, str]]) -> dict:

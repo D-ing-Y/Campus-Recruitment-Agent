@@ -29,6 +29,7 @@ class SessionReferenceError(SessionError):
 
 
 _REF_TYPES = {
+    "resume_evidence_snapshot_id": "resume_evidence_snapshot",
     "candidate_profile_snapshot_id": "candidate_profile_snapshot",
     "career_intent_snapshot_id": "career_intent_snapshot",
     "role_profile_snapshot_ids": "role_profile_snapshot",

@@ -1,20 +1,30 @@
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
 import sqlite3
+from uuid import uuid4
 
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
-from pypdf import PdfWriter
 
 from campus_job_agent.evidence import ClaimExtractorService
 from campus_job_agent.llm import LLMCache, LLMConfig, MockLLMProvider
 from campus_job_agent.schemas import (
+    EvidenceArtifact,
+    EvidenceFragment,
+    CustomSectionRecord,
     HumanAnswer,
     HumanInteractionResponse,
+    PdfExtractionDiagnostics,
     ProfileCorrection,
+    ResumeData,
+    ResumeDraft,
+    ResumeEvidenceSnapshot,
+    ResumeSourceRef,
     ToolResult,
 )
+from campus_job_agent.schemas.resume import default_section_statuses
 from campus_job_agent.storage import LocalBlobStore, SQLiteRepository
 from campus_job_agent.tools import build_candidate_profile_registry
 from campus_job_agent.workflows.candidate_profile import (
@@ -56,15 +66,105 @@ def _request(result):
     return result["__interrupt__"][0].value
 
 
+def _resume_evidence(
+    tmp_path: Path,
+    repository: SQLiteRepository,
+    *,
+    owner_id: str,
+    candidate_id: str,
+    input_paths: list[str],
+) -> str:
+    """Seed the confirmed-evidence boundary for legacy Candidate behavior tests."""
+
+    source_texts = [Path(value).read_text(encoding="utf-8") for value in input_paths]
+    text = "\n".join(source_texts)
+    digest = hashlib.sha256(text.encode()).hexdigest()
+    artifact_id = f"artifact-resume-{uuid4()}"
+    uri = LocalBlobStore(tmp_path / "blobs").put(
+        f"fixtures/{artifact_id}.txt", text.encode()
+    )
+    repository.save_artifact(EvidenceArtifact(
+        artifact_id=artifact_id, owner_id=owner_id, source_type="confirmed_resume_fixture",
+        content_type="application/pdf", original_name="confirmed-resume.pdf",
+        raw_uri=uri, content_hash=digest,
+    ))
+    fragments = []
+    for index, source_text in enumerate(source_texts):
+        source_digest = hashlib.sha256(source_text.encode()).hexdigest()
+        fragments.append(repository.save_fragment(EvidenceFragment(
+            fragment_id=f"fragment-resume-{uuid4()}", artifact_id=artifact_id,
+            locator_type="page_and_char_range",
+            locator={"page": index + 1, "document_start": 0, "document_end": len(source_text)},
+            text=source_text, text_hash=source_digest,
+        )))
+    diagnostics = PdfExtractionDiagnostics(
+        selected_parser="fixture", attempted_parsers=["fixture"],
+        total_non_whitespace_chars=sum(not char.isspace() for char in text),
+        nonempty_page_ratio=1.0 if text else 0.0,
+        invalid_character_ratio=0.0, quality_passed=bool(text),
+    )
+    statuses = default_section_statuses()
+    statuses.update({key: "confirmed_empty" for key in statuses})
+    if source_texts:
+        statuses["custom_sections"] = "confirmed"
+    data = ResumeData(custom_sections=[
+        CustomSectionRecord(record_id=f"fixture-{index}", content=source_text)
+        for index, source_text in enumerate(source_texts)
+    ])
+    field_sources = {
+        f"/custom_sections/{index}/content": [ResumeSourceRef(
+            artifact_id=artifact_id, fragment_id=fragment.fragment_id,
+            page_number=index + 1, text_hash=fragment.text_hash,
+            start_offset=0, end_offset=len(fragment.text),
+        )]
+        for index, fragment in enumerate(fragments)
+    }
+    draft = repository.save_resume_draft(ResumeDraft(
+        owner_id=owner_id, candidate_id=candidate_id, artifact_id=artifact_id,
+        status="finalized", data=data,
+        field_sources=field_sources,
+        section_statuses=statuses, review_receipt_ids=["fixture-confirmation"],
+        extraction_diagnostics=diagnostics,
+    ))
+    snapshot = repository.save_resume_evidence_snapshot(ResumeEvidenceSnapshot(
+        draft_id=draft.draft_id, owner_id=owner_id, candidate_id=candidate_id,
+        artifact_id=artifact_id, version=1, data=data,
+        field_sources=draft.field_sources,
+        review_receipt_ids=draft.review_receipt_ids,
+        extraction_diagnostics=diagnostics,
+    ))
+    return snapshot.resume_evidence_id
+
+
+def _candidate_state(
+    tmp_path: Path,
+    repository: SQLiteRepository,
+    *,
+    thread_id: str,
+    user_id: str,
+    candidate_id: str,
+    source_paths: list[str],
+    **kwargs,
+):
+    return create_candidate_profile_state(
+        thread_id=thread_id, user_id=user_id, candidate_id=candidate_id,
+        resume_evidence_id=_resume_evidence(
+            tmp_path, repository, owner_id=user_id,
+            candidate_id=candidate_id, input_paths=source_paths,
+        ),
+        input_paths=[], **kwargs,
+    )
+
+
 def test_sufficient_material_completes_without_interrupt(tmp_path) -> None:
     repository = SQLiteRepository(tmp_path / "evidence.sqlite3")
     runtime = _runtime(tmp_path, repository, InMemorySaver())
     result = runtime.invoke(
-        create_candidate_profile_state(
+        _candidate_state(tmp_path, repository,
             thread_id="thread-sufficient",
             user_id="owner",
             candidate_id="candidate",
-            input_paths=[str(FIXTURES / "candidate_sufficient.md")],
+            source_paths=[str(FIXTURES / "candidate_sufficient.md")],
         )
     )
     assert result["status"] == "completed"
@@ -85,11 +185,11 @@ def test_answer_is_archived_before_profile_update_and_skip_is_not_reasked(
     repository = SQLiteRepository(tmp_path / "evidence.sqlite3")
     runtime = _runtime(tmp_path, repository, InMemorySaver())
     result = runtime.invoke(
-        create_candidate_profile_state(
+        _candidate_state(tmp_path, repository,
             thread_id="thread-answer",
             user_id="owner",
             candidate_id="candidate",
-            input_paths=[str(FIXTURES / "candidate_missing_responsibility.md")],
+            source_paths=[str(FIXTURES / "candidate_missing_responsibility.md")],
         )
     )
     request = _request(result)
@@ -125,7 +225,10 @@ def test_answer_is_archived_before_profile_update_and_skip_is_not_reasked(
     )
     assert response_fragments[0].locator_type == "json_pointer"
     claims = repository.list_claims("candidate")
-    answer_claims = [item for item in claims if item.claim_type == "user_reported"]
+    answer_claims = [
+        item for item in claims
+        if response_fragments[0].fragment_id in item.evidence_fragment_ids
+    ]
     assert answer_claims
     assert answer_claims[0].evidence_fragment_ids == [
         response_fragments[0].fragment_id
@@ -135,11 +238,11 @@ def test_answer_is_archived_before_profile_update_and_skip_is_not_reasked(
     second_repository = SQLiteRepository(tmp_path / "skip-evidence.sqlite3")
     skip_runtime = _runtime(tmp_path / "skip", second_repository, InMemorySaver())
     interrupted = skip_runtime.invoke(
-        create_candidate_profile_state(
+        _candidate_state(tmp_path / "skip", second_repository,
             thread_id="thread-skip",
             user_id="owner",
             candidate_id="candidate-skip",
-            input_paths=[str(FIXTURES / "candidate_missing_responsibility.md")],
+            source_paths=[str(FIXTURES / "candidate_missing_responsibility.md")],
         )
     )
     skip_request = _request(interrupted)
@@ -163,11 +266,11 @@ def test_wrong_request_id_is_rejected_without_evidence_write(tmp_path) -> None:
     repository = SQLiteRepository(tmp_path / "evidence.sqlite3")
     runtime = _runtime(tmp_path, repository, InMemorySaver())
     result = runtime.invoke(
-        create_candidate_profile_state(
+        _candidate_state(tmp_path, repository,
             thread_id="thread-invalid",
             user_id="owner",
             candidate_id="candidate",
-            input_paths=[str(FIXTURES / "candidate_missing_responsibility.md")],
+            source_paths=[str(FIXTURES / "candidate_missing_responsibility.md")],
         )
     )
     request = _request(result)
@@ -200,11 +303,11 @@ def test_sqlite_checkpoint_recovers_across_graph_instances_and_resume_is_idempot
     with open_sqlite_checkpointer(checkpoint_path) as saver:
         runtime = _runtime(tmp_path, repository, saver)
         interrupted = runtime.invoke(
-            create_candidate_profile_state(
+                _candidate_state(tmp_path, repository,
                 thread_id="thread-restart",
                 user_id="owner",
                 candidate_id="candidate",
-                input_paths=[str(FIXTURES / "candidate_missing_responsibility.md")],
+                    source_paths=[str(FIXTURES / "candidate_missing_responsibility.md")],
             )
         )
         request = _request(interrupted)
@@ -257,11 +360,11 @@ def test_max_profile_round_budget_terminates(tmp_path) -> None:
     repository = SQLiteRepository(tmp_path / "evidence.sqlite3")
     runtime = _runtime(tmp_path, repository, InMemorySaver())
     result = runtime.invoke(
-        create_candidate_profile_state(
+        _candidate_state(tmp_path, repository,
             thread_id="thread-budget",
             user_id="owner",
             candidate_id="candidate",
-            input_paths=[str(FIXTURES / "candidate_missing_responsibility.md")],
+            source_paths=[str(FIXTURES / "candidate_missing_responsibility.md")],
             budgets={
                 "max_profile_rounds": 1,
                 "max_questions_per_interrupt": 3,
@@ -279,11 +382,11 @@ def test_uploaded_material_is_reingested_then_completes(tmp_path) -> None:
     repository = SQLiteRepository(tmp_path / "evidence.sqlite3")
     runtime = _runtime(tmp_path, repository, InMemorySaver())
     interrupted = runtime.invoke(
-        create_candidate_profile_state(
+        _candidate_state(tmp_path, repository,
             thread_id="thread-upload",
             user_id="owner",
             candidate_id="candidate",
-            input_paths=[],
+            source_paths=[],
         )
     )
     request = _request(interrupted)
@@ -301,7 +404,7 @@ def test_uploaded_material_is_reingested_then_completes(tmp_path) -> None:
     )
     assert completed["status"] == "completed"
     assert completed["next_action"] == "complete"
-    assert len(completed["active_artifact_ids"]) == 2
+    assert len(completed["active_artifact_ids"]) == 3
     assert completed["input_paths"] == []
 
 
@@ -311,11 +414,11 @@ def test_correction_supersedes_claims_resolves_conflict_and_has_version_diff(
     repository = SQLiteRepository(tmp_path / "evidence.sqlite3")
     runtime = _runtime(tmp_path, repository, InMemorySaver())
     interrupted = runtime.invoke(
-        create_candidate_profile_state(
+        _candidate_state(tmp_path, repository,
             thread_id="thread-correction",
             user_id="owner",
             candidate_id="candidate",
-            input_paths=[
+            source_paths=[
                 str(FIXTURES / "candidate_conflict_a.md"),
                 str(FIXTURES / "candidate_conflict_b.md"),
             ],
@@ -390,11 +493,11 @@ def test_llm_sufficiency_failure_uses_deterministic_fallback(tmp_path) -> None:
         evaluator=evaluator,
     )
     result = runtime.invoke(
-        create_candidate_profile_state(
+        _candidate_state(tmp_path, repository,
             thread_id="thread-llm-fallback",
             user_id="owner",
             candidate_id="candidate",
-            input_paths=[str(FIXTURES / "candidate_sufficient.md")],
+            source_paths=[str(FIXTURES / "candidate_sufficient.md")],
         )
     )
     assert result["status"] == "completed"
@@ -428,11 +531,11 @@ def test_storage_tool_failure_is_fatal_and_does_not_create_profile(tmp_path) -> 
 
     runtime.registry.register(BrokenProfileTool())
     result = runtime.invoke(
-        create_candidate_profile_state(
+        _candidate_state(tmp_path, repository,
             thread_id="thread-storage-failure",
             user_id="owner",
             candidate_id="candidate",
-            input_paths=[str(FIXTURES / "candidate_sufficient.md")],
+            source_paths=[str(FIXTURES / "candidate_sufficient.md")],
         )
     )
     assert result["status"] == "failed"
@@ -450,11 +553,11 @@ def test_checkpoint_failure_is_reported_and_not_claimed_recoverable(tmp_path) ->
     runtime = _runtime(tmp_path, repository, BrokenCheckpointer())
     with pytest.raises(CandidateProfileWorkflowError, match="checkpoint_error"):
         runtime.invoke(
-            create_candidate_profile_state(
+            _candidate_state(tmp_path, repository,
                 thread_id="thread-checkpoint-failure",
                 user_id="owner",
                 candidate_id="candidate",
-                input_paths=[str(FIXTURES / "candidate_sufficient.md")],
+                source_paths=[str(FIXTURES / "candidate_sufficient.md")],
             )
         )
     # Evidence writes are independently idempotent facts; checkpoint failure
@@ -464,40 +567,17 @@ def test_checkpoint_failure_is_reported_and_not_claimed_recoverable(tmp_path) ->
     )
 
 
-def test_scanned_pdf_requests_material_then_skip_finishes_with_unknowns(
-    tmp_path,
-) -> None:
-    scan = tmp_path / "scan.pdf"
-    writer = PdfWriter()
-    writer.add_blank_page(width=612, height=792)
-    with scan.open("wb") as handle:
-        writer.write(handle)
+def test_candidate_rejects_missing_resume_evidence(tmp_path) -> None:
     repository = SQLiteRepository(tmp_path / "evidence.sqlite3")
     runtime = _runtime(tmp_path, repository, InMemorySaver())
-    interrupted = runtime.invoke(
-        create_candidate_profile_state(
+    with pytest.raises(CandidateProfileWorkflowError, match="confirmed ResumeEvidence"):
+        runtime.invoke(create_candidate_profile_state(
             thread_id="thread-scan",
             user_id="owner",
             candidate_id="candidate",
-            input_paths=[str(scan)],
-        )
-    )
-    request = _request(interrupted)
-    assert interrupted["next_action"] == "request_more_materials"
-    assert request["interaction_type"] == "provide_materials"
-    assert interrupted["unsupported_artifact_ids"]
-    completed = runtime.resume(
-        thread_id="thread-scan",
-        response=HumanInteractionResponse(
-            response_id="response-scan-skip",
-            request_id=request["request_id"],
-            thread_id="thread-scan",
-            user_id="owner",
-            action="skip",
-            skipped_ids=[request["requested_materials"][0]["material_id"]],
-        ),
-    )
-    assert completed["status"] == "completed_with_unknowns"
+            resume_evidence_id="resume-evidence-missing", input_paths=[],
+        ))
+    assert repository.list_claims("candidate") == []
 
 
 def test_llm_and_tool_call_hard_budgets_never_overrun(tmp_path) -> None:
@@ -514,11 +594,11 @@ def test_llm_and_tool_call_hard_budgets_never_overrun(tmp_path) -> None:
         evaluator=evaluator,
     )
     result = runtime.invoke(
-        create_candidate_profile_state(
+        _candidate_state(tmp_path / "llm-budget", repository,
             thread_id="thread-llm-budget",
             user_id="owner",
             candidate_id="candidate",
-            input_paths=[str(FIXTURES / "candidate_sufficient.md")],
+            source_paths=[str(FIXTURES / "candidate_sufficient.md")],
             budgets={
                 "max_profile_rounds": 3,
                 "max_questions_per_interrupt": 1,
@@ -537,11 +617,11 @@ def test_llm_and_tool_call_hard_budgets_never_overrun(tmp_path) -> None:
         InMemorySaver(),
     )
     tool_result = tool_runtime.invoke(
-        create_candidate_profile_state(
+        _candidate_state(tmp_path / "tool-budget", tool_repository,
             thread_id="thread-tool-budget",
             user_id="owner",
             candidate_id="candidate-tool",
-            input_paths=[str(FIXTURES / "candidate_sufficient.md")],
+            source_paths=[str(FIXTURES / "candidate_sufficient.md")],
             budgets={
                 "max_profile_rounds": 3,
                 "max_questions_per_interrupt": 1,
@@ -564,11 +644,11 @@ def test_uploaded_path_outside_authorized_roots_is_rejected_before_archive(
     repository = SQLiteRepository(tmp_path / "evidence.sqlite3")
     runtime = _runtime(tmp_path, repository, InMemorySaver())
     interrupted = runtime.invoke(
-        create_candidate_profile_state(
+        _candidate_state(tmp_path, repository,
             thread_id="thread-path-boundary",
             user_id="owner",
             candidate_id="candidate",
-            input_paths=[],
+            source_paths=[],
             allowed_path_roots=[str(allowed)],
         )
     )

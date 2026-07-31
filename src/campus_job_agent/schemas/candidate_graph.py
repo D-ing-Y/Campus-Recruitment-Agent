@@ -197,6 +197,7 @@ class CandidateProfileGraphState(TypedDict, total=False):
     thread_id: str
     user_id: str
     candidate_id: str
+    resume_evidence_id: str
     status: str
     allowed_path_roots: list[str]
 
