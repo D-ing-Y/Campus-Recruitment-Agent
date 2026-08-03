@@ -7,6 +7,7 @@ import json
 import re
 import unicodedata
 from collections import defaultdict
+from datetime import datetime
 from typing import Any
 
 from campus_job_agent.evidence.candidate_predicates import (
@@ -48,6 +49,9 @@ class ClaimExtractorService:
         *,
         max_attempts: int | None = None,
         source_evidence_ids: list[str] | None = None,
+        origin_kind: str = "legacy",
+        origin_ref: str | None = None,
+        effective_at: datetime | None = None,
     ) -> tuple[list[EvidenceClaim], list[LLMCallRecord]]:
         def retry(previous: str, error: str) -> list[dict[str, str]]:
             return build_claim_retry_messages(
@@ -94,6 +98,9 @@ class ClaimExtractorService:
                 extractor=extractor,
                 prompt_version=CLAIM_PROMPT_VERSION,
                 schema_version=CLAIM_SCHEMA_VERSION,
+                origin_kind=origin_kind,
+                origin_ref=origin_ref,
+                effective_at=effective_at,
             )
             for item in normalized_claims
         ]

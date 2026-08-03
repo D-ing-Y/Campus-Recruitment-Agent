@@ -97,6 +97,7 @@ class CandidateProfile(BaseModel):
     unknowns: list[str] = Field(default_factory=list)
     conflicts: list[dict[str, Any]] = Field(default_factory=list)
     evidence_coverage: EvidenceCoverage = Field(default_factory=EvidenceCoverage)
+    evidence_basis_ids: list[str] = Field(default_factory=list)
     supporting_claim_ids: list[str] = Field(default_factory=list)
     previous_snapshot_id: str | None = None
     completion_reason: CompletionReason | None = None

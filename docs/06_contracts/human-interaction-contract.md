@@ -446,3 +446,9 @@ Resume 审核使用独立 `ResumeReviewRequest/Response/Receipt`，不复用 Can
 当前 PDF Fragment 文本中找到。非法 identity/request/revision/patch 在消费 LangGraph interrupt 前
 拒绝，保证失败输入不会污染 checkpoint。相同 response ID 的 canonical payload（排除提交时间）只写
 一次；不同 payload 返回 `idempotency_conflict`。Draft CAS 与 Receipt 插入必须在同一 SQLite 事务。
+
+## v0.7.1 WP1.3.2 Multi-Claim Correction
+
+Candidate conflict correction 可以引用同一 subject/predicate 的多个 active Claim。一次 response 只创建
+一个 successor Claim，并在同一事务内把全部 predecessor 标为 superseded；任一 identity、lineage 或
+写入校验失败时 successor 和 lifecycle 更新全部回滚。跨来源不同值必须保留到用户完成该确认。

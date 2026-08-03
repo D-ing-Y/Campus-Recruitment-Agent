@@ -302,3 +302,13 @@ ID，并验证 owner、candidate 与 session current ref。简历陈述生成 `u
 `evidence_fragment_ids` 保留原 PDF Fragment 追溯。期望职位不投影 CandidateProfile；个人优势与专业
 技能在证据层保持分离、仅在画像阶段允许联合分析。Agent 后续问答仍归档为 conversation_response，
 不回写不可变 ResumeEvidence。
+
+## v0.7.1 WP1.3.2 Current Claim Resolution
+
+`profile.project_candidate` 必须接收 current `resume_evidence_id`，先执行确定性 Claim Resolution，再
+投影 CandidateProfile。CandidateProfile 保存 `evidence_basis_ids`；supporting claim IDs 只能来自
+selected set。Resume 旧版本、legacy model extraction 和已 superseded ancestor 不得进入当前画像。
+
+capability level、experience kind/context、毕业时间精度和归一化字符串使用受限语义比较；其他值仍
+严格 canonical JSON。不同语义的跨来源 Claim 必须保留 conflict 并触发现有 HITL，不能按最新时间、
+模型 confidence 或固定来源优先级静默覆盖。

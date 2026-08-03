@@ -255,3 +255,13 @@ Candidate 模型批次先完成逐项领域校验，再在同一个 SQLite 事�
   `processed_all_rejected`；结构化输出/外部依赖失败记录 `retryable_extraction_failure`，不可恢复的
   evidence/contract 失败记录 `fatal_validation_failure`。
 - prompt/schema 升级后的重放必须创建新 Run/receipt，不修改旧 Artifact、Fragment、Claim 或 receipt。
+
+## v0.7.1 WP1.3.2 Claim Lifecycle 增量
+
+新 EvidenceClaim 增加 `origin_kind`、`origin_ref`、`effective_at` 和 `supersedes_claim_ids`。
+旧字段缺失时按 `legacy`、null、created_at 和单前驱兼容读取，不批量回填旧 payload。
+
+Candidate 当前 Claim 集必须由显式 ResumeEvidence basis 和仍有效 overlay 解析得到，禁止把同 subject
+的全部 active Claim 直接视为当前事实。旧 Resume 与 legacy model Claim 继续可 inspect，但存在当前
+confirmed ResumeEvidence 时不进入新 CandidateSnapshot。跨来源不同值保留为 conflict；等价或精化
+Claim 共同提供支持。多前驱 correction 的 successor 保存和 predecessor supersede 必须单事务完成。

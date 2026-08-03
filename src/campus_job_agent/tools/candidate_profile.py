@@ -20,6 +20,7 @@ from campus_job_agent.evidence import (
     ClaimValidator,
     normalize_human_candidate_value,
     profile_path_to_candidate_predicate,
+    resolve_candidate_claims,
 )
 from campus_job_agent.evidence.claim_extractor import ClaimExtractorService
 from campus_job_agent.evidence.projector import CandidateProfileProjector
@@ -382,6 +383,7 @@ class ExtractCandidateClaimsTool:
             )
         fragments: list[EvidenceFragment] = []
         allowed_artifacts: set[str] = set()
+        artifacts_by_id: dict[str, EvidenceArtifact] = {}
         for fragment_id in fragment_ids:
             fragment = self.repository.get_fragment(fragment_id)
             if fragment is None:
@@ -397,9 +399,26 @@ class ExtractCandidateClaimsTool:
                 )
             fragments.append(fragment)
             allowed_artifacts.add(fragment.artifact_id)
-        extraction_batches: list[tuple[list[EvidenceFragment], list[str]]] = [
-            (fragments, [])
-        ]
+            artifacts_by_id[artifact.artifact_id] = artifact
+        extraction_batches: list[
+            tuple[list[EvidenceFragment], list[str], str, str, Any]
+        ] = []
+
+        def add_artifact_batches(values: list[EvidenceFragment]) -> None:
+            grouped: dict[str, list[EvidenceFragment]] = {}
+            for item in values:
+                grouped.setdefault(item.artifact_id, []).append(item)
+            for artifact_id, batch in sorted(grouped.items()):
+                artifact = artifacts_by_id[artifact_id]
+                origin_kind = (
+                    "conversation_response"
+                    if artifact.content_type == "conversation_response"
+                    else "supplemental_document"
+                )
+                extraction_batches.append(
+                    (batch, [], origin_kind, artifact_id, artifact.retrieved_at)
+                )
+
         if resume_evidence_id:
             snapshot = self.repository.get_resume_evidence_snapshot(resume_evidence_id)
             if (
@@ -426,9 +445,19 @@ class ExtractCandidateClaimsTool:
             extraction_batches = []
             structured_resume = _resume_profile_fragments(snapshot, resume_fragments)
             if structured_resume:
-                extraction_batches.append((structured_resume, [resume_evidence_id]))
+                extraction_batches.append(
+                    (
+                        structured_resume,
+                        [resume_evidence_id],
+                        "resume_evidence",
+                        resume_evidence_id,
+                        snapshot.confirmed_at,
+                    )
+                )
             if conversation_fragments:
-                extraction_batches.append((conversation_fragments, []))
+                add_artifact_batches(conversation_fragments)
+        else:
+            add_artifact_batches(fragments)
         claims = []
         calls = []
         try:
@@ -436,10 +465,19 @@ class ExtractCandidateClaimsTool:
                 int(args["remaining_llm_calls"])
                 if "remaining_llm_calls" in args else None
             )
-            for batch_fragments, source_evidence_ids in extraction_batches:
+            for (
+                batch_fragments,
+                source_evidence_ids,
+                origin_kind,
+                origin_ref,
+                effective_at,
+            ) in extraction_batches:
                 batch_claims, batch_calls = self.extractor.extract(
                     subject_id, batch_fragments, max_attempts=remaining,
                     source_evidence_ids=source_evidence_ids,
+                    origin_kind=origin_kind,
+                    origin_ref=origin_ref,
+                    effective_at=effective_at,
                 )
                 claims.extend(batch_claims)
                 calls.extend(batch_calls)
@@ -712,6 +750,9 @@ class ArchiveUserResponseTool:
                 extractor=ClaimExtractor(provider="human", model="user_response"),
                 prompt_version="human_interaction_v0.7.1",
                 schema_version="candidate_claim_v0.7.1",
+                origin_kind="conversation_response",
+                origin_ref=artifact.artifact_id,
+                effective_at=response.submitted_at,
             )
             saved.append(
                 self.validator.validate_and_save(
@@ -722,56 +763,62 @@ class ArchiveUserResponseTool:
             )
         for index, correction in enumerate(response.corrections):
             fragment = fragment_by_pointer[f"/corrections/{index}"]
-            supersedes = correction.supersedes_claim_ids or [None]
-            for previous_id in supersedes:
-                previous = (
-                    self.repository.get_claim(previous_id) if previous_id else None
-                )
-                predicate = (
-                    previous.predicate
-                    if previous is not None
-                    else profile_path_to_candidate_predicate(correction.target_path)
-                )
-                schema_version = (
-                    previous.schema_version
-                    if previous is not None
-                    else "candidate_claim_v0.7.1"
-                )
-                claim = EvidenceClaim(
-                    subject_id=correction.candidate_id,
-                    predicate=predicate,
-                    value=normalize_human_candidate_value(
-                        predicate, correction.new_value
-                    ),
-                    claim_type="user_reported",
-                    evidence_fragment_ids=[fragment.fragment_id],
-                    confidence=1.0,
-                    extractor=ClaimExtractor(provider="human", model="profile_correction"),
-                    prompt_version="human_interaction_v0.7.1",
-                    schema_version=schema_version,
-                    supersedes_claim_id=previous_id,
-                )
-                existing_claim = next(
-                    (
-                        item
-                        for item in self.repository.list_claims(
-                            correction.candidate_id
-                        )
-                        if item.idempotency_key() == claim.idempotency_key()
-                    ),
-                    None,
-                )
-                if existing_claim is not None:
-                    saved.append(existing_claim)
-                    continue
-                saved_claim = self.validator.validate_and_save(
+            predecessor_ids = correction.supersedes_claim_ids
+            previous = (
+                self.repository.get_claim(predecessor_ids[0])
+                if predecessor_ids
+                else None
+            )
+            predicate = (
+                previous.predicate
+                if previous is not None
+                else profile_path_to_candidate_predicate(correction.target_path)
+            )
+            schema_version = (
+                previous.schema_version
+                if previous is not None
+                else "candidate_claim_v0.7.1"
+            )
+            claim = EvidenceClaim(
+                subject_id=correction.candidate_id,
+                predicate=predicate,
+                value=normalize_human_candidate_value(
+                    predicate, correction.new_value
+                ),
+                claim_type="user_reported",
+                evidence_fragment_ids=[fragment.fragment_id],
+                confidence=1.0,
+                extractor=ClaimExtractor(provider="human", model="profile_correction"),
+                prompt_version="human_interaction_v0.7.1",
+                schema_version=schema_version,
+                supersedes_claim_ids=predecessor_ids,
+                origin_kind="conversation_response",
+                origin_ref=artifact.artifact_id,
+                effective_at=response.submitted_at,
+            )
+            existing_claim = next(
+                (
+                    item
+                    for item in self.repository.list_claims(correction.candidate_id)
+                    if item.idempotency_key() == claim.idempotency_key()
+                ),
+                None,
+            )
+            if existing_claim is not None:
+                saved.append(existing_claim)
+                continue
+            save = (
+                self.validator.validate_and_save_superseding
+                if predecessor_ids
+                else self.validator.validate_and_save
+            )
+            saved.append(
+                save(
                     claim,
                     {artifact.artifact_id},
                     expected_owner_id=request.user_id,
                 )
-                saved.append(saved_claim)
-                if previous_id:
-                    self.repository.mark_claim_superseded(previous_id)
+            )
         return saved
 
 
@@ -786,15 +833,37 @@ class ProjectCandidateTool:
 
     def run(self, args: dict[str, Any]) -> ToolResult:
         candidate_id = str(args.get("candidate_id", "")).strip()
-        if not candidate_id:
-            return _failure(self.name, "candidate_id is required", "validation_error")
+        resume_evidence_id = str(args.get("resume_evidence_id", "")).strip()
+        if not candidate_id or not resume_evidence_id:
+            return _failure(
+                self.name,
+                "candidate_id and resume_evidence_id are required",
+                "validation_error",
+            )
         try:
+            resume_evidence = self.evidence_repository.get_resume_evidence_snapshot(
+                resume_evidence_id
+            )
+            if (
+                resume_evidence is None
+                or resume_evidence.status != "confirmed"
+                or resume_evidence.candidate_id != candidate_id
+            ):
+                return _failure(
+                    self.name,
+                    "confirmed ResumeEvidence for the candidate is required",
+                    "validation_error",
+                )
             claims = self.evidence_repository.list_active_claims(candidate_id)
+            resolution = resolve_candidate_claims(
+                claims, current_resume_evidence_id=resume_evidence_id
+            )
             snapshot = self.projector.project(
                 candidate_id,
-                claims,
+                resolution.selected_claims,
                 completion_reason=args.get("completion_reason"),
                 unknowns=[str(value) for value in args.get("unknowns", [])],
+                evidence_basis_ids=[resume_evidence_id],
             )
         except Exception as exc:
             return _failure(self.name, str(exc), "storage_error", retryable=True)
@@ -809,6 +878,9 @@ class ProjectCandidateTool:
                 }
             ],
             evidence_ids=[snapshot.snapshot_id],
+            metadata={
+                "claim_resolution_summary": resolution.summary.model_dump(mode="json")
+            },
         )
 
 

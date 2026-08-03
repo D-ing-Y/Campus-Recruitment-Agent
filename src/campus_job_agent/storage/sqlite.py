@@ -154,6 +154,54 @@ class SQLiteRepository:
             raise
         return claim
 
+    def save_superseding_claim(self, claim: EvidenceClaim) -> EvidenceClaim:
+        """Persist one successor and supersede all predecessors atomically."""
+        predecessor_ids = claim.all_supersedes_claim_ids
+        if not predecessor_ids:
+            return self.save_claim(claim)
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM claims WHERE idempotency_key = ?",
+                (claim.idempotency_key(),),
+            ).fetchone()
+            if row is not None:
+                return EvidenceClaim.model_validate_json(row[0])
+            predecessor_rows = connection.execute(
+                f"SELECT claim_id, payload_json FROM claims WHERE claim_id IN "
+                f"({','.join('?' for _ in predecessor_ids)})",
+                tuple(predecessor_ids),
+            ).fetchall()
+            if len(predecessor_rows) != len(predecessor_ids):
+                raise KeyError("unknown superseded claim")
+            predecessors = [
+                EvidenceClaim.model_validate_json(item["payload_json"])
+                for item in predecessor_rows
+            ]
+            if any(item.status != "active" for item in predecessors):
+                raise ValueError("only active claims may be superseded")
+            connection.execute(
+                "INSERT INTO claims VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    claim.claim_id,
+                    claim.subject_id,
+                    claim.predicate,
+                    claim.idempotency_key(),
+                    claim.model_dump_json(),
+                    claim.created_at.isoformat(),
+                ),
+            )
+            connection.executemany(
+                "INSERT INTO claim_fragments VALUES (?, ?)",
+                [(claim.claim_id, value) for value in claim.evidence_fragment_ids],
+            )
+            for predecessor in predecessors:
+                updated = predecessor.model_copy(update={"status": "superseded"})
+                connection.execute(
+                    "UPDATE claims SET payload_json = ? WHERE claim_id = ?",
+                    (updated.model_dump_json(), predecessor.claim_id),
+                )
+        return claim
+
     def save_candidate_claim_batch(
         self,
         validated: list[tuple[EvidenceClaim, ValidationReceipt]],

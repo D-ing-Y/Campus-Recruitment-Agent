@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from campus_job_agent.evidence.projector import CandidateProfileProjector
+from campus_job_agent.evidence.claim_resolution import resolve_candidate_claims
 from campus_job_agent.schemas import (
     FeedbackDirective, LearningPlan, PreparationConstraints, PreparationInputSet, TargetDecision,
 )
@@ -53,8 +54,22 @@ class FeedbackReplanSaga:
         if old_candidate is None or old_candidate.profile_type != "candidate":
             raise ValueError("candidate_snapshot_not_found")
         claims = self.evidence.list_active_claims(old_candidate.subject_id)
+        current_resume_evidence_id = (
+            old_candidate.profile_data.get("evidence_basis_ids", [None])[0]
+            if old_candidate.profile_data.get("evidence_basis_ids")
+            else None
+        )
+        resolution = resolve_candidate_claims(
+            claims,
+            current_resume_evidence_id=current_resume_evidence_id,
+        )
         new_candidate = CandidateProfileProjector(self.profiles).project(
-            old_candidate.subject_id, claims, completion_reason="sufficient"
+            old_candidate.subject_id,
+            resolution.selected_claims,
+            completion_reason="sufficient",
+            evidence_basis_ids=(
+                [current_resume_evidence_id] if current_resume_evidence_id else []
+            ),
         )
         if new_candidate.snapshot_id == old_candidate_snapshot_id:
             raise ValueError("candidate_rebuild_produced_no_successor")

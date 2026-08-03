@@ -1,7 +1,7 @@
 # v0.7.1 Workflow 验收矩阵
 
-状态：WP1.3.1 Implementation Passed；WP1/WP2 Revalidation Partial
-日期：2026-07-31
+状态：WP1.3.2 与 WP1/WP2 Revalidation Passed；WP3 未开始
+日期：2026-08-03
 
 状态枚举：`not_started | failing | blocked | partial | passed | not_applicable`。
 
@@ -10,9 +10,9 @@
 | Workflow | Contract | Evidence | Model | Validator | Projection/Policy | Persistence | Graph | CLI/Observability | Eval | 总状态 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Runtime/CLI | passed | not_applicable | not_applicable | passed | passed | passed | not_applicable | passed | passed | passed |
-| ResumeEvidence | passed | passed | passed | passed | passed | passed | passed | passed | partial | partial |
-| Candidate | passed | partial | passed | passed | passed | passed | passed | passed | partial | partial |
-| CareerIntent | passed | passed | passed | passed | passed | passed | passed | passed | partial | partial |
+| ResumeEvidence | passed | passed | passed | passed | passed | passed | passed | passed | passed | passed |
+| Candidate | passed | passed | passed | passed | passed | passed | passed | passed | passed | passed |
+| CareerIntent | passed | passed | passed | passed | passed | passed | passed | passed | passed | passed |
 | Role | partial | partial | partial | partial | partial | partial | partial | failing | partial | partial |
 | Matching/Decision | partial | not_applicable | partial | partial | partial | partial | partial | failing | partial | partial |
 | Preparation | partial | not_applicable | partial | partial | partial | partial | partial | failing | partial | partial |
@@ -98,10 +98,8 @@ MCP 配置尚未开放到 CLI UI。
 | Failure diagnosis | model/storage/checkpoint/fatal 可诊断 | passed | model terminal ErrorEvent；Graph storage/checkpoint injection tests |
 | Real review | 用户复核画像 | passed | 2026-07-29 用户确认教育、经历边界与能力等级正确 |
 
-WP1 全量回归：398 passed in 40.11s，`compileall` 与 `git diff --check` 通过。DeepSeek Provider
-健康检查、真实简历 E4 与断网缓存回放已通过；用户已完成真实画像人工确认。WP1
-退出门禁曾按旧的 PDF→Claim 契约满足；WP1.3 替换该入口后，本段只作为历史证据。新 E4 与
-CandidateSnapshot 重验完成前，WP1 当前状态为 partial。
+WP1 原验收按旧 PDF→Claim 契约完成，本段保留历史证据。WP1.3.2 已用 confirmed
+ResumeEvidence 与 scoped Claim resolution 完成新的 CandidateSnapshot 重验，当前状态恢复为 passed。
 
 ### 4.1 WP1.2 经历 Taxonomy 与 typed Claim 补丁
 
@@ -129,11 +127,24 @@ capability。荣誉奖项和更细粒度语言/库/工具仍不属于当前 Cand
 | Candidate handoff | 仅 confirmed Snapshot；旧 --input 拒绝 | passed | Graph + installed CLI tests |
 | Fidelity patch | layout、无标签头部、“至今”、奖项边界、字段 span | passed | 444 tests + `v0.7.1-wp1.3.1-eval-report.md` |
 | Real extraction | DeepSeek 生成字段对齐 Draft，36/36 精确 SourceRef | passed | `run-ceb5ff01-4ab0-4dc6-9dd7-e3f6bf6a0b8a` + `run-82482f23-7a67-4545-b476-e98c82c6935f` |
-| Human review | 八区块全部由用户确认 | partial | 新 Draft `resume-draft-6d718b55-ade8-406b-97ab-3d8df888ae67` 停在 personal_information |
-| WP1/WP2 replay | 新 CandidateSnapshot 与 CareerIntent 重验 | partial | 等待 confirmed ResumeEvidence |
+| Human review | 八区块全部由用户确认 | passed | confirmed `resume-evidence-7a793727c907b79065397a35` |
+| WP1/WP2 replay | 新 CandidateSnapshot 与 CareerIntent 重验 | passed | Candidate `89514ab4-758e-4d54-90af-f740519c40b1`；WP2 confirmation `run-56709fb6-8489-4fdd-8339-3d1e3cc0938d` |
 
 WP1.3.1 阶段结果见 `docs/07_evaluation/v0.7.1-wp1.3.1-eval-report.md`；原 WP1.3 报告仅保留为
-修复前基线。代码实现通过不等于 E4 人工验收通过。
+修复前基线。WP1.3.2 生命周期与重验结果见对应 Eval report。
+
+### 4.3 WP1.3.2 Claim 生命周期与增量投影
+
+| Gate | 预期 | 状态 | 证据 |
+| --- | --- | --- | --- |
+| Lifecycle | origin/effective/multi-supersede 且 legacy 可读 | passed | schema/legacy payload/lineage unit |
+| Resolution | 当前 Resume + 有效 overlay；旧派生隔离 | passed | pure resolution unit + Resume v1→v2 installed CLI |
+| Semantics | metadata 等价、日期 refinement、真实差异冲突 | passed | semantic unit 与 projector regression |
+| Atomic correction | 一条 successor 原子替代多条旧 Claim | passed | SQLite transaction + Graph correction test |
+| Feedback | event effective_at 且共享 resolution | passed | Feedback Graph/Saga regression |
+| Recovery | cancel→session.resume→candidate.build | passed | CLI unit、provider failure 与真实 checkpoint |
+| Real Candidate | basis/trace/selection 指标通过 | passed | `run-22685159-b474-4100-9a02-7d8e9d43a261` |
+| WP2 replay | 新 Candidate typed input 产生 Intent/Scope/Handoff | passed | `run-a07e2376-2ae9-4b86-ad56-082d8070ebdb` 至 `run-56709fb6-8489-4fdd-8339-3d1e3cc0938d` |
 
 ## 5. WP2 CareerIntent
 
@@ -149,8 +160,7 @@ WP1.3.1 阶段结果见 `docs/07_evaluation/v0.7.1-wp1.3.1-eval-report.md`；原
 | CLI/Observability | installed create/resume/show/inspect 和 8 件套 | passed | installed CLI E3 + E4 run artifacts |
 | Eval | E0-E4 与全量回归 | passed | `v0.7.1-wp2-eval-report.md`；424 tests |
 
-WP2 上表是旧 CandidateSnapshot 的历史验收；WP1.3 要求用新 confirmed ResumeEvidence 生成的
-CandidateSnapshot 重跑，因此当前总状态暂记 partial，代码本身未重写。
+WP2 已用新 CandidateSnapshot 重验；领域模型未重写，新的 create manifest 保留 typed-input 引用。
 
 ## 6. WP3-WP7
 

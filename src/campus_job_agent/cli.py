@@ -276,14 +276,17 @@ def _session(runtime: Any, args: argparse.Namespace) -> int:
                     session.session_id, expected_version=session.session_version,
                     operation="run_linked", latest_run_id=manifest.run_id,
                 )
-                next_action = "candidate.build"
+                next_action = "resume.import"
             else:
                 updated = runtime.session_service.resume(
                     session.session_id, expected_version=args.expected_version,
                     latest_run_id=manifest.run_id,
                 )
                 next_action = _next_action(
-                    updated.current_stage, updated.pending_request
+                    updated.current_stage,
+                    updated.pending_request,
+                    updated.current_refs,
+                    updated.status,
                 )
             observed.finish(
                 output_refs={"session_id": updated.session_id},
@@ -361,6 +364,9 @@ def _inspect(runtime: Any, args: argparse.Namespace) -> int:
                 "source_evidence_ids": item.source_evidence_ids,
                 "confidence": item.confidence, "schema_version": item.schema_version,
                 "status": item.status,
+                "origin_kind": item.origin_kind, "origin_ref": item.origin_ref,
+                "effective_at": item.effective_at.isoformat(),
+                "supersedes_claim_ids": item.all_supersedes_claim_ids,
             }
             for item in runtime.evidence_repository.list_claims(args.subject_id)
         ]
@@ -864,13 +870,23 @@ def _session_payload(command: str, session: Any) -> dict[str, Any]:
         "pending_request": session.pending_request,
         "pending_handoff_ids": session.pending_handoff_ids,
         "next_action": _next_action(
-            session.current_stage, session.pending_request
+            session.current_stage,
+            session.pending_request,
+            session.current_refs,
+            session.status,
         ),
         "artifact_paths": {}, "warnings": [], "errors": [],
     }
 
 
-def _next_action(stage: str, pending_request: str | None = None) -> str:
+def _next_action(
+    stage: str,
+    pending_request: str | None = None,
+    current_refs: dict[str, Any] | None = None,
+    status: str = "active",
+) -> str:
+    if status == "failed":
+        return "session.resume"
     if pending_request:
         if pending_request.startswith("request-resume-"):
             return "resume.resume"
@@ -878,8 +894,16 @@ def _next_action(stage: str, pending_request: str | None = None) -> str:
             return "intent.resume"
         if stage == "candidate":
             return "candidate.resume"
+    refs = current_refs or {}
+    if stage == "candidate":
+        return (
+            "candidate.build"
+            if refs.get("resume_evidence_snapshot_id")
+            and not refs.get("candidate_profile_snapshot_id")
+            else "resume.import"
+        )
     return {
-        "candidate": "resume.import", "intent": "intent.create", "role": "role.research",
+        "intent": "intent.create", "role": "role.research",
         "matching": "match.run", "preparation": "plan.build", "feedback": "feedback.add",
     }.get(stage, "session.status")
 

@@ -1,6 +1,6 @@
 # v0.7.1 版本入口：子 Workflow 纵向闭环与 CLI 加固
 
-状态：Implementation In Progress（WP1.3.1 忠实度补丁通过；新 Draft 人工审核及 WP1/WP2 重验进行中）
+状态：Implementation In Progress（WP1.3.2 与 WP1/WP2 重验通过；下一工作包 WP3）
 路线确认日期：2026-07-28  
 代码版本：仍为 0.7.0；完成实现、测试和 Eval 后才升级 0.7.1
 
@@ -40,6 +40,7 @@ v0.7.1 的唯一目标是把现有 v0.3-v0.7 能力从“独立子图与离线�
 - WP1.3 结构化简历证据：Requirements/Tasks、RFC-0012、ADR-0012、
   `docs/06_contracts/resume-evidence-contract.md`、Eval plan 与阶段性 Eval report
 - WP1.3.1 忠实度纠错：layout 解析、字段级 span、简化审核、reparse 版本链与真实 Draft 复验
+- WP1.3.2 Claim 生命周期：当前 Resume basis、长期 overlay、显式 supersede 与增量投影
 - WP2 文档包：`docs/03_requirements/v0.7.1-wp2-career-intent-intake.md`、RFC-0010、ADR-0010 与
   `docs/06_contracts/career-intent-contract.md`
 - WP2 Eval report：`docs/07_evaluation/v0.7.1-wp2-eval-report.md`
@@ -71,9 +72,8 @@ v0.7.1 的唯一目标是把现有 v0.3-v0.7 能力从“独立子图与离线�
 
 1. 正式 Runtime/Session/doctor/inspect CLI 基座与 Candidate build/resume/show/diff 已完成；其他业务
    workflow 命令尚未接入，旧 `run` 仅作为明确标记的 `legacy-mini-runtime` 保留。
-2. WP1.2 以前的 Candidate/DeepSeek 历史验收保留；WP1.3 已将 PDF 转录与画像分析拆图。新的真实
-   DeepSeek E4 已生成 Draft 并停在首个人工审核点，在用户完成八区块确认、新 CandidateSnapshot 与
-   WP2 重验以前，WP1/WP2 当前契约状态保持 partial。
+2. WP1.3 已将 PDF 转录与画像分析拆图；WP1.3.2 进一步隔离旧 Resume/legacy model Claim，保留
+   conversation/feedback overlay。真实 CandidateSnapshot 与 WP2 typed-input 重验均已通过。
 3. CareerIntent 已有首次生产入口；PreparationConstraints 仍没有首次生产入口。
 4. Role live 必须要求真实 detail raw，搜索页不能冒充详情。
 5. Matching/Preparation/Feedback 存在名义节点与真实业务边界不一致的问题。
@@ -127,7 +127,5 @@ v0.7.1 的唯一目标是把现有 v0.3-v0.7 能力从“独立子图与离线�
 
 ## 7. 下一步
 
-WP1.3.1 代码、自动化验收和真实 Draft 内容对齐已完成，新 DeepSeek Draft 正在等待用户
-逐区块审核。下一步是继续该
-ResumeEvidence session，随后用新 CandidateSnapshot 重跑 WP2；完成前不进入 WP3，也不实现
-v1.0 Parent Graph。
+WP1.3.2 已完成 Claim 生命周期、增量投影、真实 Candidate 重建与 WP2 重验。下一步是 WP3
+Role live source；仍不实现 v1.0 Parent Graph，也不把 WP3 typed handoff 的产生表述为已消费。

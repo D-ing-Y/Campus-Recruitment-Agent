@@ -12,6 +12,10 @@ from campus_job_agent.evidence.candidate_predicates import (
     CandidatePredicateError,
     parse_candidate_predicate,
 )
+from campus_job_agent.evidence.claim_resolution import (
+    claims_have_semantic_conflict,
+    representative_claim,
+)
 from campus_job_agent.schemas.candidate_taxonomy import (
     CapabilityClaimValue,
     ExperienceKindValue,
@@ -50,6 +54,7 @@ class CandidateProfileProjector:
         *,
         completion_reason: str | None = None,
         unknowns: list[str] | None = None,
+        evidence_basis_ids: list[str] | None = None,
     ) -> ProfileSnapshot:
         active = sorted(
             (claim for claim in claims if claim.status == "active"),
@@ -97,6 +102,8 @@ class CandidateProfileProjector:
             and completion_reason is None
             and not unknowns
             and latest.supporting_claim_ids == used_claims
+            and latest.profile_data.get("evidence_basis_ids", [])
+            == _stable_unique(evidence_basis_ids or [])
         ):
             return latest
         profile = CandidateProfile(
@@ -116,6 +123,7 @@ class CandidateProfileProjector:
                 ),
                 conflicted_field_count=len(conflicts),
             ),
+            evidence_basis_ids=_stable_unique(evidence_basis_ids or []),
             supporting_claim_ids=used_claims,
             previous_snapshot_id=None if latest is None else latest.snapshot_id,
             completion_reason=completion_reason,
@@ -151,7 +159,7 @@ class CandidateProfileProjector:
                 continue
             raw_label = predicate.split(":", 1)[1]
             resolution = self.ontology.resolve(raw_label)
-            latest = claims[-1]
+            latest = representative_claim(predicate, claims)
             if latest.value is None:
                 continue
             level = "unknown"
@@ -206,15 +214,16 @@ def _project_education(
         claims = grouped.get(predicate, [])
         if (
             not claims
-            or claims[-1].value is None
+            or representative_claim(predicate, claims).value is None
             or predicate in conflicting_predicates
         ):
             continue
-        values["primary"][field] = claims[-1].value
+        values["primary"][field] = representative_claim(predicate, claims).value
         field_claim_ids["primary"][field] = [item.claim_id for item in claims]
         claim_ids["primary"].extend(field_claim_ids["primary"][field])
     for predicate, claims in grouped.items():
-        if predicate in conflicting_predicates or not claims or claims[-1].value is None:
+        representative = representative_claim(predicate, claims) if claims else None
+        if predicate in conflicting_predicates or representative is None or representative.value is None:
             continue
         try:
             parsed = parse_candidate_predicate(predicate, allow_legacy=False)
@@ -223,7 +232,7 @@ def _project_education(
         if parsed.kind != "education" or parsed.record_id is None or parsed.field is None:
             continue
         record_id = parsed.record_id
-        values[record_id][parsed.field] = claims[-1].value
+        values[record_id][parsed.field] = representative.value
         field_claim_ids[record_id][parsed.field] = [item.claim_id for item in claims]
         claim_ids[record_id].extend(field_claim_ids[record_id][parsed.field])
     return [
@@ -250,7 +259,7 @@ def _project_experiences(
             continue
         experience_id = match.group(1) or match.group(2)
         field = match.group(3)
-        value = claims[-1].value
+        value = representative_claim(predicate, claims).value
         if value is None:
             continue
         if field in {"responsibilities", "technologies", "outputs", "results"}:
@@ -299,7 +308,7 @@ def _project_boundaries(
         if match is None or match.group(3) != "responsibilities":
             continue
         experience_id = match.group(1) or match.group(2)
-        values = claims[-1].value
+        values = representative_claim(predicate, claims).value
         if values is None:
             continue
         if not isinstance(values, list):
@@ -323,13 +332,7 @@ def _find_conflicts(
 ) -> list[dict[str, Any]]:
     conflicts: list[dict[str, Any]] = []
     for predicate, claims in sorted(grouped.items()):
-        values: dict[str, list[EvidenceClaim]] = defaultdict(list)
-        for claim in claims:
-            canonical = json.dumps(
-                claim.value, ensure_ascii=False, sort_keys=True, default=str
-            )
-            values[canonical].append(claim)
-        if len(values) <= 1:
+        if not claims_have_semantic_conflict(predicate, claims):
             continue
         conflicts.append(
             {

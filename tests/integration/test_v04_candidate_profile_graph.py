@@ -378,6 +378,40 @@ def test_max_profile_round_budget_terminates(tmp_path) -> None:
     assert result["counters"]["profile_rounds"] == 1
 
 
+def test_cancel_preserves_checkpoint_snapshot_without_final_projection(tmp_path) -> None:
+    repository = SQLiteRepository(tmp_path / "evidence.sqlite3")
+    runtime = _runtime(tmp_path, repository, InMemorySaver())
+    interrupted = runtime.invoke(
+        _candidate_state(
+            tmp_path,
+            repository,
+            thread_id="thread-cancel",
+            user_id="owner",
+            candidate_id="candidate-cancel",
+            source_paths=[str(FIXTURES / "candidate_missing_responsibility.md")],
+        )
+    )
+    request = _request(interrupted)
+    before_snapshot_id = interrupted["candidate_profile_snapshot_id"]
+    before_count = len(repository.list_profiles("candidate-cancel", "candidate"))
+
+    cancelled = runtime.resume(
+        thread_id="thread-cancel",
+        response=HumanInteractionResponse(
+            response_id="response-cancel",
+            request_id=request["request_id"],
+            thread_id="thread-cancel",
+            user_id="owner",
+            action="cancel",
+        ),
+    )
+
+    assert cancelled["status"] == "cancelled"
+    assert cancelled.get("errors", []) == []
+    assert cancelled["candidate_profile_snapshot_id"] == before_snapshot_id
+    assert len(repository.list_profiles("candidate-cancel", "candidate")) == before_count
+
+
 def test_uploaded_material_is_reingested_then_completes(tmp_path) -> None:
     repository = SQLiteRepository(tmp_path / "evidence.sqlite3")
     runtime = _runtime(tmp_path, repository, InMemorySaver())
@@ -460,9 +494,9 @@ def test_correction_supersedes_claims_resolves_conflict_and_has_version_diff(
     correction_claims = [
         item
         for item in repository.list_claims("candidate")
-        if item.supersedes_claim_id in conflict["claim_ids"]
+        if set(item.all_supersedes_claim_ids) == set(conflict["claim_ids"])
     ]
-    assert len(correction_claims) == len(conflict["claim_ids"])
+    assert len(correction_claims) == 1
     registry = runtime.registry
     diff = registry.run(
         "profile.diff_candidate_versions",

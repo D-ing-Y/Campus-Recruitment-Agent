@@ -7,6 +7,13 @@ from campus_job_agent.evidence.claim_validator import (
     ClaimValidationError,
     ClaimValidator,
 )
+from campus_job_agent.evidence.claim_resolution import (
+    ClaimResolutionResult,
+    claims_have_semantic_conflict,
+    relation_for_values,
+    representative_claim,
+    resolve_candidate_claims,
+)
 from campus_job_agent.evidence.candidate_predicates import (
     CandidatePredicate,
     CandidatePredicateError,
@@ -33,4 +40,9 @@ __all__ = [
     "parse_candidate_predicate",
     "profile_path_to_candidate_predicate",
     "CandidateProfileProjector",
+    "ClaimResolutionResult",
+    "claims_have_semantic_conflict",
+    "relation_for_values",
+    "representative_claim",
+    "resolve_candidate_claims",
 ]

@@ -51,6 +51,9 @@
 - `pending_request` 只保存 HumanInteractionRequest ref；
 - 重复写入相同 canonical refs 幂等复用；
 - 不允许 CLI 参数直接覆盖未验证 current refs。
+- failed Session 的恢复提示必须为 `session.resume`；恢复后 next action 由 current refs 决定：无
+  ResumeEvidence 为 `resume.import`，有 ResumeEvidence 且无 CandidateSnapshot 为 `candidate.build`，
+  有 pending Candidate request 为 `candidate.resume`。
 
 ## 4. RunManifest
 

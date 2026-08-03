@@ -50,6 +50,17 @@ def test_session_cas_owner_stale_and_idempotent_refs(tmp_path: Path) -> None:
         lifecycle_status="current",
     )
     runtime.session_repository.register_ref(ref)
+    reused = runtime.session_repository.register_ref(
+        ref.model_copy(update={
+            "predecessor_ids": ["session-local-predecessor"],
+            "successor_of": "session-local-predecessor",
+        })
+    )
+    assert reused == ref
+    with pytest.raises(SessionReferenceError, match="identity conflict"):
+        runtime.session_repository.register_ref(
+            ref.model_copy(update={"canonical_hash": "sha256:different"})
+        )
     updated = runtime.session_repository.set_current_ref(
         session.session_id,
         key="candidate_profile_snapshot_id",

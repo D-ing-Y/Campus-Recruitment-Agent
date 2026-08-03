@@ -317,3 +317,10 @@ directive_resolution_invalid
 - 应用使用 NFKC/空白/隐形格式字符归一化生成字段级 span，无精确 span 的 Draft 拒绝进入审核；
 - Candidate 初始 Claim Tool 接受 `resume_evidence_id`，把 confirmed 结构化视图与原 Fragment ID 一起
   送入抽取器；后续 conversation_response 上传仍按独立 Artifact 处理，不伪装成 ResumeEvidence。
+
+## v0.7.1 WP1.3.2 Candidate Projection Tool
+
+`profile.project_candidate` 的必填输入为 `candidate_id + resume_evidence_id`。Tool 先执行确定性 Claim
+Resolution，再将 selected claims 交给 Projector，并在 metadata 返回安全 summary。禁止 Tool 内部把
+`list_active_claims(candidate_id)` 直接作为最终投影集合。Feedback rebuild 必须复用同一入口或同一
+resolution function，不得维护第二套选择规则。

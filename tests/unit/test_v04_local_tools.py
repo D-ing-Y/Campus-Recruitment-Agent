@@ -5,7 +5,7 @@ from pathlib import Path
 
 from pypdf import PdfWriter
 
-from campus_job_agent.evidence import ClaimExtractorService
+from campus_job_agent.evidence import CandidateProfileProjector, ClaimExtractorService
 from campus_job_agent.llm import LLMCache, LLMConfig, MockLLMProvider
 from campus_job_agent.storage import LocalBlobStore, SQLiteRepository
 from campus_job_agent.tools import build_candidate_profile_registry
@@ -204,13 +204,20 @@ def test_claim_extraction_failure_is_structured_and_profile_projection_is_idempo
     assert failed.records[0]["llm_calls"][0]["status"] == "failed"
     assert repository.list_claims("candidate") == []
 
-    first = registry.run(
+    rejected = registry.run(
         "profile.project_candidate", {"candidate_id": "candidate"}
     )
-    second = registry.run(
-        "profile.project_candidate", {"candidate_id": "candidate"}
+    assert rejected.status == "failed"
+    assert rejected.metadata["error_type"] == "validation_error"
+
+    projector = CandidateProfileProjector(repository)
+    first = projector.project(
+        "candidate", [], evidence_basis_ids=["resume-evidence-test"]
     )
-    assert first.records[0]["snapshot_id"] == second.records[0]["snapshot_id"]
+    second = projector.project(
+        "candidate", [], evidence_basis_ids=["resume-evidence-test"]
+    )
+    assert first.snapshot_id == second.snapshot_id
     assert len(repository.list_profiles("candidate", "candidate")) == 1
 
 

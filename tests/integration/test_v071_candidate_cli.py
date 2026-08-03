@@ -70,9 +70,10 @@ def _text_pdf(path: Path, text: str) -> None:
 
 
 def _confirmed_resume(
-    tmp_path: Path, session_id: str, candidate_id: str, *, sufficient: bool
+    tmp_path: Path, session_id: str, candidate_id: str, *, sufficient: bool,
+    marker: str = "",
 ) -> str:
-    resume = tmp_path / f"{candidate_id}.pdf"
+    resume = tmp_path / f"{candidate_id}{marker}.pdf"
     responsibility = (
         "Responsibilities implemented graph checkpoint recovery and evaluation."
         if sufficient else "Project Agent workflow requires additional details."
@@ -81,7 +82,7 @@ def _confirmed_resume(
         resume,
         (
             "Anonymous University expected graduation 2027. Project Candidate Evidence Workflow. "
-            f"{responsibility} Skills Python LangGraph RAG LLM. " * 2
+            f"{responsibility} Skills Python LangGraph RAG LLM. {marker} " * 2
         ),
     )
     imported = _run(
@@ -96,7 +97,7 @@ def _confirmed_resume(
             break
         reviewed = _run(
             tmp_path, "resume", "resume", session_id,
-            "--action", "confirm", "--response-id", f"resume-response-{candidate_id}-{index}",
+            "--action", "confirm", "--response-id", f"resume-response-{candidate_id}-{marker}-{index}",
         )
         assert reviewed.returncode == 0, reviewed.stderr
         payload = json.loads(reviewed.stdout)
@@ -104,7 +105,7 @@ def _confirmed_resume(
             duplicate = _run(
                 tmp_path, "resume", "resume", session_id,
                 "--action", "confirm",
-                "--response-id", f"resume-response-{candidate_id}-{index}",
+                "--response-id", f"resume-response-{candidate_id}-{marker}-{index}",
             )
             assert duplicate.returncode == 0, duplicate.stderr
             duplicate_payload = json.loads(duplicate.stdout)
@@ -112,6 +113,48 @@ def _confirmed_resume(
             assert duplicate_payload["metrics"]["duplicate_review_write_count"] == 0
     assert payload["status"] == "completed"
     return payload["output_refs"]["resume_evidence_id"]
+
+
+def test_candidate_rebuild_selects_only_current_resume_claims(tmp_path: Path) -> None:
+    first_session = _start_session(tmp_path, "version-owner")
+    resume_v1 = _confirmed_resume(
+        tmp_path, first_session, "version-owner", sufficient=True, marker="version-one"
+    )
+    first_build = _run(
+        tmp_path, "candidate", "build", first_session,
+        "--candidate-id", "version-owner", "--resume-evidence", resume_v1,
+    )
+    assert first_build.returncode == 0, first_build.stderr
+
+    second_session = _start_session(tmp_path, "version-owner")
+    resume_v2 = _confirmed_resume(
+        tmp_path, second_session, "version-owner", sufficient=True, marker="version-two"
+    )
+    assert resume_v2 != resume_v1
+    second_build = _run(
+        tmp_path, "candidate", "build", second_session,
+        "--candidate-id", "version-owner", "--resume-evidence", resume_v2,
+    )
+    assert second_build.returncode == 0, second_build.stderr
+    payload = json.loads(second_build.stdout)
+    assert payload["status"] == "completed"
+    assert payload["metrics"]["stale_resume_claim_projection_count"] == 0
+    assert payload["metrics"]["legacy_model_claim_projection_count"] == 0
+    assert payload["metrics"]["current_resume_claim_trace_rate"] == 1.0
+
+    snapshot_id = payload["output_refs"]["candidate_profile_snapshot_id"]
+    profile = json.loads(
+        _run(tmp_path, "candidate", "show", snapshot_id).stdout
+    )["result"]
+    assert profile["profile"]["evidence_basis_ids"] == [resume_v2]
+    supporting_ids = set(profile["supporting_claim_ids"])
+    claims = json.loads(
+        _run(tmp_path, "inspect", "claims", "version-owner").stdout
+    )["result"]["claims"]
+    supporting = [item for item in claims if item["claim_id"] in supporting_ids]
+    assert supporting
+    assert all(item["origin_ref"] == resume_v2 for item in supporting)
+    assert any(item["origin_ref"] == resume_v1 for item in claims)
 
 
 def test_resume_then_candidate_build_show_and_claim_trace_from_installed_cli(
@@ -132,12 +175,16 @@ def test_resume_then_candidate_build_show_and_claim_trace_from_installed_cli(
     assert built.returncode == 0, built.stderr
     payload = json.loads(built.stdout)
     assert payload["status"] == "completed"
+    assert payload["errors"] == []
     snapshot_id = payload["output_refs"]["candidate_profile_snapshot_id"]
     assert payload["metrics"]["accepted_candidate_predicate_supported_rate"] == 1.0
 
     shown = _run(tmp_path, "candidate", "show", snapshot_id)
     assert shown.returncode == 0
-    assert json.loads(shown.stdout)["result"]["profile"]["capabilities"]
+    shown_profile = json.loads(shown.stdout)["result"]["profile"]
+    assert shown_profile["capabilities"]
+    assert shown_profile["completion_reason"] == "sufficient"
+    assert shown_profile["evidence_basis_ids"] == [resume_id]
     inspected = _run(tmp_path, "inspect", "claims", "candidate-owner")
     claims = json.loads(inspected.stdout)["result"]["claims"]
     assert claims and all(resume_id in item["source_evidence_ids"] for item in claims)
@@ -233,7 +280,13 @@ def test_candidate_model_contract_failure_has_terminal_run_and_error_event(
     assert failed.returncode == 3
     payload = json.loads(failed.stdout)
     assert payload["status"] == "failed"
+    assert payload["next_action"] == "session.resume"
     inspected = _run(tmp_path, "inspect", "run", payload["run_id"])
     result = json.loads(inspected.stdout)["result"]
     assert result["manifest"]["status"] == "failed"
     assert any(item["error_type"] == "llm_invalid_output" for item in result["errors"])
+    recovered = _run(tmp_path, "session", "resume", session_id)
+    assert recovered.returncode == 0, recovered.stderr
+    recovered_payload = json.loads(recovered.stdout)
+    assert recovered_payload["status"] == "active"
+    assert recovered_payload["next_action"] == "candidate.build"

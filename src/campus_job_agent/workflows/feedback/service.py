@@ -153,6 +153,8 @@ class FeedbackService:
                 value=value, claim_type="feedback_signal", evidence_fragment_ids=event.fragment_ids,
                 confidence=diagnosis.confidence, extractor=ClaimExtractor(provider="deterministic", model="feedback-policy-v1"),
                 prompt_version="feedback_claim_v1", schema_version="v0.7",
+                origin_kind="feedback_event", origin_ref=event.feedback_event_id,
+                effective_at=event.occurred_at,
             )
             claims.append(self.claim_validator.validate_and_save(
                 claim, allowed_artifact_ids=set(event.raw_artifact_ids), expected_owner_id=event.user_id

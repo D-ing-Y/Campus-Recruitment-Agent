@@ -42,6 +42,8 @@ class EvidenceRepository(Protocol):
 
     def save_claim(self, claim: EvidenceClaim) -> EvidenceClaim: ...
 
+    def save_superseding_claim(self, claim: EvidenceClaim) -> EvidenceClaim: ...
+
     def save_candidate_claim_batch(
         self,
         validated: list[tuple[EvidenceClaim, ValidationReceipt]],

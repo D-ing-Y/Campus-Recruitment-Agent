@@ -757,3 +757,9 @@ build_draft → validate_schema → review loop → finalize_snapshot`；本 Sta
 - Draft 通过 `revision` CAS 更新；ReviewReceipt append-only；Snapshot immutable；
 - Candidate State 新增必填 `resume_evidence_id`，首节点验证 confirmed、owner 和 candidate 后，仅把
   画像相关的已确认字段转成模型可见结构；个人信息与期望职位不进入 Candidate 推导。
+
+## v0.7.1 WP1.3.2 Candidate Resolution State
+
+Candidate State 保存 current `resume_evidence_id` 和不含正文的 `claim_resolution_summary`。Summary 只含
+selected/excluded/refined/conflicted Claim IDs、reason codes 和计数；不得复制 Claim value。Graph 调用
+Projector 时必须传递 current Resume basis，checkpoint 中的历史 claim IDs 不构成投影权威输入。

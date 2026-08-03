@@ -31,6 +31,7 @@ from campus_job_agent.schemas.document import DocumentExtraction, ExtractionUnit
 from campus_job_agent.schemas.evidence import (
     ClaimExtractionBatch,
     ClaimExtractor,
+    ClaimResolutionSummary,
     EvidenceArtifact,
     EvidenceClaim,
     EvidenceFragment,
@@ -234,6 +235,7 @@ __all__ = [
     "ExtractedClaim",
     "ClaimExtractionBatch",
     "ClaimExtractor",
+    "ClaimResolutionSummary",
     "Provenance",
     "ValidationReceipt",
     "ProfileSnapshot",

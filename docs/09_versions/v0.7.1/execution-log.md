@@ -1,6 +1,6 @@
 # v0.7.1 执行日志
 
-状态：WP1.3.1 Implementation Passed；WP1/WP2 Revalidation Partial
+状态：WP1.3.2 与 WP1/WP2 Revalidation Passed；WP3 未开始
 创建日期：2026-07-28
 
 本文件只记录实际执行事实，不记录计划性成功。每个工作包追加一节，保留失败、修复、命令、结果、
@@ -465,3 +465,29 @@ Next action:
 - Current boundary：新 Draft 停在 `personal_information`，等待用户按八区块完成确认；旧 Snapshot
   保持不可变且不作为新链路输入。新 ResumeEvidenceSnapshot、CandidateSnapshot 和 WP2 replay 尚未
   发生，因此 WP1/WP2 保持 partial，v0.7.1 整体仍为实施中。
+
+## WP1.3.2 Claim Lifecycle / 2026-08-02 至 2026-08-03 / working tree（未提交）
+
+- Problem：旧 Resume、当前 Resume、长期对话和反馈的 active Claim 被直接混合投影，形成 SQL 元数据、
+  Python 等级和毕业时间精度伪冲突；相同代码长期使用也会复现，并非只有代码升级才发生。
+- Doc-first：新增 Requirements、RFC-0013、ADR-0013、Tasks、Eval Plan，并更新 Evidence、Candidate、
+  State、Tool、HITL、CLI contracts。
+- Minimal implementation：EvidenceClaim 增加 origin/effective/multi-lineage；新增一个纯确定性 resolution
+  模块；SQLite JSON payload 不迁移、不新增表；Candidate/Feedback 共用选择规则。
+- Correction：一次人工修订只创建一条 user_reported successor，在单事务内 supersede 所有前驱；
+  跨 subject/predicate、cycle 和非 active predecessor 拒绝。
+- Projection：Profile 保存 `evidence_basis_ids`；capability/kind/string/date 使用窄语义规则；跨来源不同
+  值仍生成 conflict，不能按时间或 confidence 静默覆盖。
+- Recovery：failed/pending/current refs 驱动准确 next_action。真实验收另发现 Candidate 最终投影漏传
+  basis 与跨 Session 复用 immutable ObjectRef 的 identity conflict，均以最小接线修复并补回归。
+- Automated：全量与安装态结果记录在 `v0.7.1-wp1.3.2-eval-report.md`；`compileall` 与
+  `git diff --check` 通过。
+- Real Candidate：保留旧错误 run，经公开 CLI cancel/resume/build，最终 run
+  `run-22685159-b474-4100-9a02-7d8e9d43a261` 发布 Candidate
+  `89514ab4-758e-4d54-90af-f740519c40b1`；17 selected，41 legacy model isolated，0 conflict，
+  basis/trace 指标通过。
+- WP2 replay：create `run-a07e2376-2ae9-4b86-ad56-082d8070ebdb` 明确引用新 Candidate；最终
+  confirmation `run-56709fb6-8489-4fdd-8339-3d1e3cc0938d` 发布 CareerIntent、SearchScope 和 pending
+  WP3 handoff。
+- Gate decision：WP1/WP2 revalidation Passed；下一工作包为 WP3 Role live source。WP3 尚未消费
+  handoff，v0.7.1 整体仍为 In Progress，代码版本保持 0.7.0。

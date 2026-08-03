@@ -577,7 +577,10 @@ class _CandidateProfileNodes:
         counters = CounterState.model_validate(state["counters"])
         result, counters = self._call_tool(
             "profile.project_candidate",
-            {"candidate_id": state["candidate_id"]},
+            {
+                "candidate_id": state["candidate_id"],
+                "resume_evidence_id": state["resume_evidence_id"],
+            },
             counters,
             budgets,
         )
@@ -595,6 +598,9 @@ class _CandidateProfileNodes:
                 "snapshot_id"
             ]
             update["claim_ids"] = result.records[0]["supporting_claim_ids"]
+            update["claim_resolution_summary"] = result.metadata.get(
+                "claim_resolution_summary", {}
+            )
         return update
 
     def assess_profile_sufficiency(
@@ -993,11 +999,17 @@ class _CandidateProfileNodes:
         tool_results: list[dict[str, Any]] = []
         errors: list[dict[str, Any]] = []
         snapshot_id = state.get("candidate_profile_snapshot_id")
-        if counters.tool_calls < budgets.max_tool_calls and status != "failed":
+        resolution_summary = state.get("claim_resolution_summary", {})
+        supporting_claim_ids = list(state.get("claim_ids", []))
+        if (
+            counters.tool_calls < budgets.max_tool_calls
+            and status not in {"failed", "cancelled"}
+        ):
             result, counters = self._call_tool(
                 "profile.project_candidate",
                 {
                     "candidate_id": state["candidate_id"],
+                    "resume_evidence_id": state["resume_evidence_id"],
                     "completion_reason": reason,
                     "unknowns": unknowns,
                 },
@@ -1007,8 +1019,14 @@ class _CandidateProfileNodes:
             tool_results.append(result.model_dump(mode="json"))
             if result.status == "success":
                 snapshot_id = result.records[0]["snapshot_id"]
+                supporting_claim_ids = result.records[0]["supporting_claim_ids"]
+                resolution_summary = result.metadata.get(
+                    "claim_resolution_summary", resolution_summary
+                )
             else:
                 errors.append(_tool_error("finalize_profile", result))
+                status = "failed"
+                reason = "failed"
         latest = (
             self.profile_repository.get_profile(snapshot_id)
             if snapshot_id
@@ -1018,6 +1036,8 @@ class _CandidateProfileNodes:
         return {
             "status": status,
             "candidate_profile_snapshot_id": snapshot_id,
+            "claim_ids": supporting_claim_ids,
+            "claim_resolution_summary": resolution_summary,
             "counters": counters.model_dump(),
             "tool_results": tool_results,
             "errors": errors,

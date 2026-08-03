@@ -163,7 +163,12 @@ class SQLiteSessionRepository:
             ).fetchone()
             if row is not None:
                 existing = ObjectRef.model_validate_json(row[0])
-                if existing != ref:
+                if (
+                    existing.object_type != ref.object_type
+                    or existing.owner_id != ref.owner_id
+                    or existing.schema_version != ref.schema_version
+                    or existing.canonical_hash != ref.canonical_hash
+                ):
                     raise SessionReferenceError("object ref identity conflict")
                 return existing
             connection.execute(

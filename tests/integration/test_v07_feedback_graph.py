@@ -75,9 +75,10 @@ def test_rejection_without_explanation_is_outcome_only(tmp_path):
 
 
 def test_explicit_evaluator_signal_interrupts_then_creates_candidate_directives(tmp_path):
-    runtime, _, feedback, plan, activity = _runtime(tmp_path)
+    runtime, data, feedback, plan, activity = _runtime(tmp_path)
+    occurred_at = datetime.now(UTC)
     interrupted = _invoke(runtime, FeedbackInput(
-        feedback_type="mock_interview", source_kind="evaluator_report", occurred_at=datetime.now(UTC),
+        feedback_type="mock_interview", source_kind="evaluator_report", occurred_at=occurred_at,
         capability_id="programming.python",
         structured={"evaluator_comment": "The candidate demonstrated intermediate Python.",
                     "capability_level": "intermediate"},
@@ -90,6 +91,10 @@ def test_explicit_evaluator_signal_interrupts_then_creates_candidate_directives(
     types = {feedback.get(item, FeedbackDirective, owner_id="owner").directive_type for item in result["directive_ids"]}
     assert {"candidate_profile_rebuild_required", "rematch_required", "replan_required"}.issubset(types)
     assert len(result["feedback_claim_ids"]) == 1
+    claim = data["profiles"].get_claim(result["feedback_claim_ids"][0])
+    assert claim.origin_kind == "feedback_event"
+    assert claim.origin_ref == result["feedback_event_id"]
+    assert claim.effective_at == occurred_at
     assert result["report"]["attributions"][0]["status"] == "confirmed"
     assert result["report"]["impact"]["candidate_rebuild_required"] is True
     assert result["report"]["directives"]

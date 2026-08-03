@@ -21,7 +21,7 @@
 | v0.5 | 已完成 | 岗位需求画像 Graph | 招聘/官网/面经证据、岗位族与具体岗位画像、检索循环 |
 | v0.6 | 已完成 | 双画像匹配与用户决策 | 四类差距、可解释匹配、偏好调整、回退与重检索 |
 | v0.7 | 已完成 | 准备计划与反馈闭环 | 最小准备包、容量排期、反馈证据、画像更新、动态重排 |
-| v0.7.1 | 实施中 | 子图纵向闭环与 CLI 加固 | WP1.3.1 忠实度补丁通过，新 Draft 人工审核与 WP1/WP2 重验进行中 |
+| v0.7.1 | 实施中 | 子图纵向闭环与 CLI 加固 | WP1.3.2 与 WP1/WP2 重验通过，下一工作包 WP3 Role live source |
 | v0.8 | 计划中 | Hybrid RAG 与长期记忆 | 稀疏+稠密检索、metadata filter、rerank、引用回答 |
 | v1.0 | 计划中 | 单 Agent 端到端产品 | 父图、subgraph、checkpoint、interrupt、完整 eval |
 | v1.1 | 计划中 | 分布式存储与异步执行 | PostgreSQL、对象存储、向量存储、队列、幂等与恢复 |
@@ -250,9 +250,8 @@ DeepSeek、智联、牛客、企业官网传输和真实 auth resume 已通过�
 ## v0.7.1：子 Workflow 纵向闭环与 CLI 加固
 
 状态：In Progress（2026-07-30）。Requirements / RFC / ADR / CLI-Run Contract、实现任务和
-Eval plan 已确认；WP0、WP1.1、WP1.2 已通过，WP1.3.1 代码与真实 Draft 忠实度验收通过但
-E4 人工审核未完成，
-WP1/WP2 因新 typed handoff 进入重验，WP3-WP7 尚未完成。当前通过的是分阶段验收，
+Eval plan 已确认；WP0、WP1.1、WP1.2、WP1.3.2 与 WP2 重验已通过，
+WP3-WP7 尚未完成。当前通过的是分阶段验收，
 不等同于 v0.7.1 整体 Implemented / Accepted。
 
 版本定位：

@@ -53,8 +53,11 @@ class ClaimValidator:
             json.dumps(claim.value, ensure_ascii=False, default=_reject_non_json)
         except (TypeError, ValueError) as exc:
             raise ClaimValidationError("claim value must be JSON serializable") from exc
-        if claim.supersedes_claim_id:
-            previous = self.repository.get_claim(claim.supersedes_claim_id)
+        predecessor_ids = claim.all_supersedes_claim_ids
+        if len(set(predecessor_ids)) != len(predecessor_ids):
+            raise ClaimValidationError("claim contains duplicate predecessor references")
+        for predecessor_id in predecessor_ids:
+            previous = self.repository.get_claim(predecessor_id)
             if previous is None:
                 raise ClaimValidationError("superseded claim does not exist")
             if (previous.subject_id, previous.predicate) != (
@@ -76,7 +79,24 @@ class ClaimValidator:
                         raise ClaimValidationError(
                             "superseded claim belongs to another evidence owner"
                         )
+            if self._lineage_reaches(previous, claim.claim_id):
+                raise ClaimValidationError("claim supersede lineage contains a cycle")
         return claim
+
+    def _lineage_reaches(self, claim: EvidenceClaim, target_claim_id: str) -> bool:
+        pending = list(claim.all_supersedes_claim_ids)
+        visited: set[str] = set()
+        while pending:
+            claim_id = pending.pop()
+            if claim_id == target_claim_id:
+                return True
+            if claim_id in visited:
+                continue
+            visited.add(claim_id)
+            ancestor = self.repository.get_claim(claim_id)
+            if ancestor is not None:
+                pending.extend(ancestor.all_supersedes_claim_ids)
+        return False
 
     def validate_and_save(
         self,
@@ -87,6 +107,15 @@ class ClaimValidator:
         return self.repository.save_claim(
             self.validate(claim, allowed_artifact_ids, expected_owner_id)
         )
+
+    def validate_and_save_superseding(
+        self,
+        claim: EvidenceClaim,
+        allowed_artifact_ids: set[str] | None = None,
+        expected_owner_id: str | None = None,
+    ) -> EvidenceClaim:
+        validated = self.validate(claim, allowed_artifact_ids, expected_owner_id)
+        return self.repository.save_superseding_claim(validated)
 
 
 class CandidateClaimValidator(ClaimValidator):

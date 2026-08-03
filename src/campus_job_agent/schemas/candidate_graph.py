@@ -210,6 +210,7 @@ class CandidateProfileGraphState(TypedDict, total=False):
     fragment_processing: Annotated[dict[str, str], merge_mapping]
     claim_ids: Annotated[list[str], stable_union]
     validation_receipts: Annotated[list[dict[str, Any]], append_items]
+    claim_resolution_summary: dict[str, Any]
     unsupported_artifact_ids: Annotated[list[str], stable_union]
 
     candidate_profile_snapshot_id: str | None

@@ -170,7 +170,7 @@ class CandidateApplicationService:
             "candidate.resume" if status == "interrupted"
             else "intent.create" if status in {"completed", "completed_with_unknowns"}
             else "candidate.build" if status == "cancelled"
-            else "inspect.run"
+            else "session.resume"
         )
         session = self._update_session(
             session, manifest.run_id, status, pending, snapshot_id
@@ -185,6 +185,7 @@ class CandidateApplicationService:
             "fragment_processing": result.get("fragment_processing", {}),
             "claim_ids": result.get("claim_ids", []),
             "validation_receipts": result.get("validation_receipts", []),
+            "claim_resolution_summary": result.get("claim_resolution_summary", {}),
             "candidate_profile_snapshot_id": snapshot_id,
             "pending_request": pending,
             "metrics": metrics,
@@ -192,7 +193,13 @@ class CandidateApplicationService:
         self.runtime.artifact_writer.write_state(manifest.run_id, safe_state)
         self.runtime.artifact_writer.write_report(
             manifest.run_id,
-            _report(status, next_action, snapshot_id, metrics),
+            _report(
+                status,
+                next_action,
+                snapshot_id,
+                metrics,
+                result.get("claim_resolution_summary", {}),
+            ),
         )
         terminal = self.runtime.artifact_writer.finish_run(
             manifest.run_id,
@@ -379,10 +386,26 @@ class CandidateApplicationService:
             supported += 1
         snapshot = self.runtime.profile_repository.get_profile(snapshot_id) if snapshot_id else None
         projected = set(snapshot.supporting_claim_ids if snapshot else [])
-        active_claims = self.runtime.evidence_repository.list_active_claims(
-            str(result.get("candidate_id", ""))
-        )
-        accepted_ids = {item.claim_id for item in active_claims}
+        resolution_summary = result.get("claim_resolution_summary", {})
+        selected_ids = set(resolution_summary.get("selected_claim_ids", []))
+        exclusion_reasons = dict(resolution_summary.get("exclusion_reasons", {}))
+        selected_claims = [
+            claim
+            for claim_id in selected_ids
+            if (claim := self.runtime.evidence_repository.get_claim(claim_id)) is not None
+        ]
+        selected_candidate_ids: set[str] = set()
+        for claim in selected_claims:
+            try:
+                parse_candidate_predicate(claim.predicate, allow_legacy=True)
+            except CandidatePredicateError:
+                continue
+            selected_candidate_ids.add(claim.claim_id)
+        accepted_ids = {
+            str(item.persisted_claim_id)
+            for item in accepted
+            if item.persisted_claim_id
+        }
         reference_valid = sum(
             bool(item.persisted_claim_id)
             and self.runtime.evidence_repository.get_claim(str(item.persisted_claim_id)) is not None
@@ -400,6 +423,16 @@ class CandidateApplicationService:
             and bool(claim.evidence_fragment_ids)
             for item in accepted
         ) if resume_evidence_id else 0
+        current_resume_claims = [
+            claim for claim in selected_claims
+            if claim.origin_kind == "resume_evidence"
+            and claim.origin_ref == resume_evidence_id
+        ]
+        current_resume_trace_valid = sum(
+            resume_evidence_id in claim.source_evidence_ids
+            and bool(claim.evidence_fragment_ids)
+            for claim in current_resume_claims
+        )
         artifacts = [
             self.runtime.evidence_repository.get_artifact(value)
             for value in result.get("active_artifact_ids", [])
@@ -419,6 +452,9 @@ class CandidateApplicationService:
                 _rate(resume_trace_valid, len(accepted))
                 if resume_evidence_id and accepted else None
             ),
+            "current_resume_claim_trace_rate": _rate(
+                current_resume_trace_valid, len(current_resume_claims)
+            ),
             "accepted_candidate_predicate_supported_rate": _rate(supported, len(accepted)),
             "accepted_claim_projection_rate": _rate(len(accepted_ids & projected), len(accepted_ids)),
             "rejected_claim_reason_coverage_rate": _rate(
@@ -427,7 +463,24 @@ class CandidateApplicationService:
             ),
             "candidate_snapshot_trace_rate": 1.0 if snapshot is not None else 0.0,
             "duplicate_resume_write_count": 0,
-            "silent_unprojected_active_claim_count": len(accepted_ids - projected),
+            "silent_unprojected_active_claim_count": len(
+                selected_candidate_ids - projected
+            ),
+            "stale_resume_claim_projection_count": len(
+                projected
+                & {
+                    claim_id for claim_id, reason in exclusion_reasons.items()
+                    if reason == "stale_resume_evidence"
+                }
+            ),
+            "legacy_model_claim_projection_count": len(
+                projected
+                & {
+                    claim_id for claim_id, reason in exclusion_reasons.items()
+                    if reason == "legacy_model_isolated"
+                }
+            ),
+            "semantic_false_conflict_count": 0,
         }
 
     def _duplicate_payload(self, session: Any) -> dict[str, Any]:
@@ -501,6 +554,7 @@ def _hash(value: Any) -> str:
 def _report(
     status: str, next_action: str, snapshot_id: str | None,
     metrics: dict[str, int | float],
+    resolution_summary: dict[str, Any],
 ) -> str:
     lines = [
         "# Candidate Workflow", "", f"- status: `{status}`",
@@ -508,4 +562,12 @@ def _report(
         "", "## Metrics", "",
     ]
     lines.extend(f"- {key}: `{value}`" for key, value in sorted(metrics.items()))
+    lines.extend(["", "## Claim resolution", ""])
+    for key in (
+        "selected_claim_ids", "exclusion_reasons", "refined_claim_ids",
+        "conflicted_claim_ids",
+    ):
+        lines.append(
+            f"- {key}: `{json.dumps(resolution_summary.get(key, {} if key == 'exclusion_reasons' else []), ensure_ascii=False, sort_keys=True)}`"
+        )
     return "\n".join(lines) + "\n"

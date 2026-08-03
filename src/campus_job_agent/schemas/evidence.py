@@ -25,6 +25,13 @@ ClaimType = Literal[
     "feedback_signal",
 ]
 ClaimStatus = Literal["active", "superseded", "rejected"]
+ClaimOriginKind = Literal[
+    "resume_evidence",
+    "conversation_response",
+    "feedback_event",
+    "supplemental_document",
+    "legacy",
+]
 ProfileType = Literal["candidate", "career_intent", "role"]
 
 
@@ -112,6 +119,29 @@ class EvidenceClaim(BaseModel):
     status: ClaimStatus = "active"
     created_at: datetime = Field(default_factory=utc_now)
     supersedes_claim_id: str | None = None
+    origin_kind: ClaimOriginKind = "legacy"
+    origin_ref: str | None = None
+    effective_at: datetime | None = None
+    supersedes_claim_ids: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def normalize_lifecycle(self) -> "EvidenceClaim":
+        if self.origin_kind != "legacy" and not str(self.origin_ref or "").strip():
+            raise ValueError("non-legacy claim requires origin_ref")
+        if self.effective_at is None:
+            self.effective_at = self.created_at
+        lineage = self.all_supersedes_claim_ids
+        if self.claim_id in lineage:
+            raise ValueError("claim cannot supersede itself")
+        self.supersedes_claim_ids = lineage
+        return self
+
+    @property
+    def all_supersedes_claim_ids(self) -> list[str]:
+        values = [*self.supersedes_claim_ids]
+        if self.supersedes_claim_id:
+            values.append(self.supersedes_claim_id)
+        return list(dict.fromkeys(values))
 
     def idempotency_key(self) -> str:
         payload = {
@@ -124,6 +154,19 @@ class EvidenceClaim(BaseModel):
             "schema_version": self.schema_version,
             "supersedes_claim_id": self.supersedes_claim_id,
         }
+        if self.origin_kind != "legacy" or self.origin_ref is not None:
+            payload.update(
+                {
+                    "origin_kind": self.origin_kind,
+                    "origin_ref": self.origin_ref,
+                    "effective_at": self.effective_at,
+                }
+            )
+        if self.supersedes_claim_ids and not (
+            self.supersedes_claim_id
+            and self.supersedes_claim_ids == [self.supersedes_claim_id]
+        ):
+            payload["supersedes_claim_ids"] = sorted(self.supersedes_claim_ids)
         canonical = json.dumps(
             payload,
             ensure_ascii=False,
@@ -132,6 +175,13 @@ class EvidenceClaim(BaseModel):
             default=str,
         )
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+class ClaimResolutionSummary(BaseModel):
+    selected_claim_ids: list[str] = Field(default_factory=list)
+    exclusion_reasons: dict[str, str] = Field(default_factory=dict)
+    refined_claim_ids: list[str] = Field(default_factory=list)
+    conflicted_claim_ids: list[str] = Field(default_factory=list)
 
 
 class ExtractedClaim(BaseModel):
