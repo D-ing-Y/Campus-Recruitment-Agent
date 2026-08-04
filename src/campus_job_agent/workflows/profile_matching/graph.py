@@ -27,6 +27,7 @@ from campus_job_agent.schemas import (
     TargetDecision,
 )
 from campus_job_agent.schemas.matching import canonical_hash
+from campus_job_agent.schemas.intent import role_target_bindings_for_roles
 from campus_job_agent.storage.base import EvidenceRepository, ProfileRepository
 from campus_job_agent.workflows.candidate_profile.graph import open_sqlite_checkpointer
 from campus_job_agent.workflows.profile_matching.explanation import ExplanationProvider, explain_with_fallback
@@ -37,7 +38,7 @@ from campus_job_agent.workflows.profile_matching.service import (
     MatchingServiceError,
     assess_intent_impact,
     build_directive,
-    project_search_scope,
+    project_search_scopes,
     role_refresh_reason,
 )
 
@@ -414,6 +415,12 @@ class _MatchingNodes:
         old_intent = CareerIntent.model_validate(previous_snapshot.profile_data)
         if "constraints" in patch:
             patch["constraints"] = [IntentConstraint.model_validate(item) for item in patch["constraints"]]
+        if "target_roles" in patch:
+            bindings = role_target_bindings_for_roles(list(patch["target_roles"]))
+            patch["role_target_bindings"] = bindings
+            patch["target_role_families"] = list(dict.fromkeys(
+                item.role_family for item in bindings
+            ))
         new_intent = old_intent.model_copy(update={**patch, "schema_version": "v0.6", "previous_snapshot_id": previous_snapshot.snapshot_id})
         changed_paths = [f"/{key}" for key in sorted(patch) if old_intent.model_dump(mode="json").get(key) != new_intent.model_dump(mode="json").get(key)]
         digest = canonical_hash("intent-revision", [previous_snapshot.snapshot_id, patch, response.response_id])
@@ -431,11 +438,18 @@ class _MatchingNodes:
         )
         impact = self.repository.save("intent_impact", impact, owner_id=state["user_id"])
         directive_type = "rematch_required" if impact.impact != "role_research_required" else "role_research_required"
+        requested_scopes = (
+            [
+                scope.model_dump(mode="json")
+                for scope in project_search_scopes(new_intent, new_snapshot.snapshot_id)
+            ]
+            if directive_type == "role_research_required" else []
+        )
         directive = build_directive(
             directive_type=directive_type, run_id=state["run_id"], comparison_set_id=state["comparison_set_id"],
             reason_codes=impact.reason_codes, required_input_refs=[new_snapshot.snapshot_id],
             affected_job_profile_ids=state["job_instance_profile_snapshot_ids"],
-            requested_scope=project_search_scope(new_intent, new_snapshot.snapshot_id).model_dump(mode="json") if directive_type == "role_research_required" else None,
+            requested_scopes=requested_scopes,
         )
         directive = self.repository.save("rebuild_directive", directive, owner_id=state["user_id"])
         self._archive_nondecision_response(response, {"record_ids": [new_snapshot.snapshot_id, impact.impact_assessment_id, directive.directive_id]})

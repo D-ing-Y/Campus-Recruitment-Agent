@@ -1,6 +1,6 @@
 # v0.7.1 Workflow 验收矩阵
 
-状态：WP1.3.2 与 WP1/WP2 Revalidation Passed；WP3 未开始
+状态：WP1/WP2 Passed；WP3 设计门禁补丁 Offline Passed；WP3 live source 未开始
 日期：2026-08-03
 
 状态枚举：`not_started | failing | blocked | partial | passed | not_applicable`。
@@ -13,7 +13,7 @@
 | ResumeEvidence | passed | passed | passed | passed | passed | passed | passed | passed | passed | passed |
 | Candidate | passed | passed | passed | passed | passed | passed | passed | passed | passed | passed |
 | CareerIntent | passed | passed | passed | passed | passed | passed | passed | passed | passed | passed |
-| Role | partial | partial | partial | partial | partial | partial | partial | failing | partial | partial |
+| Role | passed | partial | partial | passed | partial | passed | partial | failing | partial | partial |
 | Matching/Decision | partial | not_applicable | partial | partial | partial | partial | partial | failing | partial | partial |
 | Preparation | partial | not_applicable | partial | partial | partial | partial | partial | failing | partial | partial |
 | Feedback | partial | partial | partial | partial | partial | partial | partial | failing | partial | partial |
@@ -162,11 +162,25 @@ WP1.3.1 阶段结果见 `docs/07_evaluation/v0.7.1-wp1.3.1-eval-report.md`；原
 
 WP2 已用新 CandidateSnapshot 重验；领域模型未重写，新的 create manifest 保留 typed-input 引用。
 
-## 6. WP3-WP7
+## 6. WP3 岗位层级与证据门禁补丁
+
+| Gate | 预期 | 状态 | 证据 |
+| --- | --- | --- | --- |
+| Multi-family scope | 每个 family 独立 Scope/Handoff | passed | multi-family CareerIntent Graph + legacy fallback unit |
+| Family membership | mismatch/ambiguous 不进入统计分母 | passed | cross-family noise Role Graph case |
+| Detail gate | search-only 不产生岗位画像 | passed | search-only/detail Role Graph cases |
+| Experience scope | family/company/job 可追溯，ambiguous 不投影 | passed | scope-link unit/integration |
+| Replay | gate 记录幂等，旧 official plan 可恢复 | passed | cross-thread fixture replay |
+| Live source | 真实 search → detail Raw Artifact | not_started | `v0.7.1-wp3-live-source-support-matrix.md` |
+
+补丁的详细数据见 `docs/07_evaluation/v0.7.1-wp3-role-hierarchy-evidence-gates-eval-report.md`。
+这里的 passed 是 contract/deterministic gate/offline replay，不表示 Role Workflow 已完成 live 验收。
+
+## 7. WP3-WP7
 
 后续工作包开始时，按照 Requirements 第 6 节和 Eval plan 补充对应 Gate。不得预填 `passed`。
 
-## 7. 版本放行
+## 8. 版本放行
 
 只有总矩阵所有适用项为 `passed`，或外部 live source 项具有经用户接受且不影响版本核心声明的
 明确 `blocked/partial` 限制，才可进入最终 Eval report。任何 Candidate、Intent、Matching、

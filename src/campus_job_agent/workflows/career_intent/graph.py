@@ -31,7 +31,7 @@ from campus_job_agent.workflows.career_intent.extractor import IntentCandidateEx
 from campus_job_agent.workflows.career_intent.ingestion import IntentEvidenceIngestor
 from campus_job_agent.workflows.career_intent.policy import apply_revision, publish_intent, validate_candidate
 from campus_job_agent.workflows.career_intent.repository import SQLiteIntentRepository
-from campus_job_agent.workflows.profile_matching.service import project_search_scope
+from campus_job_agent.workflows.profile_matching.service import project_search_scopes
 
 if TYPE_CHECKING:
     from campus_job_agent.runtime.sessions import SQLiteSessionRepository
@@ -61,7 +61,9 @@ class CareerIntentState(TypedDict, total=False):
     confirmed_intent: dict[str, Any] | None
     career_intent_snapshot_id: str | None
     search_scope_id: str | None
+    search_scope_ids: list[str]
     handoff_id: str | None
+    handoff_ids: list[str]
     status: str
     next_action: str | None
     llm_calls: Annotated[list[dict[str, Any]], append_items]
@@ -142,7 +144,8 @@ def create_career_intent_state(
         "processed_response": None,
         "response_artifact_id": None, "response_fragment_id": None,
         "confirmed_intent": None, "career_intent_snapshot_id": None,
-        "search_scope_id": None, "handoff_id": None,
+        "search_scope_id": None, "search_scope_ids": [], "handoff_id": None,
+        "handoff_ids": [],
         "status": "initialized", "next_action": None,
         "llm_calls": [], "trace": [], "errors": [],
     }
@@ -375,32 +378,45 @@ class _Nodes:
         if snapshot is None:
             raise CareerIntentWorkflowError("CareerIntent snapshot not found")
         intent = CareerIntent.model_validate(snapshot.profile_data)
-        scope = project_search_scope(intent, snapshot.snapshot_id)
-        scope = self.intents.save("search_scope", scope, owner_id=state["user_id"], idempotency_key=scope.fingerprint())
+        scopes = [
+            self.intents.save(
+                "search_scope", scope, owner_id=state["user_id"],
+                idempotency_key=scope.fingerprint(),
+            )
+            for scope in project_search_scopes(intent, snapshot.snapshot_id)
+        ]
+        scope_ids = [scope.scope_id for scope in scopes]
         return {
-            "search_scope_id": scope.scope_id,
-            "trace": [trace("project_search_scope", state, scope_id=scope.scope_id)],
+            "search_scope_id": scope_ids[0] if len(scope_ids) == 1 else None,
+            "search_scope_ids": scope_ids,
+            "trace": [trace("project_search_scope", state, scope_ids=scope_ids)],
         }
 
     def emit_role_research_handoff(self, state: CareerIntentState) -> dict[str, Any]:
         from campus_job_agent.runtime.models import Handoff
 
-        handoff_id = stable_intent_id("handoff", [
-            state["session_id"], state["career_intent_snapshot_id"], state["search_scope_id"],
-        ])
-        handoff = self.sessions.save_handoff(Handoff(
-            handoff_id=handoff_id, session_id=state["session_id"], user_id=state["user_id"],
-            handoff_type="role_research_required", origin_run_id=state["run_id"],
-            origin_object_refs={"career_intent_snapshot_id": state["career_intent_snapshot_id"]},
-            required_input_refs={
-                "career_intent_snapshot_id": state["career_intent_snapshot_id"],
-                "search_scope_id": state["search_scope_id"],
-            },
-            handler_version="role_research_handoff_v1",
-        ))
+        handoffs = []
+        for scope_id in state.get("search_scope_ids", []):
+            handoff_id = stable_intent_id("handoff", [
+                state["session_id"], state["career_intent_snapshot_id"], scope_id,
+            ])
+            handoffs.append(self.sessions.save_handoff(Handoff(
+                handoff_id=handoff_id, session_id=state["session_id"], user_id=state["user_id"],
+                handoff_type="role_research_required", origin_run_id=state["run_id"],
+                origin_object_refs={"career_intent_snapshot_id": state["career_intent_snapshot_id"]},
+                required_input_refs={
+                    "career_intent_snapshot_id": state["career_intent_snapshot_id"],
+                    "search_scope_id": scope_id,
+                },
+                handler_version="role_research_handoff_v2",
+            )))
+        if not handoffs:
+            raise CareerIntentWorkflowError("CareerIntent produced no SearchScope handoff")
+        handoff_ids = [handoff.handoff_id for handoff in handoffs]
         return {
-            "handoff_id": handoff.handoff_id,
-            "trace": [trace("emit_role_research_handoff", state, handoff_id=handoff.handoff_id)],
+            "handoff_id": handoff_ids[0] if len(handoff_ids) == 1 else None,
+            "handoff_ids": handoff_ids,
+            "trace": [trace("emit_role_research_handoff", state, handoff_ids=handoff_ids)],
         }
 
     def finalize(self, state: CareerIntentState) -> dict[str, Any]:
@@ -417,20 +433,23 @@ class _Nodes:
         draft = CareerIntentDraft.model_validate(state["draft"])
         self._save_response(response, update, artifact_id, fragment_id, "confirmed", draft,
                             snapshot_id=str(state["career_intent_snapshot_id"]),
-                            search_scope_id=str(state["search_scope_id"]))
+                            search_scope_id=str(state["search_scope_id"]) if state.get("search_scope_id") else None,
+                            search_scope_ids=list(state.get("search_scope_ids", [])))
         return update
 
     def _save_response(
         self, response: IntentReviewResponse, update: dict[str, Any], artifact_id: str,
         fragment_id: str, status: str, draft: CareerIntentDraft,
         snapshot_id: str | None = None, search_scope_id: str | None = None,
+        search_scope_ids: list[str] | None = None,
     ) -> None:
         record = IntentConfirmationRecord(
             confirmation_id=stable_intent_id("intent-confirmation", [response.response_id, status]),
             response_id=response.response_id, request_id=response.request_id,
             user_id=response.user_id, draft_id=draft.draft_id,
             response_artifact_id=artifact_id, response_fragment_id=fragment_id,
-            status=status, snapshot_id=snapshot_id, search_scope_id=search_scope_id,  # type: ignore[arg-type]
+            status=status, snapshot_id=snapshot_id, search_scope_id=search_scope_id,
+            search_scope_ids=list(search_scope_ids or ([search_scope_id] if search_scope_id else [])),
         )
         self.intents.save("confirmation", record, owner_id=response.user_id)
         self.intents.save_response_result(

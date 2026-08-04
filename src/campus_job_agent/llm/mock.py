@@ -96,6 +96,10 @@ def _valid_career_intent(messages: list[dict[str, str]]) -> dict:
         roles.append({
             "value": "Agent 开发", "evidence_fragment_ids": [fragment_id], "confidence": 0.95,
         })
+    if "后端" in text or "服务端" in text:
+        roles.append({
+            "value": "后端开发", "evidence_fragment_ids": [fragment_id], "confidence": 0.95,
+        })
     if not roles:
         roles.append({
             "value": "unknown", "evidence_fragment_ids": [fragment_id], "confidence": 0.4,

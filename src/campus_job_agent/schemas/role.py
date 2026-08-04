@@ -3,13 +3,54 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from campus_job_agent.schemas.candidate import CapabilityLevel
 from campus_job_agent.schemas.evidence import utc_now
 
 
 RequirementImportance = Literal["hard", "core", "bonus", "context"]
+
+
+class RoleFamilyMembership(BaseModel):
+    membership_id: str
+    schema_version: Literal["v0.7.1"] = "v0.7.1"
+    scope_id: str
+    job_posting_id: str
+    target_role_family: str
+    primary_role_family: str
+    secondary_role_tags: list[str] = Field(default_factory=list)
+    status: Literal["accepted", "ambiguous", "rejected"]
+    confidence: float = Field(ge=0.0, le=1.0)
+    reason_codes: list[str] = Field(min_length=1)
+    supporting_fragment_ids: list[str] = Field(min_length=1)
+    policy_version: str = "role_family_membership_v1"
+
+    @model_validator(mode="after")
+    def accepted_requires_primary_family_match(self) -> "RoleFamilyMembership":
+        if self.status == "accepted" and self.primary_role_family != self.target_role_family:
+            raise ValueError("accepted role membership requires primary family match")
+        return self
+
+
+class RoleDetailEvidenceReceipt(BaseModel):
+    receipt_id: str
+    schema_version: Literal["v0.7.1"] = "v0.7.1"
+    scope_id: str
+    job_cluster_id: str
+    status: Literal["eligible", "missing", "invalid"]
+    detail_document_ids: list[str] = Field(default_factory=list)
+    detail_artifact_ids: list[str] = Field(default_factory=list)
+    reason_codes: list[str] = Field(min_length=1)
+    policy_version: str = "role_detail_gate_v1"
+
+    @model_validator(mode="after")
+    def eligible_requires_detail_evidence(self) -> "RoleDetailEvidenceReceipt":
+        if self.status == "eligible" and (
+            not self.detail_document_ids or not self.detail_artifact_ids
+        ):
+            raise ValueError("eligible role detail receipt requires detail documents and artifacts")
+        return self
 
 
 class RoleRequirement(BaseModel):

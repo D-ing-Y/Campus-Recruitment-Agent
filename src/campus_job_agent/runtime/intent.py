@@ -106,7 +106,9 @@ class IntentApplicationService:
         status = "interrupted" if pending else str(result.get("status") or "failed")
         snapshot_id = result.get("career_intent_snapshot_id")
         scope_id = result.get("search_scope_id")
+        scope_ids = list(result.get("search_scope_ids") or ([scope_id] if scope_id else []))
         handoff_id = result.get("handoff_id")
+        handoff_ids = list(result.get("handoff_ids") or ([handoff_id] if handoff_id else []))
         next_action = (
             "intent.resume" if status == "interrupted"
             else "role.research" if status == "completed"
@@ -115,15 +117,15 @@ class IntentApplicationService:
         )
         session = self._update_session(
             session=session, run_id=manifest.run_id, status=status,
-            pending=pending, snapshot_id=snapshot_id, handoff_id=handoff_id,
+            pending=pending, snapshot_id=snapshot_id, handoff_ids=handoff_ids,
         )
         self._index_objects(
             run_id=manifest.run_id, owner=session.user_id,
             artifact_id=result.get("raw_artifact_id"), snapshot_id=snapshot_id,
-            scope_id=scope_id,
+            scope_ids=scope_ids,
         )
-        if handoff_id:
-            handoff = self.runtime.session_repository.get_handoff(handoff_id, user_id=session.user_id)
+        for value in handoff_ids:
+            handoff = self.runtime.session_repository.get_handoff(value, user_id=session.user_id)
             self.runtime.artifact_writer.append_handoff(handoff)
         metrics = self._metrics(result, status)
         self.runtime.artifact_writer.write_state(manifest.run_id, {
@@ -133,7 +135,8 @@ class IntentApplicationService:
             "validation_receipt_id": result.get("validation_receipt_id"),
             "pending_request": pending,
             "career_intent_snapshot_id": snapshot_id,
-            "search_scope_id": scope_id, "handoff_id": handoff_id,
+            "search_scope_id": scope_id, "search_scope_ids": scope_ids,
+            "handoff_id": handoff_id, "handoff_ids": handoff_ids,
             "metrics": metrics,
         })
         self.runtime.artifact_writer.write_report(
@@ -142,8 +145,8 @@ class IntentApplicationService:
                 "# CareerIntent Workflow", "", f"- status: `{status}`",
                 f"- next action: `{next_action}`",
                 f"- snapshot: `{snapshot_id or 'none'}`",
-                f"- search scope: `{scope_id or 'none'}`",
-                f"- handoff: `{handoff_id or 'none'}`",
+                f"- search scopes: `{', '.join(scope_ids) or 'none'}`",
+                f"- handoffs: `{', '.join(handoff_ids) or 'none'}`",
             ]),
         )
         terminal = self.runtime.artifact_writer.finish_run(
@@ -152,10 +155,11 @@ class IntentApplicationService:
             next_action=next_action,
             output_refs={
                 "career_intent_snapshot_id": snapshot_id,
-                "search_scope_id": scope_id, "handoff_id": handoff_id,
+                "search_scope_id": scope_id, "search_scope_ids": scope_ids,
+                "handoff_id": handoff_id, "handoff_ids": handoff_ids,
             },
             pending_request_id=(pending or {}).get("request_id"),
-            pending_handoff_ids=[handoff_id] if handoff_id else [],
+            pending_handoff_ids=handoff_ids,
         )
         return {
             "schema_version": "v0.7.1", "command": manifest.command,
@@ -164,7 +168,8 @@ class IntentApplicationService:
             "status": status, "next_action": next_action,
             "output_refs": {
                 "career_intent_snapshot_id": snapshot_id,
-                "search_scope_id": scope_id, "handoff_id": handoff_id,
+                "search_scope_id": scope_id, "search_scope_ids": scope_ids,
+                "handoff_id": handoff_id, "handoff_ids": handoff_ids,
             },
             "pending_request": pending, "artifact_paths": terminal.artifact_paths,
             "metrics": metrics, "deduplicated": False, "warnings": [], "errors": [],
@@ -172,7 +177,7 @@ class IntentApplicationService:
 
     def _update_session(
         self, *, session: Any, run_id: str, status: str,
-        pending: dict[str, Any] | None, snapshot_id: str | None, handoff_id: str | None,
+        pending: dict[str, Any] | None, snapshot_id: str | None, handoff_ids: list[str],
     ) -> Any:
         if status == "interrupted":
             return self.runtime.session_repository.update_navigation(
@@ -198,7 +203,7 @@ class IntentApplicationService:
                 session.session_id, key="career_intent_snapshot_id", object_id=snapshot_id,
                 expected_version=session.session_version,
             )
-            pending_handoffs = list(dict.fromkeys([*session.pending_handoff_ids, *([handoff_id] if handoff_id else [])]))
+            pending_handoffs = list(dict.fromkeys([*session.pending_handoff_ids, *handoff_ids]))
             return self.runtime.session_repository.update_navigation(
                 session.session_id, expected_version=session.session_version,
                 operation="intent_completed", status="active", current_stage="role",
@@ -247,13 +252,17 @@ class IntentApplicationService:
 
     def _index_objects(
         self, *, run_id: str, owner: str, artifact_id: str | None,
-        snapshot_id: str | None, scope_id: str | None,
+        snapshot_id: str | None, scope_ids: list[str],
     ) -> None:
-        for logical_type, object_id, locator, sensitivity in (
+        base = [
             ("career_intent_evidence", artifact_id, f"repository://evidence/artifacts/{artifact_id}", "private"),
             ("career_intent_snapshot", snapshot_id, f"repository://profiles/{snapshot_id}", "internal"),
-            ("search_scope", scope_id, f"repository://intent/search-scopes/{scope_id}", "internal"),
-        ):
+        ]
+        base.extend(
+            ("search_scope", scope_id, f"repository://intent/search-scopes/{scope_id}", "internal")
+            for scope_id in scope_ids
+        )
+        for logical_type, object_id, locator, sensitivity in base:
             if object_id:
                 self.runtime.artifact_writer.add_artifact(run_id, ArtifactEntry(
                     logical_type=logical_type, object_id=str(object_id), locator=locator,
@@ -274,7 +283,7 @@ class IntentApplicationService:
                 if completed else None
             ),
             "search_scope_projection_accuracy": (
-                1.0 if completed and result.get("search_scope_id") else 0.0
+                1.0 if completed and (result.get("search_scope_ids") or result.get("search_scope_id")) else 0.0
             ) if completed else None,
             "duplicate_confirmation_write_count": 0,
         }

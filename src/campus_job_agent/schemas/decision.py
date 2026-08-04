@@ -66,6 +66,7 @@ class RebuildDirective(BaseModel):
     required_input_refs: list[str] = Field(default_factory=list)
     affected_job_profile_ids: list[str] = Field(default_factory=list)
     requested_scope: dict[str, Any] | None = None
+    requested_scopes: list[dict[str, Any]] = Field(default_factory=list)
     status: Literal["pending", "consumed", "cancelled", "failed"] = "pending"
     created_at: datetime = Field(default_factory=utc_now)
 

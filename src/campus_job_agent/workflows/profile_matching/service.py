@@ -17,6 +17,7 @@ from campus_job_agent.schemas import (
     RoleFamilyProfile,
     SearchScope,
 )
+from campus_job_agent.schemas.intent import role_target_bindings_for_roles
 from campus_job_agent.schemas.evidence import utc_now
 from campus_job_agent.schemas.matching import canonical_hash
 from campus_job_agent.storage.base import EvidenceRepository, ProfileRepository
@@ -250,24 +251,46 @@ class MatchingService:
                     raise MatchingServiceError("snapshot_owner_mismatch")
 
 
-def project_search_scope(intent: CareerIntent, snapshot_id: str) -> SearchScope:
+def project_search_scopes(intent: CareerIntent, snapshot_id: str) -> list[SearchScope]:
     scoped_constraints = [
         item.model_dump(mode="json")
         for item in intent.constraints
         if item.affects_search_scope and item.status == "confirmed"
     ]
-    return SearchScope(
-        career_intent_snapshot_id=snapshot_id,
-        target_role_queries=intent.target_roles or ["unknown"],
-        target_role_family=(intent.target_role_families or intent.target_roles or ["unknown"])[0],
-        locations=intent.locations,
-        graduation_year=intent.graduation_year or "unknown",
-        recruitment_type=intent.recruitment_type if intent.recruitment_type in {"autumn_campus", "spring_campus", "internship", "unknown"} else "unknown",
-        industries=intent.industries,
-        companies=intent.companies,
-        company_types=intent.company_types,
-        hard_constraints=scoped_constraints,
+    bindings = intent.role_target_bindings or role_target_bindings_for_roles(
+        intent.target_roles or ["unknown"]
     )
+    grouped: dict[str, list[str]] = {}
+    for binding in bindings:
+        grouped.setdefault(binding.role_family, [])
+        if binding.target_role not in grouped[binding.role_family]:
+            grouped[binding.role_family].append(binding.target_role)
+    if not grouped:
+        raise MatchingServiceError("ambiguous_role_family_mapping")
+    return [
+        SearchScope(
+            career_intent_snapshot_id=snapshot_id,
+            target_role_queries=queries,
+            target_role_family=family,
+            locations=intent.locations,
+            graduation_year=intent.graduation_year or "unknown",
+            recruitment_type=intent.recruitment_type if intent.recruitment_type in {"autumn_campus", "spring_campus", "internship", "unknown"} else "unknown",
+            industries=intent.industries,
+            companies=intent.companies,
+            company_types=intent.company_types,
+            hard_constraints=scoped_constraints,
+        )
+        for family, queries in grouped.items()
+    ]
+
+
+def project_search_scope(intent: CareerIntent, snapshot_id: str) -> SearchScope:
+    """Compatibility helper for callers that require exactly one role family."""
+
+    scopes = project_search_scopes(intent, snapshot_id)
+    if len(scopes) != 1:
+        raise MatchingServiceError("multiple_search_scopes_required")
+    return scopes[0]
 
 
 def assess_intent_impact(
@@ -278,8 +301,8 @@ def assess_intent_impact(
     new_snapshot_id: str,
     changed_paths: list[str],
 ) -> IntentImpactAssessment:
-    before = project_search_scope(old_intent, old_snapshot_id).fingerprint()
-    after = project_search_scope(new_intent, new_snapshot_id).fingerprint()
+    before = _search_scope_set_fingerprint(old_intent, old_snapshot_id)
+    after = _search_scope_set_fingerprint(new_intent, new_snapshot_id)
     if before != after:
         impact, reasons = "role_research_required", ["search_scope_changed"]
     elif changed_paths:
@@ -297,6 +320,15 @@ def assess_intent_impact(
         impact=impact,
         reason_codes=reasons,
     )
+
+
+def _search_scope_set_fingerprint(intent: CareerIntent, snapshot_id: str) -> str:
+    """Hash the complete family-partitioned scope set, independent of order."""
+
+    fingerprints = sorted(
+        scope.fingerprint() for scope in project_search_scopes(intent, snapshot_id)
+    )
+    return canonical_hash("search-scope-set", fingerprints)
 
 
 def role_refresh_reason(role: JobInstanceRoleProfile) -> str | None:
@@ -321,10 +353,12 @@ def build_directive(
     required_input_refs: list[str],
     affected_job_profile_ids: list[str],
     requested_scope: dict[str, Any] | None = None,
+    requested_scopes: list[dict[str, Any]] | None = None,
 ) -> RebuildDirective:
+    scope_list = list(requested_scopes or ([requested_scope] if requested_scope else []))
     digest = canonical_hash(
         "rebuild-directive",
-        [comparison_set_id, directive_type, reason_codes, required_input_refs, affected_job_profile_ids, requested_scope],
+        [comparison_set_id, directive_type, reason_codes, required_input_refs, affected_job_profile_ids, scope_list],
     )
     return RebuildDirective(
         directive_id=f"directive:{digest[7:31]}",
@@ -334,12 +368,13 @@ def build_directive(
         reason_codes=reason_codes,
         required_input_refs=required_input_refs,
         affected_job_profile_ids=affected_job_profile_ids,
-        requested_scope=requested_scope,
+        requested_scope=requested_scope or (scope_list[0] if len(scope_list) == 1 else None),
+        requested_scopes=scope_list,
         created_at=utc_now(),
     )
 
 
 __all__ = [
     "MatchingService", "MatchingServiceError", "assess_intent_impact", "build_directive",
-    "project_search_scope", "role_refresh_reason",
+    "project_search_scope", "project_search_scopes", "role_refresh_reason",
 ]

@@ -12,28 +12,28 @@ from campus_job_agent.workflows.role_profile import RoleProfileGraphRuntime, cre
 
 
 JOBS = [
-    {"source_url":"fixture://jobs/a1","job_id":"a1","company":"甲科技","role_title":"AI Agent工程师","city":"成都",
+    {"source_url":"fixture://jobs/a1","document_kind":"job_detail","job_id":"a1","company":"甲科技","role_title":"AI Agent工程师","city":"成都",
      "graduation_year":"2027","recruitment_type":"autumn_campus","job_description":"负责 Agent 编排与评测",
      "requirements":"熟悉 Python；掌握 RAG","requirements_normalized":["Python","RAG"],"degree_requirement":"本科"},
-    {"source_url":"fixture://jobs/b1","job_id":"b1","company":"乙科技","role_title":"LLM应用开发工程师","city":"成都",
+    {"source_url":"fixture://jobs/b1","document_kind":"job_detail","job_id":"b1","company":"乙科技","role_title":"LLM应用开发工程师","city":"成都",
      "graduation_year":"2027","recruitment_type":"autumn_campus","job_description":"负责 LLM 应用与工具调用",
      "requirements":"熟悉 Python；了解 LangGraph","requirements_normalized":["Python","LangGraph"],"degree_requirement":"本科"},
-    {"source_url":"fixture://jobs/a2","job_id":"a2","company":"甲科技","role_title":"智能体研发工程师","city":"成都",
+    {"source_url":"fixture://jobs/a2","document_kind":"job_detail","job_id":"a2","company":"甲科技","role_title":"智能体研发工程师","city":"成都",
      "graduation_year":"2027","recruitment_type":"autumn_campus","job_description":"负责多轮智能体系统",
      "requirements":"熟悉 Python；了解评测","requirements_normalized":["Python","评测"],"degree_requirement":"硕士"},
 ]
 
 OFFICIAL = [
-    {**JOBS[0], "source_url":"fixture://official/a1", "application_url":"https://careers.example/a1"},
-    {**JOBS[1], "source_url":"fixture://official/b1", "application_url":"https://careers.example/b1"},
-    {**JOBS[2], "source_url":"fixture://official/a2", "application_url":"https://careers.example/a2"},
+    {**JOBS[0], "source_url":"fixture://official/a1", "document_kind":"official_job_detail", "application_url":"https://careers.example/a1"},
+    {**JOBS[1], "source_url":"fixture://official/b1", "document_kind":"official_job_detail", "application_url":"https://careers.example/b1"},
+    {**JOBS[2], "source_url":"fixture://official/a2", "document_kind":"official_job_detail", "application_url":"https://careers.example/a2"},
 ]
 
 EXPERIENCES = [
-    {"source_url":"fixture://experience/1","title":"甲科技 AI Agent 一面","company":"甲科技","role_title":"AI Agent工程师",
+    {"source_url":"fixture://experience/1","document_kind":"experience_post","title":"甲科技 AI Agent 一面","company":"甲科技","role_title":"AI Agent工程师",
      "role_family":"ai_agent_engineering","scope_level":"company_role","stage":"first_interview",
      "signals":{"interview":["追问 Agent bad case 与评测"],"tech_stack":["Python"]}},
-    {"source_url":"fixture://experience/2","title":"乙科技 LLM 应用面经","company":"乙科技","role_title":"LLM应用开发工程师",
+    {"source_url":"fixture://experience/2","document_kind":"experience_post","title":"乙科技 LLM 应用面经","company":"乙科技","role_title":"LLM应用开发工程师",
      "role_family":"ai_agent_engineering","scope_level":"company_role","stage":"first_interview",
      "signals":{"interview":["追问 RAG 召回评估"],"project_preference":["关注项目职责"]}},
 ]
@@ -76,6 +76,25 @@ def test_full_fixture_graph_completes_with_auditable_profiles(tmp_path):
     assert result["next_action"] == "complete"
     assert len(result["job_cluster_ids"]) == 3
     assert len(result["job_instance_profile_snapshot_ids"]) == 3
+    assert len(result["role_family_membership_ids"]) == 3
+    assert len(result["role_detail_evidence_receipt_ids"]) == 3
+    assert len(result["eligible_job_cluster_ids"]) == 3
+    assert len(result["experience_scope_link_ids"]) == 2
+    schemas = __import__("campus_job_agent.schemas", fromlist=[
+        "RoleFamilyMembership", "RoleDetailEvidenceReceipt", "ExperienceScopeLink",
+    ])
+    assert all(
+        role.get(value, schemas.RoleFamilyMembership).status == "accepted"
+        for value in result["role_family_membership_ids"]
+    )
+    assert all(
+        role.get(value, schemas.RoleDetailEvidenceReceipt).status == "eligible"
+        for value in result["role_detail_evidence_receipt_ids"]
+    )
+    assert all(
+        role.get(value, schemas.ExperienceScopeLink).status == "confirmed"
+        for value in result["experience_scope_link_ids"]
+    )
     assert len(result["official_status_by_cluster"]) == 3
     assert all(role.get(value, __import__("campus_job_agent.schemas", fromlist=["JobIdentityLink"]).JobIdentityLink).status == "confirmed"
                for value in result["job_identity_link_ids"])
@@ -88,13 +107,26 @@ def test_full_fixture_graph_completes_with_auditable_profiles(tmp_path):
     assert all(receipt["archived_count"] == receipt["received_count"] for receipt in result["source_run_receipts"] if receipt["status"] == "completed")
 
 
-def test_duplicate_graph_invoke_reuses_batches_and_snapshots(tmp_path):
+def test_duplicate_graph_invoke_reuses_batches_and_gate_records(tmp_path):
     runtime, evidence, role, registry, adapters = _build(tmp_path, InMemorySaver())
     first = runtime.invoke(_state(adapters, "idempotent-thread"))
     batch_count = len(role.list("source_batch", __import__("campus_job_agent.schemas", fromlist=["SourceBatch"]).SourceBatch))
-    second = runtime.get_state("idempotent-thread").values
-    assert second["role_family_profile_snapshot_id"] == first["role_family_profile_snapshot_id"]
+    schemas = __import__("campus_job_agent.schemas", fromlist=[
+        "RoleFamilyMembership", "RoleDetailEvidenceReceipt", "ExperienceScopeLink",
+    ])
+    gate_counts = (
+        len(role.list("role_family_membership", schemas.RoleFamilyMembership)),
+        len(role.list("role_detail_evidence", schemas.RoleDetailEvidenceReceipt)),
+        len(role.list("experience_scope_link", schemas.ExperienceScopeLink)),
+    )
+    second = runtime.invoke(_state(adapters, "idempotent-replay-thread"))
+    assert first["status"] == second["status"] == "completed"
     assert len(role.list("source_batch", __import__("campus_job_agent.schemas", fromlist=["SourceBatch"]).SourceBatch)) == batch_count
+    assert (
+        len(role.list("role_family_membership", schemas.RoleFamilyMembership)),
+        len(role.list("role_detail_evidence", schemas.RoleDetailEvidenceReceipt)),
+        len(role.list("experience_scope_link", schemas.ExperienceScopeLink)),
+    ) == gate_counts
 
 
 def test_auth_interrupt_authorized_resume_and_credential_redaction(tmp_path):
@@ -155,6 +187,62 @@ def test_budget_termination_is_explicit_unknowns(tmp_path):
     assert result["next_action"] == "finalize_with_unknowns"
 
 
+def test_search_page_without_detail_does_not_project_role_profile(tmp_path):
+    runtime, evidence, role, registry, adapters = _build(tmp_path, InMemorySaver())
+    adapters.get("fixture_jobs").fixture_pages = {
+        "first": [{**item, "document_kind": "search_page"} for item in JOBS]
+    }
+    adapters.get("official_careers").fixture_pages = {"first": []}
+    state = _state(adapters, "search-only-thread")
+    state["budgets"] = RoleSearchBudget(
+        max_query_rounds=1,
+        max_queries=3,
+        max_documents=20,
+        max_tool_calls=80,
+    ).model_dump()
+
+    result = runtime.invoke(state)
+
+    schemas = __import__("campus_job_agent.schemas", fromlist=["RoleDetailEvidenceReceipt"])
+    receipts = [
+        role.get(value, schemas.RoleDetailEvidenceReceipt)
+        for value in result["role_detail_evidence_receipt_ids"]
+    ]
+    assert len(receipts) == 3
+    assert all(item.status == "missing" for item in receipts)
+    assert result["eligible_job_cluster_ids"] == []
+    assert result["job_instance_profile_snapshot_ids"] == []
+
+
+def test_cross_family_search_noise_is_rejected_before_clustering(tmp_path):
+    runtime, evidence, role, registry, adapters = _build(tmp_path, InMemorySaver())
+    adapters.get("fixture_jobs").fixture_pages = {
+        "first": [
+            *JOBS,
+            {
+                **JOBS[0],
+                "source_url": "fixture://jobs/frontend-noise",
+                "job_id": "frontend-noise",
+                "company": "丙科技",
+                "role_title": "前端开发工程师",
+            },
+        ],
+    }
+
+    result = runtime.invoke(_state(adapters, "cross-family-thread"))
+
+    schemas = __import__("campus_job_agent.schemas", fromlist=["RoleFamilyMembership"])
+    memberships = [
+        role.get(value, schemas.RoleFamilyMembership)
+        for value in result["role_family_membership_ids"]
+    ]
+    rejected = [item for item in memberships if item.status == "rejected"]
+    assert len(rejected) == 1
+    assert rejected[0].primary_role_family == "frontend_engineering"
+    assert len(result["job_cluster_ids"]) == 3
+    assert len(result["job_instance_profile_snapshot_ids"]) == 3
+
+
 def test_run_exports_replayable_source_handoff_files(tmp_path):
     runtime, evidence, role, registry, adapters = _build(tmp_path, InMemorySaver())
     state = _state(adapters, "export-thread")
@@ -163,8 +251,9 @@ def test_run_exports_replayable_source_handoff_files(tmp_path):
     output = tmp_path / "run-output"
     assert result["status"] == "completed"
     for name in ["search_scope.json", "user_needs.md", "query_history.jsonl", "source_receipts.jsonl",
-                 "source_index.jsonl", "jobs_normalized.jsonl", "official_verifications.jsonl",
-                 "job_identity_links.jsonl", "field_resolutions.jsonl", "experience_normalized.jsonl",
+                 "source_index.jsonl", "jobs_normalized.jsonl", "role_family_memberships.jsonl",
+                 "official_verifications.jsonl", "job_identity_links.jsonl", "role_detail_evidence.jsonl",
+                 "field_resolutions.jsonl", "experience_normalized.jsonl", "experience_scope_links.jsonl",
                  "role_profile_report.md"]:
         assert (output / name).is_file()
 

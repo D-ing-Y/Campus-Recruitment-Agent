@@ -30,6 +30,16 @@ class IntentConstraint(BaseModel):
     source_ref: str | None = None
 
 
+class RoleTargetBinding(BaseModel):
+    """Stable one-to-one binding between a user-facing role and its family."""
+
+    model_config = ConfigDict(frozen=True)
+    binding_id: str
+    target_role: str = Field(min_length=1)
+    role_family: str = Field(min_length=1)
+    mapping_policy_version: str = "role_family_mapping_v2"
+
+
 class IntentValueCandidate(BaseModel):
     """One model-proposed value with an exact raw-evidence reference."""
 
@@ -86,12 +96,20 @@ class CareerIntentDraft(BaseModel):
     user_id: str
     target_roles: list[str] = Field(min_length=1)
     target_role_families: list[str] = Field(min_length=1)
+    role_target_bindings: list[RoleTargetBinding] = Field(default_factory=list)
     constraints: list[IntentConstraint] = Field(default_factory=list)
     raw_artifact_ids: list[str] = Field(min_length=1)
     source_fragment_ids: list[str] = Field(min_length=1)
     unresolved_fields: list[str] = Field(default_factory=list)
     validation_issues: list[str] = Field(default_factory=list)
     revision: int = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def validate_role_target_bindings(self) -> "CareerIntentDraft":
+        _validate_role_target_bindings(
+            self.target_roles, self.target_role_families, self.role_target_bindings,
+        )
+        return self
 
 
 class IntentRevisionPatch(BaseModel):
@@ -162,6 +180,7 @@ class IntentConfirmationRecord(BaseModel):
     status: Literal["confirmed", "revised", "cancelled", "needs_confirmation"]
     snapshot_id: str | None = None
     search_scope_id: str | None = None
+    search_scope_ids: list[str] = Field(default_factory=list)
 
 
 class CareerIntent(BaseModel):
@@ -169,6 +188,7 @@ class CareerIntent(BaseModel):
     schema_version: str = "v0.3"
     target_roles: list[str] = Field(default_factory=list)
     target_role_families: list[str] = Field(default_factory=list)
+    role_target_bindings: list[RoleTargetBinding] = Field(default_factory=list)
     locations: list[str] = Field(default_factory=list)
     graduation_year: str = "unknown"
     recruitment_type: str = "unknown"
@@ -193,6 +213,9 @@ class CareerIntent(BaseModel):
 
     @model_validator(mode="after")
     def validate_v071_canonical_projection(self) -> "CareerIntent":
+        _validate_role_target_bindings(
+            self.target_roles, self.target_role_families, self.role_target_bindings,
+        )
         if self.schema_version != "v0.7.1" or not self.confirmed:
             return self
         if any(item.status != "confirmed" for item in self.constraints):
@@ -211,6 +234,26 @@ class CareerIntent(BaseModel):
         if not self.raw_artifact_ids or not self.source_fragment_ids:
             raise ValueError("confirmed v0.7.1 intent requires raw evidence refs")
         return self
+
+
+def _validate_role_target_bindings(
+    target_roles: list[str],
+    target_role_families: list[str],
+    bindings: list[RoleTargetBinding],
+) -> None:
+    # Empty bindings are the explicit legacy-read boundary.  Once bindings are
+    # present they become canonical and must not drift from the compatibility
+    # lists.
+    if not bindings:
+        return
+    bound_roles = [item.target_role for item in bindings]
+    if len(bound_roles) != len(set(bound_roles)):
+        raise ValueError("target role has multiple primary family bindings")
+    if set(bound_roles) != set(target_roles):
+        raise ValueError("role target bindings drift from target roles")
+    bound_families = {item.role_family for item in bindings}
+    if bound_families != set(target_role_families):
+        raise ValueError("role target bindings drift from target role families")
 
 
 def project_constraint_fields(constraints: list[IntentConstraint]) -> dict[str, Any]:
@@ -242,13 +285,36 @@ def project_constraint_fields(constraints: list[IntentConstraint]) -> dict[str, 
 
 def role_family_for_query(value: str) -> str:
     normalized = value.casefold()
-    if any(marker in normalized for marker in ("agent", "智能体", "langgraph", "llm应用")):
+    if any(marker in normalized for marker in (
+        "agent", "智能体", "langgraph", "llm应用", "llm 应用", "大模型应用", "ai应用", "ai 应用",
+    )):
         return "ai_agent_engineering"
+    if any(marker in normalized for marker in ("前端", "frontend", "web前端", "web 前端")):
+        return "frontend_engineering"
+    if any(marker in normalized for marker in ("后端", "backend", "服务端", "server-side", "server side")):
+        return "backend_engineering"
+    if any(marker in normalized for marker in (
+        "算法", "algorithm", "机器学习", "machine learning", "深度学习", "computer vision", "nlp",
+    )):
+        return "algorithm_engineering"
     slug = re.sub(r"[^a-z0-9]+", "_", normalized).strip("_")
     if slug:
         return slug
     digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
     return f"role_family_{digest}"
+
+
+def role_target_bindings_for_roles(roles: list[str]) -> list[RoleTargetBinding]:
+    result: list[RoleTargetBinding] = []
+    for role in roles:
+        normalized = " ".join(role.split())
+        family = role_family_for_query(normalized)
+        result.append(RoleTargetBinding(
+            binding_id=stable_intent_id("role-target", [normalized, family, "role_family_mapping_v2"]),
+            target_role=normalized,
+            role_family=family,
+        ))
+    return result
 
 
 def stable_intent_id(prefix: str, payload: Any) -> str:

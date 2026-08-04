@@ -27,6 +27,7 @@ from campus_job_agent.schemas import (
     SearchScope,
     SourceDocument,
 )
+from campus_job_agent.schemas.intent import role_family_for_query
 from campus_job_agent.schemas.source import canonical_hash, normalize_text
 from campus_job_agent.storage.base import BlobStore, EvidenceRepository
 
@@ -100,11 +101,12 @@ def normalize_job_document(
         if not isinstance(raw, dict):
             continue
         source_url = str(raw.get("source_url") or document.source_url)
+        role_title = str(raw.get("role_title") or raw.get("title") or "unknown")
         job = NormalizedJobPosting(
             job_posting_id=str(uuid5(NAMESPACE_URL, f"normalized-job:{document.source_id}:{source_url}:{document.content_hash}:{index}")),
             job_id=_optional_string(raw.get("job_id")), company=str(raw.get("company") or "unknown"),
-            company_type=str(raw.get("company_type") or "unknown"), role_title=str(raw.get("role_title") or raw.get("title") or "unknown"),
-            role_family=str(raw.get("role_family") or scope.target_role_family), city=str(raw.get("city") or "unknown"),
+            company_type=str(raw.get("company_type") or "unknown"), role_title=role_title,
+            role_family=str(raw.get("role_family") or role_family_for_query(role_title)), city=str(raw.get("city") or "unknown"),
             work_location_detail=_optional_string(raw.get("work_location_detail")), salary_min=_optional_number(raw.get("salary_min")),
             salary_max=_optional_number(raw.get("salary_max")), salary_unit=_optional_string(raw.get("salary_unit")),
             salary_source=str(raw.get("salary_source") or ("official" if document.channel == "employer_official" else "third_party_only" if raw.get("salary_min") is not None else "unknown")),

@@ -12,6 +12,12 @@ from campus_job_agent.sources.adapters import (
 )
 from campus_job_agent.sources.credential_store import LocalCredentialStore
 from campus_job_agent.sources.repository import SQLiteRoleRepository
+from campus_job_agent.sources.role_gates import (
+    assess_role_detail_evidence,
+    classify_role_family,
+    experience_link_applies,
+    link_experience_scope,
+)
 
 __all__ = [
     "FixtureExperienceAdapter",
@@ -24,4 +30,8 @@ __all__ = [
     "ZhaopinJobsAdapter",
     "LocalCredentialStore",
     "SQLiteRoleRepository",
+    "assess_role_detail_evidence",
+    "classify_role_family",
+    "experience_link_applies",
+    "link_experience_scope",
 ]

@@ -12,8 +12,9 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
 from campus_job_agent.schemas import (
-    ExperienceEvidenceRecord, FieldResolution, JobIdentityLink, JobPostingCluster,
-    NormalizedJobPosting, OfficialVerificationPlan, RoleCoverageAssessment,
+    ExperienceEvidenceRecord, ExperienceScopeLink, FieldResolution, JobIdentityLink,
+    JobPostingCluster, NormalizedJobPosting, OfficialVerificationPlan,
+    RoleCoverageAssessment, RoleDetailEvidenceReceipt, RoleFamilyMembership,
     RoleProfileGraphState, RoleSearchBudget, RoleSearchCounter, SearchScope,
     SourceBatch, SourceDocument, SourceQuery,
 )
@@ -82,7 +83,9 @@ def create_role_profile_state(*, thread_id: str, user_id: str,
         "pending_auth_source_id": None, "credential_refs": {}, "source_batch_ids": [],
         "source_run_receipts": [], "raw_artifact_ids": [], "extraction_ids": [], "fragment_ids": [],
         "normalized_job_ids": [], "experience_record_ids": [], "job_cluster_ids": [],
+        "role_family_membership_ids": [], "experience_scope_link_ids": [],
         "official_verification_plan_ids": [], "job_identity_link_ids": [], "field_resolution_ids": [],
+        "role_detail_evidence_receipt_ids": [], "eligible_job_cluster_ids": [],
         "official_status_by_cluster": {}, "claim_ids": [], "job_instance_profile_snapshot_ids": [],
         "role_family_profile_snapshot_id": None, "coverage_assessment": None, "coverage_gaps": [],
         "next_action": None, "pending_interaction": None, "resume_input": None,
@@ -101,9 +104,10 @@ def build_role_profile_graph(*, registry: ToolRegistry, evidence_repository: Evi
     graph = StateGraph(RoleProfileGraphState)
     for name in [
         "initialize_role_run", "plan_role_queries", "collect_and_archive_sources",
-        "extract_and_normalize_sources", "deduplicate_source_records",
+        "extract_and_normalize_sources", "classify_role_family_membership",
+        "deduplicate_source_records", "link_experience_scopes",
         "plan_official_verification", "collect_and_archive_official_sources",
-        "link_official_job_records", "resolve_job_field_conflicts",
+        "link_official_job_records", "assess_role_detail_evidence", "resolve_job_field_conflicts",
         "extract_and_validate_role_claims", "project_job_instance_profiles",
         "aggregate_role_family_profile", "assess_role_coverage", "route_role_next_action",
         "plan_source_auth", "interrupt_for_source_auth", "validate_source_authorization",
@@ -111,9 +115,10 @@ def build_role_profile_graph(*, registry: ToolRegistry, evidence_repository: Evi
     ]: graph.add_node(name, getattr(nodes, name))
     chain = [
         "initialize_role_run", "plan_role_queries", "collect_and_archive_sources",
-        "extract_and_normalize_sources", "deduplicate_source_records",
+        "extract_and_normalize_sources", "classify_role_family_membership",
+        "deduplicate_source_records", "link_experience_scopes",
         "plan_official_verification", "collect_and_archive_official_sources",
-        "link_official_job_records", "resolve_job_field_conflicts",
+        "link_official_job_records", "assess_role_detail_evidence", "resolve_job_field_conflicts",
         "extract_and_validate_role_claims", "project_job_instance_profiles",
         "aggregate_role_family_profile", "assess_role_coverage", "route_role_next_action",
     ]
@@ -224,25 +229,96 @@ class _RoleNodes:
     def extract_and_normalize_sources(self, state: RoleProfileGraphState) -> dict[str, Any]:
         return self._extract_and_normalize(state, channels={"recruitment_discovery", "experience"}, node="extract_and_normalize_sources")
 
+    def classify_role_family_membership(self, state: RoleProfileGraphState) -> dict[str, Any]:
+        counters = RoleSearchCounter.model_validate(state["counters"])
+        result = self.registry.run("source.classify_role_family", {
+            "search_scope": state["search_scope"],
+            "job_ids": state.get("normalized_job_ids", []),
+        })
+        counters = counters.model_copy(update={"tool_calls": counters.tool_calls + 1})
+        update: dict[str, Any] = {
+            "counters": counters.model_dump(),
+            "tool_results": [result.model_dump(mode="json")],
+            "trace": [_trace("classify_role_family_membership", counters, memberships=len(result.evidence_ids))],
+        }
+        if result.status == "success":
+            update["role_family_membership_ids"] = result.evidence_ids
+        else:
+            update["errors"] = [_tool_error("classify_role_family_membership", result)]
+        return update
+
     def deduplicate_source_records(self, state: RoleProfileGraphState) -> dict[str, Any]:
         counters = RoleSearchCounter.model_validate(state["counters"])
         planned_channels = {item.get("channel") for item in (state.get("query_plan") or {}).get("queries", [])}
         if state.get("job_cluster_ids") and "recruitment_discovery" not in planned_channels:
             return {"trace": [_trace("deduplicate_source_records", counters, reused=True)]}
-        jobs = [item for item in self.role_repository.list("normalized_job", NormalizedJobPosting) if item.source_type != "employer_official"]
-        result = self.registry.run("source.deduplicate_jobs", {"job_ids": [item.job_posting_id for item in jobs]})
+        memberships = [
+            self.role_repository.get(value, RoleFamilyMembership)
+            for value in state.get("role_family_membership_ids", [])
+        ]
+        accepted_job_ids = {
+            item.job_posting_id for item in memberships
+            if item is not None and item.status == "accepted"
+        }
+        job_result = self.registry.run("source.deduplicate_jobs", {
+            "job_ids": [
+                value for value in state.get("normalized_job_ids", [])
+                if value in accepted_job_ids
+            ],
+        })
+        experience_result = self.registry.run("source.deduplicate_experience", {
+            "experience_ids": state.get("experience_record_ids", []),
+        })
+        counters = counters.model_copy(update={"tool_calls": counters.tool_calls + 2})
+        results = [job_result.model_dump(mode="json"), experience_result.model_dump(mode="json")]
+        errors = []
+        if job_result.status == "failed":
+            errors.append(_tool_error("deduplicate_source_records", job_result))
+        if experience_result.status == "failed":
+            errors.append(_tool_error("deduplicate_source_records", experience_result))
+        clusters = job_result.records[0]["clusters"] if job_result.status == "success" and job_result.records else []
+        return {
+            "job_cluster_ids": [item["cluster_id"] for item in clusters],
+            "experience_record_ids": experience_result.evidence_ids if experience_result.status == "success" else [],
+            "tool_results": results, "errors": errors,
+            "counters": counters.model_dump(),
+            "trace": [_trace(
+                "deduplicate_source_records", counters, clusters=len(clusters),
+                rejected_memberships=sum(item is not None and item.status != "accepted" for item in memberships),
+            )],
+        }
+
+    def link_experience_scopes(self, state: RoleProfileGraphState) -> dict[str, Any]:
+        counters = RoleSearchCounter.model_validate(state["counters"])
+        result = self.registry.run("source.link_experience_scopes", {
+            "search_scope": state["search_scope"],
+            "experience_ids": state.get("experience_record_ids", []),
+            "cluster_ids": state.get("job_cluster_ids", []),
+        })
         counters = counters.model_copy(update={"tool_calls": counters.tool_calls + 1})
-        if result.status == "failed": return {"errors": [_tool_error("deduplicate_source_records", result)], "tool_results": [result.model_dump(mode="json")], "counters": counters.model_dump()}
-        clusters = result.records[0]["clusters"]
-        return {"job_cluster_ids": [item["cluster_id"] for item in clusters], "tool_results": [result.model_dump(mode="json")],
-                "counters": counters.model_dump(), "trace": [_trace("deduplicate_source_records", counters, clusters=len(clusters))]}
+        update: dict[str, Any] = {
+            "counters": counters.model_dump(),
+            "tool_results": [result.model_dump(mode="json")],
+            "trace": [_trace("link_experience_scopes", counters, links=len(result.evidence_ids))],
+        }
+        if result.status == "success":
+            update["experience_scope_link_ids"] = result.evidence_ids
+        else:
+            update["errors"] = [_tool_error("link_experience_scopes", result)]
+        return update
 
     def plan_official_verification(self, state: RoleProfileGraphState) -> dict[str, Any]:
         counters = RoleSearchCounter.model_validate(state["counters"]); budgets = RoleSearchBudget.model_validate(state["budgets"])
-        existing = {item.job_cluster_id for item in self.role_repository.list("official_plan", OfficialVerificationPlan)}
+        existing = {
+            item.job_cluster_id: item.verification_plan_id
+            for item in self.role_repository.list("official_plan", OfficialVerificationPlan)
+        }
         ids, results, errors = [], [], []
         for cluster_id in state.get("job_cluster_ids", []):
-            if cluster_id in existing or counters.official_verifications >= budgets.max_official_verifications: continue
+            if cluster_id in existing:
+                ids.append(existing[cluster_id])
+                continue
+            if counters.official_verifications >= budgets.max_official_verifications: continue
             result = self.registry.run("source.plan_official_verification", {"cluster_id": cluster_id, "company_domains": state.get("official_domains", {})})
             counters = counters.model_copy(update={"tool_calls": counters.tool_calls + 1, "official_verifications": counters.official_verifications + 1})
             results.append(result.model_dump(mode="json"))
@@ -315,18 +391,72 @@ class _RoleNodes:
         return {"job_identity_link_ids": ids, "counters": counters.model_dump(), "tool_results": results,
                 "errors": errors, "trace": [_trace("link_official_job_records", counters, links=len(ids))]}
 
+    def assess_role_detail_evidence(self, state: RoleProfileGraphState) -> dict[str, Any]:
+        counters = RoleSearchCounter.model_validate(state["counters"])
+        receipt_ids: list[str] = []
+        eligible: list[str] = []
+        results: list[dict[str, Any]] = []
+        errors: list[dict[str, Any]] = []
+        scope = SearchScope.model_validate(state["search_scope"])
+        for cluster_id in state.get("job_cluster_ids", []):
+            result = self.registry.run("source.assess_role_detail_evidence", {
+                "scope_id": scope.scope_id,
+                "cluster_id": cluster_id,
+                "identity_link_ids": state.get("job_identity_link_ids", []),
+            })
+            counters = counters.model_copy(update={"tool_calls": counters.tool_calls + 1})
+            results.append(result.model_dump(mode="json"))
+            if result.status != "success":
+                errors.append(_tool_error("assess_role_detail_evidence", result))
+                continue
+            receipt_ids.extend(result.evidence_ids)
+            receipt = self.role_repository.get(result.evidence_ids[0], RoleDetailEvidenceReceipt)
+            if receipt is not None and receipt.status == "eligible":
+                eligible.append(cluster_id)
+        return {
+            "role_detail_evidence_receipt_ids": receipt_ids,
+            "eligible_job_cluster_ids": eligible,
+            "counters": counters.model_dump(), "tool_results": results, "errors": errors,
+            "trace": [_trace(
+                "assess_role_detail_evidence", counters,
+                eligible=len(eligible), rejected=len(state.get("job_cluster_ids", [])) - len(eligible),
+            )],
+        }
+
     def resolve_job_field_conflicts(self, state: RoleProfileGraphState) -> dict[str, Any]:
         counters = RoleSearchCounter.model_validate(state["counters"])
         if state.get("field_resolution_ids"):
             return {"trace": [_trace("resolve_job_field_conflicts", counters, reused=True)]}
-        all_jobs = self.role_repository.list("normalized_job", NormalizedJobPosting)
-        claim_result = self.registry.run("evidence.extract_role_claims", {"owner_id": state["user_id"], "job_ids": [item.job_posting_id for item in all_jobs]})
+        eligible_clusters = {
+            value: self.role_repository.get(value, JobPostingCluster)
+            for value in state.get("eligible_job_cluster_ids", [])
+        }
+        eligible_job_ids = {
+            job_id
+            for cluster in eligible_clusters.values() if cluster is not None
+            for job_id in cluster.member_job_posting_ids
+        }
+        links = [
+            self.role_repository.get(value, JobIdentityLink)
+            for value in state.get("job_identity_link_ids", [])
+        ]
+        eligible_job_ids.update(
+            item.official_job_posting_id
+            for item in links
+            if item is not None
+            and item.job_cluster_id in eligible_clusters
+            and item.status == "confirmed"
+            and item.official_job_posting_id
+        )
+        claim_result = self.registry.run("evidence.extract_role_claims", {
+            "owner_id": state["user_id"], "job_ids": sorted(eligible_job_ids),
+        })
         counters = counters.model_copy(update={"tool_calls": counters.tool_calls + 1}); claim_ids = list(claim_result.evidence_ids)
         resolution_ids, results, errors = [], [claim_result.model_dump(mode="json")], []
         if claim_result.status == "failed": errors.append(_tool_error("resolve_job_field_conflicts", claim_result))
         for link_id in state.get("job_identity_link_ids", []):
             link = self.role_repository.get(link_id, JobIdentityLink)
-            if link is None: continue
+            if link is None or link.job_cluster_id not in eligible_clusters: continue
             cluster = self.role_repository.get(link.job_cluster_id, JobPostingCluster)
             relevant_subjects = {f"job:{value}" for value in (cluster.member_job_posting_ids if cluster else [])}
             if link.official_job_posting_id: relevant_subjects.add(f"job:{link.official_job_posting_id}")
@@ -351,10 +481,12 @@ class _RoleNodes:
 
     def project_job_instance_profiles(self, state: RoleProfileGraphState) -> dict[str, Any]:
         counters = RoleSearchCounter.model_validate(state["counters"]); ids, results, errors = [], [], []
-        for cluster_id in state.get("job_cluster_ids", []):
+        for cluster_id in state.get("eligible_job_cluster_ids", []):
             result = self.registry.run("profile.project_job_instance", {"cluster_id": cluster_id, "claim_ids": state.get("claim_ids", []),
                                                                          "identity_link_ids": state.get("job_identity_link_ids", []),
-                                                                         "field_resolution_ids": state.get("field_resolution_ids", [])})
+                                                                         "field_resolution_ids": state.get("field_resolution_ids", []),
+                                                                         "detail_evidence_receipt_ids": state.get("role_detail_evidence_receipt_ids", []),
+                                                                         "experience_scope_link_ids": state.get("experience_scope_link_ids", [])})
             counters = counters.model_copy(update={"tool_calls": counters.tool_calls + 1}); results.append(result.model_dump(mode="json"))
             if result.status == "success": ids.extend(result.evidence_ids)
             else: errors.append(_tool_error("project_job_instance_profiles", result))
@@ -375,10 +507,25 @@ class _RoleNodes:
     def assess_role_coverage(self, state: RoleProfileGraphState) -> dict[str, Any]:
         scope = SearchScope.model_validate(state["search_scope"])
         snapshot = self.profile_repository.get_profile(state.get("role_family_profile_snapshot_id", "")) if state.get("role_family_profile_snapshot_id") else None
-        jobs = [item for item in self.role_repository.list("normalized_job", NormalizedJobPosting) if item.source_type != "employer_official" and item.status != "excluded_hard_scope"]
+        eligible_clusters = [
+            self.role_repository.get(value, JobPostingCluster)
+            for value in state.get("eligible_job_cluster_ids", [])
+        ]
+        eligible_job_ids = {
+            item.canonical_job_posting_id for item in eligible_clusters if item is not None
+        }
+        jobs = [
+            self.role_repository.get(value, NormalizedJobPosting)
+            for value in eligible_job_ids
+        ]
+        confirmed_experience = [
+            self.role_repository.get(value, ExperienceScopeLink)
+            for value in state.get("experience_scope_link_ids", [])
+        ]
         links = [self.role_repository.get(value, JobIdentityLink) for value in state.get("job_identity_link_ids", [])]
-        eval_args = dict(scope=scope, family_profile=snapshot.profile_data if snapshot else None, job_count=len(state.get("job_cluster_ids", [])),
-                         company_count=len({item.company for item in jobs}), experience_count=len(state.get("experience_record_ids", [])),
+        eval_args = dict(scope=scope, family_profile=snapshot.profile_data if snapshot else None, job_count=len(eligible_job_ids),
+                         company_count=len({item.company for item in jobs if item is not None}),
+                         experience_count=sum(item is not None and item.status == "confirmed" for item in confirmed_experience),
                          official_status_count=len(state.get("official_status_by_cluster", {})),
                          ambiguous_identity_count=sum(item is not None and item.status == "identity_ambiguous" for item in links),
                          has_next_cursor=bool(state.get("next_cursors")), auth_source_id=state.get("pending_auth_source_id"))
@@ -503,10 +650,13 @@ def _export_run(root: Path, state: RoleProfileGraphState, repository: SQLiteRole
         "source_receipts.jsonl": state.get("source_run_receipts", []),
         "source_index.jsonl": [item.model_dump(mode="json") for item in repository.list("source_document", SourceDocument)],
         "jobs_normalized.jsonl": [item.model_dump(mode="json") for item in repository.list("normalized_job", NormalizedJobPosting)],
+        "role_family_memberships.jsonl": [item.model_dump(mode="json") for item in repository.list("role_family_membership", RoleFamilyMembership)],
         "official_verifications.jsonl": [item.model_dump(mode="json") for item in repository.list("official_plan", OfficialVerificationPlan)],
         "job_identity_links.jsonl": [item.model_dump(mode="json") for item in repository.list("identity_link", JobIdentityLink)],
+        "role_detail_evidence.jsonl": [item.model_dump(mode="json") for item in repository.list("role_detail_evidence", RoleDetailEvidenceReceipt)],
         "field_resolutions.jsonl": [item.model_dump(mode="json") for item in repository.list("field_resolution", FieldResolution)],
         "experience_normalized.jsonl": [item.model_dump(mode="json") for item in repository.list("experience", ExperienceEvidenceRecord)],
+        "experience_scope_links.jsonl": [item.model_dump(mode="json") for item in repository.list("experience_scope_link", ExperienceScopeLink)],
     }
     for name, rows in collections.items():
         (root / name).write_text("".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in rows), encoding="utf-8")

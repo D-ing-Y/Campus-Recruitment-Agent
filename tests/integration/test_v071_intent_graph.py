@@ -128,3 +128,43 @@ def test_graph_rejects_registered_ref_when_profile_owner_is_inconsistent(
         runtime.application_services["intent"].create(
             session_id=session.session_id, raw_text=RAW_INTENT,
         )
+
+
+def test_confirmed_multi_family_intent_emits_independent_scopes_and_handoffs(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    runtime, session = _runtime_with_candidate(tmp_path, monkeypatch, owner="multi-owner")
+    created = runtime.application_services["intent"].create(
+        session_id=session.session_id,
+        raw_text="我想找 Agent 开发和后端开发，2027 年毕业，参加秋招",
+    )
+    request = created["pending_request"]
+
+    completed = runtime.application_services["intent"].resume(
+        session_id=session.session_id,
+        response=IntentReviewResponse(
+            response_id="response-multi-family",
+            request_id=request["request_id"],
+            thread_id=created["thread_id"],
+            user_id=session.user_id,
+            action="confirm",
+        ),
+    )
+
+    assert completed["status"] == "completed"
+    refs = completed["output_refs"]
+    assert refs["search_scope_id"] is None
+    assert refs["handoff_id"] is None
+    assert len(refs["search_scope_ids"]) == 2
+    assert len(refs["handoff_ids"]) == 2
+    scopes = [
+        runtime.intent_repository.get(scope_id, __import__(
+            "campus_job_agent.schemas", fromlist=["SearchScope"],
+        ).SearchScope)
+        for scope_id in refs["search_scope_ids"]
+    ]
+    assert {item.target_role_family for item in scopes} == {
+        "ai_agent_engineering",
+        "backend_engineering",
+    }
+    assert all(len(item.target_role_queries) == 1 for item in scopes)

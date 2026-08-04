@@ -26,7 +26,11 @@ class RoleSearchBudget(BaseModel):
     max_official_verifications: int = Field(default=20, ge=0)
     max_documents: int = Field(default=60, ge=1)
     max_llm_calls: int = Field(default=20, ge=0)
-    max_tool_calls: int = Field(default=50, ge=1)
+    # WP3's family-membership, experience-scope and detail-evidence gates are
+    # deterministic tool calls too.  A complete authenticated fixture run now
+    # needs 58 calls, so keep the default above that valid baseline while
+    # preserving the same hard-budget behaviour for explicitly smaller limits.
+    max_tool_calls: int = Field(default=80, ge=1)
 
 
 class RoleSearchCounter(BaseModel):
@@ -110,10 +114,14 @@ class RoleProfileGraphState(TypedDict, total=False):
     extraction_ids: Annotated[list[str], stable_union]
     fragment_ids: Annotated[list[str], stable_union]
     normalized_job_ids: Annotated[list[str], stable_union]
+    role_family_membership_ids: Annotated[list[str], stable_union]
     experience_record_ids: Annotated[list[str], stable_union]
     job_cluster_ids: Annotated[list[str], stable_union]
+    experience_scope_link_ids: Annotated[list[str], stable_union]
     official_verification_plan_ids: Annotated[list[str], stable_union]
     job_identity_link_ids: Annotated[list[str], stable_union]
+    role_detail_evidence_receipt_ids: Annotated[list[str], stable_union]
+    eligible_job_cluster_ids: Annotated[list[str], stable_union]
     field_resolution_ids: Annotated[list[str], stable_union]
     official_status_by_cluster: dict[str, str]
     claim_ids: Annotated[list[str], stable_union]

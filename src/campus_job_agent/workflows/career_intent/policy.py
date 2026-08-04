@@ -13,6 +13,7 @@ from campus_job_agent.schemas import (
     IntentRevisionPatch,
     project_constraint_fields,
     role_family_for_query,
+    role_target_bindings_for_roles,
     stable_intent_id,
 )
 
@@ -79,11 +80,13 @@ def validate_candidate(
         "artifact_id": artifact_id,
         "fragment_id": fragment_id,
     }
+    bindings = role_target_bindings_for_roles(roles)
     return CareerIntentDraft(
         draft_id=stable_intent_id("intent-draft", draft_payload),
         user_id=user_id,
         target_roles=roles,
-        target_role_families=list(dict.fromkeys(role_family_for_query(value) for value in roles)),
+        target_role_families=list(dict.fromkeys(item.role_family for item in bindings)),
+        role_target_bindings=bindings,
         constraints=constraints,
         raw_artifact_ids=[artifact_id],
         source_fragment_ids=[fragment_id],
@@ -156,11 +159,13 @@ def apply_revision(
         "constraints": [item.model_dump(mode="json") for item in constraints],
         "revision": draft.revision + 1,
     }
+    bindings = role_target_bindings_for_roles(roles or ["unknown"])
     return CareerIntentDraft(
         draft_id=stable_intent_id("intent-draft", draft_payload),
         user_id=draft.user_id,
         target_roles=roles or ["unknown"],
-        target_role_families=list(dict.fromkeys(role_family_for_query(value) for value in (roles or ["unknown"]))),
+        target_role_families=list(dict.fromkeys(item.role_family for item in bindings)),
+        role_target_bindings=bindings,
         constraints=constraints,
         raw_artifact_ids=draft.raw_artifact_ids,
         source_fragment_ids=list(dict.fromkeys([*draft.source_fragment_ids, response_fragment_id])),
@@ -182,6 +187,7 @@ def publish_intent(
         schema_version="v0.7.1",
         target_roles=draft.target_roles,
         target_role_families=draft.target_role_families,
+        role_target_bindings=draft.role_target_bindings or role_target_bindings_for_roles(draft.target_roles),
         constraints=confirmed,
         confirmed=True,
         previous_snapshot_id=previous_snapshot_id,

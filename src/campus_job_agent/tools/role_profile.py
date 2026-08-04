@@ -5,8 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 from campus_job_agent.schemas import (
-    ExperienceEvidenceRecord, FieldResolution, JobIdentityLink, JobPostingCluster,
-    NormalizedJobPosting, OfficialVerificationPlan, SearchScope, SourceDocument,
+    ExperienceEvidenceRecord, ExperienceScopeLink, FieldResolution, JobIdentityLink,
+    JobPostingCluster, NormalizedJobPosting, OfficialVerificationPlan,
+    RoleDetailEvidenceReceipt, RoleFamilyMembership, SearchScope, SourceDocument,
     SourceQuery, SourceRunReceipt, ToolResult,
 )
 from campus_job_agent.sources.adapters import SourceAdapterRegistry
@@ -17,6 +18,10 @@ from campus_job_agent.sources.processing import (
     parse_official_document, plan_official_verification,
 )
 from campus_job_agent.sources.repository import SQLiteRoleRepository
+from campus_job_agent.sources.role_gates import (
+    assess_role_detail_evidence, classify_role_family, experience_link_applies,
+    link_experience_scope,
+)
 from campus_job_agent.sources.role_pipeline import (
     RoleProfileProjector, extract_experience_claims, extract_recruitment_claims,
     resolve_fields,
@@ -150,6 +155,34 @@ class NormalizeExperienceTool:
             return _fail(self.name, str(exc), "normalization_error")
 
 
+class ClassifyRoleFamilyTool:
+    name = "source.classify_role_family"
+
+    def __init__(self, role_repository: SQLiteRoleRepository) -> None:
+        self.role_repository = role_repository
+
+    def run(self, args: dict[str, Any]) -> ToolResult:
+        try:
+            scope = SearchScope.model_validate(args["search_scope"])
+            memberships = []
+            for job_id in args.get("job_ids", []):
+                job = self.role_repository.get(str(job_id), NormalizedJobPosting)
+                if job is None or job.source_type == "employer_official":
+                    continue
+                item = classify_role_family(job, scope)
+                memberships.append(self.role_repository.save(
+                    "role_family_membership", item,
+                    idempotency_key=f"role-family-membership:{item.membership_id}",
+                ))
+            return _ok(
+                self.name,
+                [item.model_dump(mode="json") for item in memberships],
+                [item.membership_id for item in memberships],
+            )
+        except Exception as exc:
+            return _fail(self.name, str(exc), "role_family_classification_error")
+
+
 class DeduplicateJobsTool:
     name = "source.deduplicate_jobs"
     def __init__(self, role_repository: SQLiteRoleRepository) -> None: self.role_repository = role_repository
@@ -167,6 +200,47 @@ class DeduplicateExperienceTool:
         records = [self.role_repository.get(value, ExperienceEvidenceRecord) for value in args.get("experience_ids", [])]
         unique = deduplicate_experience([item for item in records if item is not None])
         return _ok(self.name, [item.model_dump(mode="json") for item in unique], [item.experience_record_id for item in unique])
+
+
+class LinkExperienceScopesTool:
+    name = "source.link_experience_scopes"
+
+    def __init__(self, role_repository: SQLiteRoleRepository) -> None:
+        self.role_repository = role_repository
+
+    def run(self, args: dict[str, Any]) -> ToolResult:
+        try:
+            scope = SearchScope.model_validate(args["search_scope"])
+            records = [
+                self.role_repository.get(str(value), ExperienceEvidenceRecord)
+                for value in args.get("experience_ids", [])
+            ]
+            clusters = [
+                self.role_repository.get(str(value), JobPostingCluster)
+                for value in args.get("cluster_ids", [])
+            ]
+            jobs = {
+                item.job_posting_id: item
+                for item in self.role_repository.list("normalized_job", NormalizedJobPosting)
+            }
+            links = []
+            for record in records:
+                if record is None:
+                    continue
+                link = link_experience_scope(
+                    record, scope, [item for item in clusters if item is not None], jobs,
+                )
+                links.append(self.role_repository.save(
+                    "experience_scope_link", link,
+                    idempotency_key=f"experience-scope-link:{link.experience_scope_link_id}",
+                ))
+            return _ok(
+                self.name,
+                [item.model_dump(mode="json") for item in links],
+                [item.experience_scope_link_id for item in links],
+            )
+        except Exception as exc:
+            return _fail(self.name, str(exc), "experience_scope_link_error")
 
 
 class PlanOfficialVerificationTool:
@@ -197,6 +271,51 @@ class LinkJobIdentityTool:
             saved = self.role_repository.save("identity_link", link, idempotency_key=f"identity-link:{link.job_identity_link_id}")
             return _ok(self.name, [saved.model_dump(mode="json")], [saved.job_identity_link_id])
         except Exception as exc: return _fail(self.name, str(exc), "identity_ambiguous")
+
+
+class AssessRoleDetailEvidenceTool:
+    name = "source.assess_role_detail_evidence"
+
+    def __init__(self, evidence_repository: EvidenceRepository, role_repository: SQLiteRoleRepository) -> None:
+        self.evidence_repository = evidence_repository
+        self.role_repository = role_repository
+
+    def run(self, args: dict[str, Any]) -> ToolResult:
+        try:
+            cluster = self.role_repository.get(str(args["cluster_id"]), JobPostingCluster)
+            if cluster is None:
+                raise ValueError("job cluster not found")
+            relevant_job_ids = set(cluster.member_job_posting_ids)
+            links = [
+                self.role_repository.get(str(value), JobIdentityLink)
+                for value in args.get("identity_link_ids", [])
+            ]
+            relevant_job_ids.update(
+                item.official_job_posting_id
+                for item in links
+                if item is not None
+                and item.job_cluster_id == cluster.cluster_id
+                and item.status == "confirmed"
+                and item.official_job_posting_id
+            )
+            jobs = [
+                self.role_repository.get(value, NormalizedJobPosting)
+                for value in relevant_job_ids
+            ]
+            receipt = assess_role_detail_evidence(
+                scope_id=str(args["scope_id"]),
+                cluster=cluster,
+                jobs=[item for item in jobs if item is not None],
+                documents=self.role_repository.list("source_document", SourceDocument),
+                repository=self.evidence_repository,
+            )
+            saved = self.role_repository.save(
+                "role_detail_evidence", receipt,
+                idempotency_key=f"role-detail-evidence:{receipt.receipt_id}",
+            )
+            return _ok(self.name, [saved.model_dump(mode="json")], [saved.receipt_id])
+        except Exception as exc:
+            return _fail(self.name, str(exc), "detail_evidence_gate_error")
 
 
 class ExtractRoleClaimsTool:
@@ -240,6 +359,15 @@ class ProjectJobInstanceTool:
     def run(self, args: dict[str, Any]) -> ToolResult:
         cluster = self.role_repository.get(str(args["cluster_id"]), JobPostingCluster)
         if cluster is None: return _fail(self.name, "job cluster not found", "validation_error")
+        detail_receipts = [
+            self.role_repository.get(value, RoleDetailEvidenceReceipt)
+            for value in args.get("detail_evidence_receipt_ids", [])
+        ]
+        if not any(
+            item is not None and item.job_cluster_id == cluster.cluster_id and item.status == "eligible"
+            for item in detail_receipts
+        ):
+            return _fail(self.name, "detail_evidence_missing", "detail_evidence_missing")
         jobs = [self.role_repository.get(value, NormalizedJobPosting) for value in cluster.member_job_posting_ids]
         claims = [self.evidence_repository.get_claim(value) for value in args.get("claim_ids", [])]
         links = [self.role_repository.get(value, JobIdentityLink) for value in args.get("identity_link_ids", [])]
@@ -250,17 +378,22 @@ class ProjectJobInstanceTool:
         relevant_job_ids.update(item.official_job_posting_id for item in relevant_links if item.official_job_posting_id)
         jobs = [self.role_repository.get(value, NormalizedJobPosting) for value in relevant_job_ids]
         canonical_job = next((item for item in jobs if item is not None and item.job_posting_id == cluster.canonical_job_posting_id), None)
+        scope_links = [
+            self.role_repository.get(value, ExperienceScopeLink)
+            for value in args.get("experience_scope_link_ids", [])
+        ]
+        links_by_record = {
+            item.experience_record_id: item for item in scope_links if item is not None
+        }
         experience_claims = []
         for item in claims:
             if item is None or not item.predicate.startswith("hiring_signal."):
                 continue
             value = item.value if isinstance(item.value, dict) else {}
-            scope_level = value.get("scope_level", "unknown")
-            if scope_level == "unknown":
-                continue
-            if scope_level in {"company_only", "company_role", "job_instance"} and value.get("company") and canonical_job and value.get("company") != canonical_job.company:
-                continue
-            if scope_level == "job_instance" and value.get("role_title") and canonical_job and value.get("role_title") != canonical_job.role_title:
+            scope_link = links_by_record.get(str(value.get("experience_record_id", "")))
+            if canonical_job is None or scope_link is None or not experience_link_applies(
+                scope_link, cluster_id=cluster.cluster_id, job=canonical_job,
+            ):
                 continue
             experience_claims.append(item)
         snapshot = self.projector.project_job_instance(
@@ -330,8 +463,10 @@ def build_role_profile_registry(*, blob_store: BlobStore, evidence_repository: E
         CollectSourceTool("source.discover_jobs", adapters, role_repository), CollectSourceTool("source.collect_experience", adapters, role_repository),
         VerifyOfficialTool(adapters, role_repository), ExtractSourceDocumentTool(blob_store, evidence_repository),
         NormalizeJobTool(evidence_repository, role_repository), NormalizeExperienceTool(evidence_repository, role_repository),
-        DeduplicateJobsTool(role_repository), DeduplicateExperienceTool(role_repository), PlanOfficialVerificationTool(role_repository),
-        LinkJobIdentityTool(role_repository), ExtractRoleClaimsTool(evidence_repository, role_repository), ResolveJobFieldsTool(evidence_repository, role_repository),
+        ClassifyRoleFamilyTool(role_repository), DeduplicateJobsTool(role_repository), DeduplicateExperienceTool(role_repository),
+        LinkExperienceScopesTool(role_repository), PlanOfficialVerificationTool(role_repository),
+        LinkJobIdentityTool(role_repository), AssessRoleDetailEvidenceTool(evidence_repository, role_repository),
+        ExtractRoleClaimsTool(evidence_repository, role_repository), ResolveJobFieldsTool(evidence_repository, role_repository),
         ProjectJobInstanceTool(evidence_repository, profile_repository, role_repository), AggregateRoleFamilyTool(profile_repository),
         ImportCredentialTool(credential_store), ValidateCredentialRefTool(credential_store),
     ]: registry.register(tool)

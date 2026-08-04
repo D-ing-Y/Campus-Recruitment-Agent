@@ -491,3 +491,25 @@ Next action:
   WP3 handoff。
 - Gate decision：WP1/WP2 revalidation Passed；下一工作包为 WP3 Role live source。WP3 尚未消费
   handoff，v0.7.1 整体仍为 In Progress，代码版本保持 0.7.0。
+
+## WP3 Role Hierarchy/Evidence Gates Preflight / 2026-08-03 / working tree（未提交）
+
+- Problem：多个 target role 被绑定到第一个 family；搜索噪声可继承 Scope family；search card
+  可绕过详情证据；经验内容靠字符串误挂具体 JD。
+- Doc-first：新增 Requirements、RFC-0014、ADR-0014、Contracts、Tasks、Eval Plan/Report 和 live
+  source support matrix。
+- Minimal implementation：新增 RoleTargetBinding、RoleFamilyMembership、RoleDetailEvidenceReceipt
+  和 ExperienceScopeLink；保留 JobInstanceRoleProfile → RoleFamilyProfile 两级结构，不引入图数据库、
+  向量聚类或通用规则引擎。
+- Multi-scope：CareerIntent 按 family 输出 plural Scope/Handoff，单 family 保留 singular 兼容；
+  Matching intent impact 按完整 scope set 计算，RebuildDirective 传递 `requested_scopes`。
+- Evidence gates：只有 accepted membership 进入 cluster；只有 `job_detail`/
+  `employer_job_detail`/`official_job_detail` Raw Artifact 可产生具体岗位画像；只有 confirmed
+  ExperienceScopeLink 可投影 HiringSignal。
+- Replay correction：新线程复用已存在 official verification plan 时会恢复 plan ID，避免
+  后续证据链因 State 缺失而降级。新门禁默认 tool budget 由 50 调整为 80，显式低预算仍按
+  hard limit 终止。
+- Verification：聚焦回归 43 passed；全量 `466 passed in 174.90s`；`compileall` 与
+  `git diff --check` 通过。
+- Boundary：现有 live HTTP adapters 只能证明 search/transport 代码存在，尚未完成并验收
+  recruitment detail、experience post detail 和 official detail kind。下一阶段仍是 WP3 live source。

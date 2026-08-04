@@ -309,6 +309,34 @@ class ExperienceEvidenceRecord(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class ExperienceScopeLink(BaseModel):
+    experience_scope_link_id: str
+    schema_version: Literal["v0.7.1"] = "v0.7.1"
+    scope_id: str
+    experience_record_id: str
+    scope_level: Literal["job_instance", "company_role", "role_family", "company_only", "unknown"]
+    role_family: str | None = None
+    company: str | None = None
+    job_cluster_id: str | None = None
+    status: Literal["confirmed", "ambiguous", "rejected"]
+    match_signals: dict[str, str] = Field(default_factory=dict)
+    supporting_fragment_ids: list[str] = Field(min_length=1)
+    reason_codes: list[str] = Field(min_length=1)
+    policy_version: str = "experience_scope_link_v1"
+
+    @model_validator(mode="after")
+    def confirmed_job_instance_requires_cluster(self) -> "ExperienceScopeLink":
+        if self.status != "confirmed":
+            return self
+        if not self.role_family:
+            raise ValueError("confirmed experience link requires a role family")
+        if self.scope_level == "job_instance" and not self.job_cluster_id:
+            raise ValueError("confirmed job-instance experience link requires a job cluster")
+        if self.scope_level in {"company_only", "company_role"} and not self.company:
+            raise ValueError("confirmed company experience link requires a company")
+        return self
+
+
 class JobPostingCluster(BaseModel):
     cluster_id: str = Field(default_factory=lambda: str(uuid4()))
     schema_version: Literal["v0.5"] = "v0.5"
