@@ -1,0 +1,254 @@
+# Role Demand and Reputation Contract
+
+状态：Ready for Implementation
+日期：2026-08-06
+
+## 1. 适用范围
+
+本 Contract 定义 WP3.1 新 run 的公司-岗位分组、社区证据分类、岗位需求画像、岗位/公司评价画像和统一读取包。
+原始 Artifact、Extraction、Fragment、RoleTargetBinding、RoleFamilyMembership 与 detail receipt 继续复用。
+
+## 2. CompanyRoleGroup
+
+```text
+CompanyRoleGroup
+  group_id
+  search_scope_id
+  company_key
+  company_display_name
+  company_aliases[]
+  role_family_id
+  job_instance_ids[]
+  exact_role_terms[]
+  status: active | insufficient_identity | excluded
+  created_at
+```
+
+Invariant：`job_instance_ids` 中每个岗位必须已经通过同一 SearchScope 的 family membership；
+company identity 不足时不得生成 community query。
+
+## 3. CommunitySearchPlan
+
+```text
+CommunitySearchPlan
+  plan_id
+  company_role_group_id
+  queries[]:
+    query_id
+    query_kind: company_exact_role | company_role_family |
+                company_reputation | generic_family_interview
+    query_text
+    intended_document_types[]
+    source_ids[]
+    search_budget
+    detail_budget
+    expansion_reason
+  status: planned | running | completed | partially_blocked | blocked
+```
+
+每个 query 具有独立预算和回执。`company_reputation` 的结果默认只有 company scope，不能自动绑定 job。
+
+## 4. CommunityEvidenceDocument
+
+```text
+CommunityEvidenceDocument
+  document_id
+  artifact_id
+  source_id
+  detail_url
+  retrieved_at
+  published_at?
+  author_fingerprint?
+  document_type: interview_experience | employment_experience | mixed | unknown
+  company_key?
+  role_family_id?
+  job_instance_id?
+  classification_receipt_id
+```
+
+search result/snippet 不能创建本对象；必须存在成功的社区 detail Raw Artifact。
+
+## 5. CommunityEvidenceSegment
+
+```text
+CommunityEvidenceSegment
+  segment_id
+  document_id
+  fragment_id
+  quote_start
+  quote_end
+  quote_hash
+  segment_type:
+    written_exam | interview_process | interview_question |
+    recruiter_feedback | project_preference |
+    work_intensity | management | team_atmosphere | compensation |
+    growth | stability | work_content | other_reputation | unknown
+  usage:
+    demand_assessment | reputation_job | reputation_company | excluded
+  company_key?
+  role_family_id?
+  job_instance_id?
+  scope_confidence
+  classification_confidence
+  validation_status: accepted | rejected | ambiguous
+  reason_codes[]
+```
+
+Usage allowlist：
+
+- written_exam、interview_process、interview_question、recruiter_feedback、project_preference
+  只允许 `demand_assessment`；
+- work_intensity、management、team_atmosphere、compensation、growth、stability、work_content、
+  other_reputation 只允许 reputation；
+- `reputation_job` 必须有经过验证的 job 或 company-role scope；
+- `reputation_company` 必须有经过验证的 company scope；
+- unknown、ambiguous 或缺少 quote 定位的 segment 必须 `excluded`。
+
+`mixed` 文档只有在拆出至少两个各自带 quote 的 segment 后，才允许同时贡献 Demand 与 Reputation。
+
+## 6. JobDemandProfile
+
+```text
+JobDemandProfile
+  profile_id
+  job_instance_id
+  company_key
+  role_family_id
+  search_scope_id
+  jd_requirements:
+    responsibilities[]
+    qualifications[]
+    capabilities[]
+    preferred_qualifications[]
+    work_context[]
+  assessment_signals[]:
+    topic
+    stage?
+    observation: observed | frequent | insufficient_sample | disputed
+    sample_count
+    independent_source_count
+    segment_ids[]
+  source_document_ids[]
+  official_escalation_receipt_id?
+  published_at
+```
+
+`jd_requirements` 只能引用 permitted recruitment/official detail document；`assessment_signals` 只能引用
+accepted demand_assessment segment。单篇面经不能发布为 frequent。
+
+## 7. RoleFamilyDemandProfile
+
+```text
+RoleFamilyDemandProfile
+  profile_id
+  role_family_id
+  search_scope_id
+  member_job_profile_ids[]
+  common_requirements[]
+  differentiating_requirements[]
+  assessment_signals[]
+  denominator:
+    accepted_job_count
+    accepted_interview_document_count
+  conflicts[]
+  published_at
+```
+
+JD requirement prevalence 和 interview signal frequency 使用独立分母。未通过 family membership 的岗位不得参与。
+
+## 8. ReputationDimension
+
+```text
+ReputationDimension
+  dimension
+  polarity: favorable | mixed | unfavorable | unknown
+  sample_status: insufficient_sample | observed | sufficient | disputed
+  sample_count
+  independent_source_count
+  role_distribution[]
+  earliest_published_at?
+  latest_published_at?
+  supporting_segment_ids[]
+  contradicting_segment_ids[]
+  limited_summary
+```
+
+`limited_summary` 不能覆盖计数、scope、时间或冲突。Contract 不提供 `overall_score`。
+
+## 9. JobReputationProfile 与 CompanyReputationProfile
+
+```text
+JobReputationProfile
+  profile_id
+  company_key
+  role_family_id
+  job_instance_ids[]
+  dimensions[]: ReputationDimension
+  source_document_ids[]
+  published_at
+
+CompanyReputationProfile
+  profile_id
+  company_key
+  covered_role_families[]
+  dimensions[]: ReputationDimension
+  source_document_ids[]
+  published_at
+```
+
+company-only segment 只能进入 CompanyReputationProfile。公司维度结论必须展示 role distribution，不能把
+某一个岗位的体验无条件外推为全公司事实。
+
+## 10. OfficialEscalationReceipt
+
+```text
+OfficialEscalationReceipt
+  receipt_id
+  job_instance_id
+  required: false
+  trigger: cross_platform_conflict | suspected_stale_or_closed |
+           missing_critical_fields | user_priority_request
+  status: not_requested | verified | unavailable | adapter_required | conflicting
+  official_document_ids[]
+  reason_codes[]
+  created_at
+```
+
+不存在 receipt 不阻止已通过 recruitment detail gate 的 Demand 发布。
+
+## 11. RoleIntelligenceBundle
+
+```text
+RoleIntelligenceBundle
+  bundle_id
+  search_scope_id
+  role_family_demand_profile_id
+  job_demand_profile_ids[]
+  job_reputation_profile_ids[]
+  company_reputation_profile_ids[]
+  raw_evidence_refs[]
+  missing_sections[]
+  created_at
+```
+
+Bundle 只是 typed references，不复制原文或合并成单一“总画像”。
+
+## 12. Consumer Allowlist
+
+- Matching/GapAssessment：JobDemandProfile、RoleFamilyDemandProfile 的 JD requirements；
+- Preparation：JD requirements 与 assessment_signals；
+- TargetDecision：Demand matching result 与 Reputation profiles；
+- Role Q&A：Bundle 全部 typed refs，但输出必须标识 `JD fact | interview signal | subjective reputation`。
+
+任何越界输入都返回 `evidence_usage_violation`，不得依赖 prompt 自律。
+
+## 13. 发布 Invariants
+
+1. search-only artifact 的投影数为 0；
+2. 所有 Demand requirement 都可追溯到 recruitment/official detail Fragment；
+3. 所有 assessment signal 都可追溯到 interview segment；
+4. 所有 Reputation dimension 都可追溯到 employment segment；
+5. interview -> Reputation 和 employment -> Demand 的泄漏数均为 0；
+6. unknown/ambiguous segment 的投影数为 0；
+7. 重复 detail、segment 或 response 不产生重复写入；
+8. 旧 Snapshot 只读，新对象不得回写旧 `hiring_signals`。

@@ -290,3 +290,11 @@ cancel
 - 所有对象使用 canonical payload + input/policy refs 生成稳定 key。
 - 相同 key 复用原对象；相同 ID 不同 payload 返回 idempotency conflict。
 - plan 只有在所有引用对象、DAG、package 和 schedule 验证通过后才可发布。
+
+## 12. WP3.1 输入边界
+
+- Preparation 可以消费 Demand requirements 和 interview assessment signals；
+- assessment signal 只能支持 written_exam/interview_practice 等准备目标，不能升级为 hard requirement；
+- work intensity、management、team atmosphere、compensation、growth、stability 和 work content 等
+  ReputationDimension 不得生成 PreparationObjective 或 Activity；
+- 任何 reputation segment ID 进入 PreparationInputSet 时返回 `evidence_usage_violation`。

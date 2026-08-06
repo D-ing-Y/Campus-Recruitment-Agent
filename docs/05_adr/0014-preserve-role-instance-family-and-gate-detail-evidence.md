@@ -2,11 +2,14 @@
 
 ## 状态
 
-Accepted
+Accepted / Amended by ADR-0015
 
 ## 日期
 
 2026-08-03
+
+2026-08-06 修订：两级岗位范围、family membership 和 detail gate 仍保留；新 run 不再将所有社区内容
+投影到统一 HiringSignal，也不再强制每个岗位经过官网确认。画像分流与来源优先级见 ADR-0015。
 
 ## 背景
 

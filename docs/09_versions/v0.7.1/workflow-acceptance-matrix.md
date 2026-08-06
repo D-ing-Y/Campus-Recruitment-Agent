@@ -1,7 +1,7 @@
 # v0.7.1 Workflow 验收矩阵
 
-状态：WP1/WP2 Passed；WP3 设计门禁补丁 Offline Passed；WP3 live source 未开始
-日期：2026-08-03
+状态：WP1/WP2 Passed；WP3 基础门禁 Offline Passed；WP3.1 设计修订 Ready for Implementation
+日期：2026-08-06
 
 状态枚举：`not_started | failing | blocked | partial | passed | not_applicable`。
 
@@ -175,6 +175,20 @@ WP2 已用新 CandidateSnapshot 重验；领域模型未重写，新的 create m
 
 补丁的详细数据见 `docs/07_evaluation/v0.7.1-wp3-role-hierarchy-evidence-gates-eval-report.md`。
 这里的 passed 是 contract/deterministic gate/offline replay，不表示 Role Workflow 已完成 live 验收。
+
+### 6.1 WP3.1 岗位需求与评价画像分流
+
+| Gate | 预期 | 状态 | 证据 |
+| --- | --- | --- | --- |
+| Design contract | 平台详情默认主路径、官网可选升级 | passed | RFC/ADR-0015、WP3.1 Requirements |
+| Community typing | interview/employment/mixed/unknown 与片段引用 | passed | `role-demand-reputation-contract.md` |
+| Consumer boundary | Matching/Preparation 不消费 Reputation | passed | Matching/Preparation contract amendment |
+| Recruitment live | search → platform detail Raw → Demand | not_started | live support matrix |
+| Community live | search → post detail Raw → typed segment | not_started | live support matrix |
+| Projection code | Demand/Reputation/Bundle 持久化与 Graph 接线 | not_started | WP3.1 implementation tasks |
+| WP3.1 Eval | 泄漏、追溯、幂等与 live 指标 | not_started | `v0.7.1-wp3.1-eval-plan.md` |
+
+本节 `passed` 仅代表文档契约已经接受，不代表对应代码或 live 数据源已完成。Role 总状态保持 partial。
 
 ## 7. WP3-WP7
 

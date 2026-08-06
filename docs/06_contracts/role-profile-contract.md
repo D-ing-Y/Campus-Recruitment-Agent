@@ -1,9 +1,13 @@
 # Role Profile Contract
 
-状态：v0.5 Accepted
-日期：2026-07-20
+状态：v0.5 Accepted / Compatibility Contract
+日期：2026-07-20（2026-08-06 修订）
 
 本契约定义具体岗位画像、岗位族画像、招聘要求、经验信号和覆盖度评价。所有事实字段必须引用已验证 Claim；所有岗位族统计必须保留样本与分母。
+
+> WP3.1：本文件中的 JobInstanceRoleProfile、RoleFamilyProfile 和 `hiring_signals` 保持历史只读兼容。
+> 新 run 使用 `role-demand-reputation-contract.md` 的 Job/Family Demand、Job/Company Reputation 和
+> RoleIntelligenceBundle。不得通过猜测把旧混合 `hiring_signals` 批量迁移为面经或在职评价。
 
 ## 1. Role Requirement
 

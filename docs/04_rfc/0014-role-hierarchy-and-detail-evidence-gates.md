@@ -1,8 +1,12 @@
 # RFC-0014：岗位层级归属与详情证据门禁
 
-状态：Accepted / Implemented Offline
+状态：Accepted / Implemented Offline / Amended by RFC-0015
 日期：2026-08-03
 关联需求：`docs/03_requirements/v0.7.1-wp3-role-hierarchy-evidence-gates.md`
+
+> 2026-08-06 修订：本 RFC 的多 SearchScope、岗位族归属、详情门禁和 scope link 继续有效；
+> “官网确认位于默认主路径”和“全部经验进入统一 HiringSignal”的后续解释由 RFC-0015 取代。
+> 新 run 以招聘平台岗位详情为默认 Demand 证据，并把面经与在职评价分流。
 
 ## 1. 决策摘要
 

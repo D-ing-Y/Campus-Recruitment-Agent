@@ -1,6 +1,6 @@
 # v0.7.1 执行日志
 
-状态：WP1.3.2 与 WP1/WP2 Revalidation Passed；WP3 未开始
+状态：WP1.3.2 与 WP1/WP2 Revalidation Passed；WP3.1 文档修订完成、实现未开始
 创建日期：2026-07-28
 
 本文件只记录实际执行事实，不记录计划性成功。每个工作包追加一节，保留失败、修复、命令、结果、
@@ -513,3 +513,25 @@ Next action:
   `git diff --check` 通过。
 - Boundary：现有 live HTTP adapters 只能证明 search/transport 代码存在，尚未完成并验收
   recruitment detail、experience post detail 和 official detail kind。下一阶段仍是 WP3 live source。
+
+## WP3.1 Demand/Reputation Design Correction / 2026-08-06 / working tree（未提交）
+
+- Problem：默认 Role 流程要求逐公司官网二次确认，adapter 成本随公司数增长；旧 HiringSignal 将
+  面经、薪资和在职体验混合，使能力 Gap、Preparation 与公司选择存在跨用途污染风险。
+- Product decision：招聘平台具体 job detail 作为 Demand 默认主证据；search card 仍不合格。
+  官网/官方 ATS 保留为跨平台冲突、疑似过期、关键字段缺失或用户明确要求时的可选 evidence escalation。
+- Topology：招聘岗位通过 CompanyRoleGroup 组织有界社区查询；社区 post detail 先归档，再分类为
+  interview/employment/mixed/unknown。mixed 按 quote Fragment 拆分 typed segments。
+- Projection：新增 JobDemand、RoleFamilyDemand、JobReputation、CompanyReputation 和
+  RoleIntelligenceBundle Contract；面经只进入 assessment signals，在职体验只进入 Reputation。
+- Consumer isolation：Matching 只读取 Demand requirements；Preparation 读取 requirements 和
+  assessment signals；TargetDecision/Role Q&A 才可读取 Reputation。
+- Scope control：为避免无必要代码扩张，保留 RoleProfileGraph 对外入口，后续只在内部增加分流阶段；
+  不建立公司知识图谱、不生成整体公司分数、不动态生成逐公司爬虫。
+- Documents：新增 WP3.1 Requirements/Tasks、RFC-0015、ADR-0015、Contract 与 Eval Plan；修订旧
+  RFC/ADR、Source/Role/Matching/Preparation contracts、support matrix、版本入口和验收矩阵。
+- Code changes：无。本节只形成 Ready for Implementation 的设计补丁。
+- Validation：仅执行文档一致性检查与 `git diff --check`；没有运行代码测试或 live source。
+- Gate decision：document design accepted；WP3.1 implementation/live 仍为 not_started。
+- Next action：先实现 recruitment search -> platform detail Raw -> Demand，再实现 community
+  search -> post detail Raw -> typed segment -> Demand/Reputation，最后按触发条件补 official escalation。

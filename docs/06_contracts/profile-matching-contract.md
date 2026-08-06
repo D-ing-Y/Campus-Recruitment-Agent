@@ -298,3 +298,12 @@ Validator 必须拒绝：
 - v0.3 GapAssessment 为 legacy read-only。
 - v0.6 实现不得把旧 `coverage_score` 无损等同为新 coverage；缺少 breakdown 时必须重新计算。
 - 任何 comparator、weight、ontology 或 ranking 语义变化都提升 policy version。
+
+## 11. WP3.1 输入边界
+
+- 新 run 的 role input 使用 JobDemandProfile/RoleFamilyDemandProfile 中的 qualification 和 requirement；
+- JobReputationProfile、CompanyReputationProfile 与 interview assessment signal 不得产生 Qualification、
+  Requirement、GapType、coverage 或 ranking weight；
+- 发现 reputation/assessment segment ID 进入 MatchingInputSet 时返回 `evidence_usage_violation`；
+- 旧 RoleProfileSnapshot 继续可读，重新匹配时应由显式兼容 adapter 只选择旧 requirement/qualification，
+  不得把 salary/work_context 等旧混合 HiringSignal 当作能力要求。

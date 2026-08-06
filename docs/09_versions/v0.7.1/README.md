@@ -1,6 +1,6 @@
 # v0.7.1 版本入口：子 Workflow 纵向闭环与 CLI 加固
 
-状态：Implementation In Progress（WP1.3.2 与 WP1/WP2 重验通过；下一工作包 WP3）
+状态：Implementation In Progress（WP1/WP2 通过；WP3.1 设计修订 Ready for Implementation）
 路线确认日期：2026-07-28  
 代码版本：仍为 0.7.0；完成实现、测试和 Eval 后才升级 0.7.1
 
@@ -44,6 +44,12 @@ v0.7.1 的唯一目标是把现有 v0.3-v0.7 能力从“独立子图与离线�
 - WP2 文档包：`docs/03_requirements/v0.7.1-wp2-career-intent-intake.md`、RFC-0010、ADR-0010 与
   `docs/06_contracts/career-intent-contract.md`
 - WP2 Eval report：`docs/07_evaluation/v0.7.1-wp2-eval-report.md`
+- WP3 基础门禁：Requirements、RFC-0014、ADR-0014 与
+  `docs/07_evaluation/v0.7.1-wp3-role-hierarchy-evidence-gates-eval-report.md`
+- WP3.1 Demand/Reputation 分流：`docs/03_requirements/v0.7.1-wp3.1-role-demand-and-reputation-profiles.md`、
+  RFC-0015、ADR-0015、`docs/06_contracts/role-demand-reputation-contract.md`、
+  `docs/03_requirements/v0.7.1-wp3.1-implementation-tasks.md` 与
+  `docs/07_evaluation/v0.7.1-wp3.1-eval-plan.md`
 - 实际 Eval report：实现完成后新增 `docs/07_evaluation/v0.7.1-eval-report.md`
 - 验收矩阵：`docs/09_versions/v0.7.1/workflow-acceptance-matrix.md`
 - 执行日志：`docs/09_versions/v0.7.1/execution-log.md`
@@ -60,7 +66,7 @@ v0.7.1 的唯一目标是把现有 v0.3-v0.7 能力从“独立子图与离线�
 | WP1.1 | LangChain Model/Tool/MCP 接入层规范化 | WP1 真实失败已定位 | 标准 provider/tool/MCP 协议与策略可诊断 |
 | WP1.3 | ResumeEvidence 与 CandidateProfile 解耦 | WP1.2 历史验收完成 | confirmed ResumeEvidence typed handoff 与人工审核 |
 | WP2 | CareerIntent 首次采集/确认/snapshot | Candidate 可用 | Passed；已产生 WP3 typed handoff |
-| WP3 | Role 非本地 JD 真实来源 | Intent 已确认 | search→detail raw→official status→Profile 或诚实阻塞 |
+| WP3 | Role 非本地岗位与社区来源 | Intent 已确认 | 平台 detail→Demand；社区 detail→typed Demand/Reputation；官网按需升级 |
 | WP4 | Matching + TargetDecision | Candidate/Intent/Role current | 四类 Gap、解释、决策和 handoff 通过 |
 | WP5 | Constraints + Preparation | selected decision | 最小包、排期和 review 可恢复 |
 | WP6 | Feedback + HandoffDispatcher | accepted/current plan | raw-first、归因、successor、rematch/replan 通过 |
@@ -75,10 +81,12 @@ v0.7.1 的唯一目标是把现有 v0.3-v0.7 能力从“独立子图与离线�
 2. WP1.3 已将 PDF 转录与画像分析拆图；WP1.3.2 进一步隔离旧 Resume/legacy model Claim，保留
    conversation/feedback overlay。真实 CandidateSnapshot 与 WP2 typed-input 重验均已通过。
 3. CareerIntent 已有首次生产入口；PreparationConstraints 仍没有首次生产入口。
-4. Role live 必须要求真实 detail raw，搜索页不能冒充详情。
-5. Matching/Preparation/Feedback 存在名义节点与真实业务边界不一致的问题。
-6. Feedback 只有 Candidate 特例 saga，缺少通用 typed dispatcher。
-7. Role 至 Feedback 子图仍需逐工作包接入统一节点日志、运行产物和 inspect。
+4. Role live 必须要求真实 detail raw，搜索页不能冒充详情；招聘平台 job detail 可默认发布 Demand，
+   官网只在冲突、过期、字段缺失或用户要求时升级。
+5. 社区内容尚未实现 interview/employment typed segment 分流，旧混合 HiringSignal 只作兼容读取。
+6. Matching/Preparation/Feedback 存在名义节点与真实业务边界不一致的问题。
+7. Feedback 只有 Candidate 特例 saga，缺少通用 typed dispatcher。
+8. Role 至 Feedback 子图仍需逐工作包接入统一节点日志、运行产物和 inspect。
 
 ## 5. 版本里程碑
 
@@ -127,5 +135,6 @@ v0.7.1 的唯一目标是把现有 v0.3-v0.7 能力从“独立子图与离线�
 
 ## 7. 下一步
 
-WP1.3.2 已完成 Claim 生命周期、增量投影、真实 Candidate 重建与 WP2 重验。下一步是 WP3
-Role live source；仍不实现 v1.0 Parent Graph，也不把 WP3 typed handoff 的产生表述为已消费。
+WP1.3.2 已完成 Claim 生命周期、增量投影、真实 Candidate 重建与 WP2 重验。下一步按 WP3.1
+先实现招聘平台 detail→Demand，再实现社区 detail→typed segment→Demand/Reputation；官方来源只做
+条件升级。仍不实现 v1.0 Parent Graph，也不把文档完成或 WP3 typed handoff 的产生表述为已消费。

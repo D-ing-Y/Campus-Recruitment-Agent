@@ -1,11 +1,21 @@
 # Source Collection Contract
 
-状态：v0.5 Accepted
-日期：2026-07-20
+状态：v0.5 Accepted / Amended for v0.7.1 WP3.1
+日期：2026-07-20（2026-08-06 修订）
 
 本契约定义第三方招聘发现、企业官网核验与社区经验来源的查询、采集、原始归档、
 归一化、身份链接、字段消解、去重和运行记录。三类来源共享 transport/归档基础设施，
 但不得共享业务输出 schema。
+
+## WP3.1 修订说明
+
+- 招聘平台的具体 `job_detail` 是 Demand Profile 默认充分证据；search page/card 仍只做 discovery。
+- `employer_official` 保留为关键冲突、疑似过期、字段缺失或用户指定时的可选证据升级，不再是每个
+  Role run 的强制步骤。
+- `experience` channel 的旧统一输出只做兼容读取；新 run 必须先进入 community post detail，再按
+  `role-demand-reputation-contract.md` 分类为 interview/employment typed segments。
+- 下文“第三方 + 官网”处理链只在创建 OfficialVerificationPlan 时执行；没有升级计划时，招聘平台
+  detail Claims 可直接在来源限制内进行 Demand projection。
 
 ## 1. Source Channel 与 Authority
 

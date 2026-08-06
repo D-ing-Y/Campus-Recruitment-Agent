@@ -48,10 +48,10 @@ raw-before-interpret，再分离 observation、diagnosis 和 impact。无解释�
 单次反馈不改岗位族；跨域变化通过 typed directive 和后继 snapshot refs 恢复。实现任务与实际
 指标见 `docs/03_requirements/v0.7-implementation-tasks.md` 和 `docs/07_evaluation/v0.7-eval-report.md`。
 
-v0.7.1 文档路线已确认，状态为 Ready for Implementation。该版本按 CLI/Run 基座、Candidate、
-CareerIntent、Role、Matching、Preparation、Feedback 和 typed handoff 的顺序逐个完成九层纵向
-验收。版本入口见 `docs/09_versions/v0.7.1/README.md`；完成代码、真实 smoke 和 Eval report 前
-不得标记 Implemented。
+v0.7.1 正在实施。WP1/WP2 已通过；WP3.1 已完成文档修订，将 Role 情报分为 Demand 和
+Job/Company Reputation，以招聘平台详情作为默认 Demand 证据、官网作为可选升级，并把面经与
+在职体验按 typed segment 分流。代码、真实 detail smoke 和 Eval 尚未开始。版本入口见
+`docs/09_versions/v0.7.1/README.md`；未完成对应实现与真实验收前不得标记 Implemented。
 
 ## Codex 协作边界
 

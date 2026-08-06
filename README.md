@@ -28,7 +28,8 @@ v0.7 准备计划与反馈闭环已于 2026-07-27 完成实现与验收，当前
 Claim/Impact/Directive，并以本地 saga 验证 feedback→snapshot→rematch→replan 版本链。
 
 v0.7.1“子 Workflow 纵向闭环与 CLI 加固”正在分工作包实施，WP0、WP1、WP1.1、WP1.3.2 与
-WP2 重验已通过，下一阶段为 WP3 Role live source；代码版本仍为 `0.7.0`，只在全部
+WP2 重验已通过；WP3.1 已完成岗位需求/评价画像分流的文档设计，代码和 live source 尚未开始。
+代码版本仍为 `0.7.0`，只在全部
 WP0-WP7 验收后升级。正式 CLI、RunSession、Candidate 和 CareerIntent 纵向闭环及相邻 typed
 handoff 已接入。版本入口见 `docs/09_versions/v0.7.1/README.md`。v0.7.1 不实现 v1.0 Parent Graph。
 
@@ -88,6 +89,10 @@ v0.5 已按最新来源验证架构完成离线实现与验收：
   同域预算和运行时禁止执行 LLM 生成代码均已有测试覆盖。
 - 72 项 v0.5 schema、adapter、raw-before-parse、官网核验、authority、画像聚合、路由、
   auth resume、SQLite checkpoint 和 Eval 测试。
+
+v0.7.1 WP3.1 将上述 v0.5 来源路径作为历史兼容：招聘平台具体 job detail 默认支撑 Demand，官网
+改为冲突/过期/缺字段/用户指定时的可选升级；社区详情拆为面经 assessment signals 和在职体验
+Reputation，避免 Matching 与 Preparation 消费主观风评。新设计见 RFC/ADR-0015。
 
 v0.6 已实现：
 
