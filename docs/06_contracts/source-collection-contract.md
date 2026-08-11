@@ -102,13 +102,21 @@ authority 是字段级策略，不是来源的单一总分。同一来源可对�
   "supports_location": true,
   "supports_company": false,
   "supports_pagination": true,
+  "supports_detail_fetch": true,
   "requires_auth": false,
+  "authorization_mode": "none",
   "live_enabled": false,
   "rate_limit_per_minute": 6
 }
 ```
 
 capability 由 adapter 声明，QueryPlanner 不得生成 source 不支持的过滤条件。
+`supports_detail_fetch=false` 的来源若收到详情请求，必须返回 `unsupported_input`，不得把搜索页
+改标成详情页。
+
+`authorization_mode` 取值为 `credential_ref | external_session | none`。`credential_ref` 来源只在
+Graph 保存本地凭据引用；`external_session` 来源通过 health/auth status 验证外部浏览器会话，不向
+Graph 返回 Cookie。历史对象缺少该字段时由 `requires_auth` 推导：true 为 credential_ref，false 为 none。
 
 ## 4. SourceQuery 与 RoleQueryPlan
 
@@ -132,6 +140,15 @@ capability 由 adapter 声明，QueryPlanner 不得生成 source 不支持的过
 }
 ```
 
+### 4.1 外部详情定位
+
+`SourceDetailRequest` 可携带 `external_locator_ref`。该字段必须是不含 Cookie、token、签名参数和正文
+的 opaque ref；详情 ID/传输参数只能在 Sidecar 本地候选缓存中解析。canonical URL 可用于跨轮去重，
+但不得把 xsec_token 等敏感查询参数写入 checkpoint、日志、报告或 Git。
+
+小红书来源成功响应仍必须先逐字节归档为 Raw Artifact，再生成 `experience_search` 或
+`experience_post`。搜索响应不得生成 Segment。
+
 `change_reason`：
 
 ```text
@@ -145,6 +162,51 @@ source_fallback
 ```
 
 fingerprint 由规范化 channel/source/keywords/location/company/role family/year/type/cursor 计算。
+
+## 4.1 Search Candidate 与 SourceDetailRequest
+
+搜索页只允许生成发现候选，不允许生成画像事实：
+
+```text
+JobDetailCandidate
+  candidate_id
+  source_id / query_id
+  search_document_id / search_artifact_id / supporting_fragment_id
+  detail_url
+  platform_job_id?
+  company_hint? / role_title_hint?
+
+CommunityPostCandidate
+  candidate_id
+  source_id / query_id
+  search_document_id / search_artifact_id / supporting_fragment_id
+  detail_url
+  company_hint? / role_family_hint?
+  intended_document_types[]
+```
+
+候选必须通过应用生成的 `SourceDetailRequest` 才能进入详情采集：
+
+```json
+{
+  "detail_request_id": "detail-request:content-hash",
+  "schema_version": "v0.7.1",
+  "source_id": "zhaopin_jobs",
+  "channel": "recruitment_discovery",
+  "query_id": "query-1",
+  "candidate_id": "candidate-1",
+  "parent_document_id": "search-document-1",
+  "detail_url": "https://example.com/job/1",
+  "expected_document_kind": "job_detail",
+  "idempotency_key": "sha256"
+}
+```
+
+`detail_request_id` 与幂等键由 `source_id + channel + canonical detail URL + expected kind`
+计算。query/candidate 只保留 discovery provenance，不能使同一详情页被重复归档。
+
+来源适配器保留 `collect(query, credential_ref)`，并可独立实现
+`fetch_detail(request, credential_ref)`；详情能力缺失必须显式返回 `unsupported_input`。
 
 ```json
 {

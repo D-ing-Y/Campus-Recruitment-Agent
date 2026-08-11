@@ -5,17 +5,30 @@ from __future__ import annotations
 from typing import Any
 
 from campus_job_agent.schemas import (
-    ExperienceEvidenceRecord, ExperienceScopeLink, FieldResolution, JobIdentityLink,
+    CommunityEvidenceDocument, CommunityEvidenceSegment, CommunityExtractionBatch,
+    CommunityPostCandidate, CommunitySearchPlan, CompanyRoleGroup,
+    ExperienceEvidenceRecord, ExperienceScopeLink, FieldResolution, JobDemandProfile,
+    JobDetailCandidate, JobIdentityLink, JobReputationProfile,
     JobPostingCluster, NormalizedJobPosting, OfficialVerificationPlan,
-    RoleDetailEvidenceReceipt, RoleFamilyMembership, SearchScope, SourceDocument,
-    SourceQuery, SourceRunReceipt, ToolResult,
+    OfficialEscalationReceipt, RoleDetailEvidenceReceipt, RoleFamilyDemandProfile,
+    RoleFamilyMembership, RoleIntelligenceBundle, SearchScope, SourceDetailRequest,
+    SourceDocument, SourceQuery, SourceRunReceipt, ToolResult,
 )
 from campus_job_agent.sources.adapters import SourceAdapterRegistry
 from campus_job_agent.sources.credential_store import LocalCredentialStore
 from campus_job_agent.sources.processing import (
+    discover_community_post_candidates, discover_job_detail_candidates,
     deduplicate_experience, deduplicate_jobs, extract_archived_document,
     link_job_identity, normalize_experience_document, normalize_job_document,
     parse_official_document, plan_official_verification,
+)
+from campus_job_agent.sources.role_intelligence import (
+    CommunityEvidenceExtractor, build_community_search_plan,
+    build_company_role_groups, ensure_community_body_fragment,
+    materialize_community_evidence,
+)
+from campus_job_agent.sources.role_intelligence_projection import (
+    DemandReputationProjector, official_escalation_for_job,
 )
 from campus_job_agent.sources.repository import SQLiteRoleRepository
 from campus_job_agent.sources.role_gates import (
@@ -62,6 +75,135 @@ class CollectSourceTool:
                        [str(item.raw_artifact_id) for item in batch.documents if item.raw_artifact_id], idempotency_key=batch.idempotency_key)
         except Exception as exc:
             return _fail(self.name, str(exc), "storage_error", retryable=True)
+
+
+class FetchSourceDetailTool:
+    name = "source.fetch_detail"
+
+    def __init__(self, adapters: SourceAdapterRegistry, role_repository: SQLiteRoleRepository) -> None:
+        self.adapters, self.role_repository = adapters, role_repository
+
+    def run(self, args: dict[str, Any]) -> ToolResult:
+        try:
+            request = SourceDetailRequest.model_validate(args["request"])
+            adapter = self.adapters.get(request.source_id)
+            if adapter is None or not callable(getattr(adapter, "fetch_detail", None)):
+                return _fail(self.name, "detail adapter is unavailable", "unsupported_input")
+            batch = adapter.fetch_detail(request, args.get("credential_ref"))
+            receipt = _save_receipt(
+                self.role_repository, str(args["run_id"]), adapter, batch,
+                bool(args.get("credential_ref")),
+            )
+            self.role_repository.save(
+                "source_detail_request", request,
+                idempotency_key=f"source-detail-request:{request.idempotency_key}",
+            )
+            for document in batch.documents:
+                self.role_repository.save(
+                    "source_document", document,
+                    idempotency_key=f"source-document:{document.source_document_id}",
+                )
+            if batch.status not in {"success", "empty"}:
+                return _fail(
+                    self.name, batch.error_type or batch.status,
+                    batch.error_type or batch.status, retryable=batch.retryable,
+                    needs_user_action=batch.needs_user_action,
+                    records=[{"batch": batch.model_dump(mode="json"), "receipt": receipt.model_dump(mode="json")}],
+                    evidence_ids=[str(item.raw_artifact_id) for item in batch.documents if item.raw_artifact_id],
+                )
+            return _ok(
+                self.name,
+                [{"batch": batch.model_dump(mode="json"), "receipt": receipt.model_dump(mode="json")}],
+                [str(item.raw_artifact_id) for item in batch.documents if item.raw_artifact_id],
+                idempotency_key=batch.idempotency_key,
+            )
+        except ValueError as exc:
+            return _fail(self.name, str(exc), "unsupported_input")
+        except Exception as exc:
+            return _fail(self.name, str(exc), "storage_error", retryable=True)
+
+
+class ValidateExternalSessionTool:
+    name = "source.validate_external_session"
+
+    def __init__(self, adapters: SourceAdapterRegistry) -> None:
+        self.adapters = adapters
+
+    def run(self, args: dict[str, Any]) -> ToolResult:
+        source_id = str(args.get("source_id") or "")
+        adapter = self.adapters.get(source_id)
+        if adapter is None or adapter.capabilities.authorization_mode != "external_session":
+            return _fail(self.name, "external session adapter is unavailable", "unsupported_input")
+        status = str(adapter.authorization_status())
+        if status == "external_session_available":
+            return _ok(self.name, [], [], authorization_status=status)
+        return _fail(
+            self.name, status, status,
+            needs_user_action=status in {"authentication_required", "risk_controlled"},
+        )
+
+
+class DiscoverJobDetailCandidatesTool:
+    name = "source.discover_job_detail_candidates"
+
+    def __init__(self, evidence_repository: EvidenceRepository, role_repository: SQLiteRoleRepository) -> None:
+        self.evidence_repository, self.role_repository = evidence_repository, role_repository
+
+    def run(self, args: dict[str, Any]) -> ToolResult:
+        try:
+            candidates: list[JobDetailCandidate] = []
+            for document_id in args.get("source_document_ids", []):
+                document = self.role_repository.get(str(document_id), SourceDocument)
+                if document is None or not document.raw_artifact_id:
+                    continue
+                fragments = self.evidence_repository.list_fragments(document.raw_artifact_id)
+                for item in discover_job_detail_candidates(document, fragments):
+                    candidates.append(self.role_repository.save(
+                        "job_detail_candidate", item,
+                        idempotency_key=f"job-detail-candidate:{item.candidate_id}",
+                    ))
+            return _ok(
+                self.name, [item.model_dump(mode="json") for item in candidates],
+                [item.candidate_id for item in candidates],
+            )
+        except Exception as exc:
+            return _fail(self.name, str(exc), "normalization_error")
+
+
+class DiscoverCommunityPostCandidatesTool:
+    name = "source.discover_community_post_candidates"
+
+    def __init__(self, evidence_repository: EvidenceRepository, role_repository: SQLiteRoleRepository) -> None:
+        self.evidence_repository, self.role_repository = evidence_repository, role_repository
+
+    def run(self, args: dict[str, Any]) -> ToolResult:
+        try:
+            candidates: list[CommunityPostCandidate] = []
+            intended_by_query = dict(args.get("intended_by_query", {}))
+            group_by_query = dict(args.get("group_by_query", {}))
+            for document_id in args.get("source_document_ids", []):
+                document = self.role_repository.get(str(document_id), SourceDocument)
+                if document is None or not document.raw_artifact_id:
+                    continue
+                group = self.role_repository.get(str(group_by_query.get(document.query_id, "")), CompanyRoleGroup)
+                fragments = self.evidence_repository.list_fragments(document.raw_artifact_id)
+                values = discover_community_post_candidates(
+                    document, fragments,
+                    intended_document_types=list(intended_by_query.get(document.query_id, [])),
+                    company_hint=group.company_display_name if group else None,
+                    role_family_hint=group.role_family_id if group else None,
+                )
+                for item in values:
+                    candidates.append(self.role_repository.save(
+                        "community_post_candidate", item,
+                        idempotency_key=f"community-post-candidate:{item.candidate_id}",
+                    ))
+            return _ok(
+                self.name, [item.model_dump(mode="json") for item in candidates],
+                [item.candidate_id for item in candidates],
+            )
+        except Exception as exc:
+            return _fail(self.name, str(exc), "normalization_error")
 
 
 class VerifyOfficialTool:
@@ -416,6 +558,327 @@ class AggregateRoleFamilyTool:
         return _ok(self.name, [{"snapshot_id": snapshot.snapshot_id, "profile": snapshot.profile_data}], [snapshot.snapshot_id])
 
 
+class BuildCompanyRoleGroupsTool:
+    name = "role.build_company_role_groups"
+
+    def __init__(self, role_repository: SQLiteRoleRepository) -> None:
+        self.role_repository = role_repository
+
+    def run(self, args: dict[str, Any]) -> ToolResult:
+        try:
+            scope = SearchScope.model_validate(args["search_scope"])
+            clusters = [
+                self.role_repository.get(str(value), JobPostingCluster)
+                for value in args.get("cluster_ids", [])
+            ]
+            jobs = {
+                item.job_posting_id: item
+                for item in self.role_repository.list("normalized_job", NormalizedJobPosting)
+            }
+            groups = build_company_role_groups(
+                scope, [item for item in clusters if item is not None], jobs
+            )
+            saved = [
+                self.role_repository.save(
+                    "company_role_group", item,
+                    idempotency_key=f"company-role-group:{item.group_id}",
+                )
+                for item in groups
+            ]
+            return _ok(
+                self.name, [item.model_dump(mode="json") for item in saved],
+                [item.group_id for item in saved],
+            )
+        except Exception as exc:
+            return _fail(self.name, str(exc), "validation_error")
+
+
+class PlanCommunitySearchTool:
+    name = "role.plan_community_search"
+
+    def __init__(self, role_repository: SQLiteRoleRepository) -> None:
+        self.role_repository = role_repository
+
+    def run(self, args: dict[str, Any]) -> ToolResult:
+        try:
+            plans: list[CommunitySearchPlan] = []
+            for group_id in args.get("group_ids", []):
+                group = self.role_repository.get(str(group_id), CompanyRoleGroup)
+                if group is None or group.status != "active":
+                    continue
+                plan = build_community_search_plan(
+                    group, source_id=str(args.get("source_id", "nowcoder_experience")),
+                    detail_budget=int(args.get("detail_budget", 3)),
+                )
+                plans.append(self.role_repository.save(
+                    "community_search_plan", plan,
+                    idempotency_key=f"community-search-plan:{plan.plan_id}",
+                ))
+            return _ok(
+                self.name, [item.model_dump(mode="json") for item in plans],
+                [item.plan_id for item in plans],
+            )
+        except Exception as exc:
+            return _fail(self.name, str(exc), "validation_error")
+
+
+class ClassifyCommunityDocumentsTool:
+    name = "role.classify_community_documents"
+
+    def __init__(
+        self, evidence_repository: EvidenceRepository,
+        role_repository: SQLiteRoleRepository,
+        extractor: CommunityEvidenceExtractor | None,
+    ) -> None:
+        self.evidence_repository, self.role_repository = evidence_repository, role_repository
+        self.extractor = extractor
+
+    def run(self, args: dict[str, Any]) -> ToolResult:
+        try:
+            documents: list[CommunityEvidenceDocument] = []
+            segments: list[CommunityEvidenceSegment] = []
+            receipts = []
+            llm_calls: list[dict[str, Any]] = []
+            group_by_query = dict(args.get("group_by_query", {}))
+            candidate_by_url = {
+                item.detail_url: item
+                for item in self.role_repository.list("community_post_candidate", CommunityPostCandidate)
+            }
+            for source_document_id in args.get("source_document_ids", []):
+                source_document = self.role_repository.get(str(source_document_id), SourceDocument)
+                if (
+                    source_document is None
+                    or source_document.document_kind != "experience_post"
+                    or not source_document.raw_artifact_id
+                ):
+                    continue
+                fragments = self.evidence_repository.list_fragments(source_document.raw_artifact_id)
+                if not fragments:
+                    continue
+                source_fragment = max(fragments, key=lambda item: len(item.text))
+                body = ensure_community_body_fragment(
+                    source_document, source_fragment, self.evidence_repository
+                )
+                group = self.role_repository.get(
+                    str(group_by_query.get(source_document.query_id, "")), CompanyRoleGroup
+                )
+                candidate = candidate_by_url.get(source_document.source_url)
+                intended = candidate.intended_document_types if candidate else []
+                if self.extractor is not None:
+                    extraction_text = source_fragment.text
+                    try:
+                        fixture_payload = __import__("json").loads(source_fragment.text)
+                    except (ValueError, TypeError):
+                        fixture_payload = None
+                    if not (
+                        isinstance(fixture_payload, dict)
+                        and (
+                            "community_extraction" in fixture_payload
+                            or {"document_type", "segments"}.issubset(fixture_payload)
+                        )
+                    ):
+                        extraction_text = body.text
+                    batch, calls = self.extractor.extract(
+                        text=extraction_text,
+                        company=group.company_display_name if group else None,
+                        role_family=group.role_family_id if group else None,
+                        intended_document_types=intended,
+                    )
+                    llm_calls.extend(item.model_dump(mode="json") for item in calls)
+                    provider = self.extractor.provider.name
+                    model = self.extractor.config.model
+                else:
+                    payload = __import__("json").loads(source_fragment.text)
+                    raw = payload.get("community_extraction") or _legacy_fixture_community_extraction(payload)
+                    batch = CommunityExtractionBatch.model_validate(raw)
+                    provider, model = "deterministic", "fixture-community-v1"
+                evidence_document, receipt, extracted_segments = materialize_community_evidence(
+                    document=source_document, body_fragment=body, extraction=batch,
+                    repository=self.evidence_repository, group=group,
+                    provider=provider, model=model,
+                )
+                documents.append(self.role_repository.save(
+                    "community_evidence_document", evidence_document,
+                    idempotency_key=f"community-evidence-document:{evidence_document.document_id}",
+                ))
+                receipts.append(self.role_repository.save(
+                    "community_classification_receipt", receipt,
+                    idempotency_key=f"community-classification-receipt:{receipt.receipt_id}",
+                ))
+                for item in extracted_segments:
+                    segments.append(self.role_repository.save(
+                        "community_evidence_segment", item,
+                        idempotency_key=f"community-evidence-segment:{item.segment_id}",
+                    ))
+            return _ok(
+                self.name,
+                [{
+                    "documents": [item.model_dump(mode="json") for item in documents],
+                    "segments": [item.model_dump(mode="json") for item in segments],
+                    "receipts": [item.model_dump(mode="json") for item in receipts],
+                    "llm_calls": llm_calls,
+                }],
+                [
+                    *[item.document_id for item in documents],
+                    *[item.segment_id for item in segments],
+                    *[item.receipt_id for item in receipts],
+                ],
+            )
+        except Exception as exc:
+            return _fail(self.name, str(exc), "llm_output_error")
+
+
+class BuildOfficialEscalationReceiptsTool:
+    name = "role.build_official_escalation_receipts"
+
+    def __init__(self, role_repository: SQLiteRoleRepository) -> None:
+        self.role_repository = role_repository
+
+    def run(self, args: dict[str, Any]) -> ToolResult:
+        try:
+            requested = set(args.get("user_requested_job_ids", []))
+            receipts: list[OfficialEscalationReceipt] = []
+            plan_ids: list[str] = []
+            jobs = {
+                item.job_posting_id: item
+                for item in self.role_repository.list("normalized_job", NormalizedJobPosting)
+            }
+            for cluster_id in args.get("cluster_ids", []):
+                cluster = self.role_repository.get(str(cluster_id), JobPostingCluster)
+                if cluster is None:
+                    continue
+                job = self.role_repository.get(
+                    cluster.canonical_job_posting_id, NormalizedJobPosting
+                )
+                if job is None:
+                    continue
+                item = official_escalation_for_job(
+                    cluster, job, user_requested=cluster.cluster_id in requested
+                )
+                receipts.append(self.role_repository.save(
+                    "official_escalation_receipt", item,
+                    idempotency_key=f"official-escalation-receipt:{item.receipt_id}",
+                ))
+                if item.trigger != "not_required":
+                    plan = plan_official_verification(
+                        cluster, jobs, company_domains=args.get("company_domains")
+                    )
+                    saved_plan = self.role_repository.save(
+                        "official_plan", plan,
+                        idempotency_key=f"official-plan:{plan.job_cluster_id}",
+                    )
+                    plan_ids.append(saved_plan.verification_plan_id)
+            return _ok(
+                self.name, [item.model_dump(mode="json") for item in receipts],
+                [item.receipt_id for item in receipts],
+                mandatory_official_verification_count=0,
+                conditional_official_escalation_count=len(plan_ids),
+                official_verification_plan_ids=plan_ids,
+            )
+        except Exception as exc:
+            return _fail(self.name, str(exc), "validation_error")
+
+
+class ProjectRoleIntelligenceTool:
+    name = "profile.project_role_intelligence"
+
+    def __init__(
+        self, evidence_repository: EvidenceRepository,
+        role_repository: SQLiteRoleRepository,
+    ) -> None:
+        self.evidence_repository, self.role_repository = evidence_repository, role_repository
+        self.projector = DemandReputationProjector(role_repository, evidence_repository)
+
+    def run(self, args: dict[str, Any]) -> ToolResult:
+        try:
+            scope = SearchScope.model_validate(args["search_scope"])
+            clusters = [
+                self.role_repository.get(str(value), JobPostingCluster)
+                for value in args.get("eligible_cluster_ids", [])
+            ]
+            clusters = [item for item in clusters if item is not None]
+            if not clusters:
+                return _fail(self.name, "detail_evidence_missing", "detail_evidence_missing")
+            jobs_by_id = {
+                item.job_posting_id: item
+                for item in self.role_repository.list("normalized_job", NormalizedJobPosting)
+            }
+            claims = [
+                self.evidence_repository.get_claim(str(value))
+                for value in args.get("claim_ids", [])
+            ]
+            detail_receipts = {
+                item.job_cluster_id: item
+                for value in args.get("detail_receipt_ids", [])
+                if (item := self.role_repository.get(str(value), RoleDetailEvidenceReceipt)) is not None
+            }
+            escalation = {
+                item.job_instance_id: item
+                for value in args.get("official_escalation_receipt_ids", [])
+                if (item := self.role_repository.get(str(value), OfficialEscalationReceipt)) is not None
+            }
+            segments = [
+                item
+                for value in args.get("segment_ids", [])
+                if (item := self.role_repository.get(str(value), CommunityEvidenceSegment)) is not None
+            ]
+            documents = {
+                item.document_id: item
+                for item in self.role_repository.list(
+                    "community_evidence_document", CommunityEvidenceDocument
+                )
+            }
+            job_profiles: list[JobDemandProfile] = []
+            for cluster in clusters:
+                receipt = detail_receipts.get(cluster.cluster_id)
+                if receipt is None:
+                    continue
+                job_profiles.append(self.projector.project_job_demand(
+                    scope=scope, cluster=cluster, jobs_by_id=jobs_by_id,
+                    claims=[item for item in claims if item is not None],
+                    detail_receipt=receipt, segments=segments,
+                    documents_by_id=documents,
+                    escalation_receipt=escalation.get(cluster.cluster_id),
+                ))
+            if not job_profiles:
+                return _fail(self.name, "detail_evidence_missing", "detail_evidence_missing")
+            family = self.projector.project_family_demand(
+                scope=scope, jobs=job_profiles, all_segments=segments,
+                documents_by_id=documents,
+            )
+            jobs_by_company_family: dict[tuple[str, str], list[str]] = {}
+            for item in job_profiles:
+                jobs_by_company_family.setdefault(
+                    (item.company_key, item.role_family_id), []
+                ).append(item.job_instance_id)
+            job_reputation, company_reputation = self.projector.project_reputation(
+                segments=segments, documents_by_id=documents,
+                jobs_by_company_family=jobs_by_company_family,
+            )
+            bundle = self.projector.build_bundle(
+                scope=scope, family=family, jobs=job_profiles,
+                job_reputation=job_reputation,
+                company_reputation=company_reputation,
+                raw_evidence_refs=list(args.get("raw_evidence_refs", [])),
+                source_receipt_ids=list(args.get("source_receipt_ids", [])),
+                segments=segments,
+            )
+            return _ok(self.name, [{
+                "job_demand_profile_ids": [item.profile_id for item in job_profiles],
+                "role_family_demand_profile_id": family.profile_id,
+                "job_reputation_profile_ids": [item.profile_id for item in job_reputation],
+                "company_reputation_profile_ids": [item.profile_id for item in company_reputation],
+                "role_intelligence_bundle_id": bundle.bundle_id,
+                "missing_sections": bundle.missing_sections,
+            }], [
+                *[item.profile_id for item in job_profiles], family.profile_id,
+                *[item.profile_id for item in job_reputation],
+                *[item.profile_id for item in company_reputation], bundle.bundle_id,
+            ])
+        except Exception as exc:
+            return _fail(self.name, str(exc), "projection_error")
+
+
 class ImportCredentialTool:
     name = "source.import_credential"
     def __init__(self, store: LocalCredentialStore) -> None: self.store = store
@@ -455,12 +918,59 @@ def _save_receipt(repository: SQLiteRoleRepository, run_id: str, adapter: Any, b
     )
 
 
+def _legacy_fixture_community_extraction(payload: dict[str, Any]) -> dict[str, Any]:
+    """Replay old anonymous fixtures without preserving their mixed profile semantics."""
+
+    signals = payload.get("signals") if isinstance(payload.get("signals"), dict) else {}
+    scope = str(payload.get("scope_level") or "unknown")
+    company = payload.get("company")
+    definitions = {
+        "written_exam": "written_exam",
+        "interview": "interview_question",
+        "project_preference": "project_preference",
+        "tech_stack": "project_preference",
+        "salary": "compensation",
+        "work_context": "work_content",
+    }
+    segments: list[dict[str, Any]] = []
+    for key, segment_type in definitions.items():
+        for value in signals.get(key, []) if isinstance(signals.get(key), list) else []:
+            text = str(value).strip()
+            if not text:
+                continue
+            segments.append({
+                "quote": text, "segment_type": segment_type,
+                "scope_level": scope, "company": company,
+                "polarity": "unknown", "limited_summary": text[:200],
+                "confidence": float(payload.get("confidence", 0.7)),
+            })
+    kinds = {
+        "interview" if item["segment_type"] in {
+            "written_exam", "interview_process", "interview_question",
+            "recruiter_feedback", "project_preference",
+        } else "employment"
+        for item in segments
+    }
+    document_type = (
+        "mixed" if kinds == {"interview", "employment"}
+        else "interview_experience" if kinds == {"interview"}
+        else "employment_experience" if kinds == {"employment"}
+        else "unknown"
+    )
+    return {"document_type": document_type, "segments": segments}
+
+
 def build_role_profile_registry(*, blob_store: BlobStore, evidence_repository: EvidenceRepository,
                                 profile_repository: ProfileRepository, role_repository: SQLiteRoleRepository,
-                                adapters: SourceAdapterRegistry, credential_store: LocalCredentialStore) -> ToolRegistry:
+                                adapters: SourceAdapterRegistry, credential_store: LocalCredentialStore,
+                                community_extractor: CommunityEvidenceExtractor | None = None) -> ToolRegistry:
     registry = ToolRegistry()
     for tool in [
         CollectSourceTool("source.discover_jobs", adapters, role_repository), CollectSourceTool("source.collect_experience", adapters, role_repository),
+        FetchSourceDetailTool(adapters, role_repository),
+        ValidateExternalSessionTool(adapters),
+        DiscoverJobDetailCandidatesTool(evidence_repository, role_repository),
+        DiscoverCommunityPostCandidatesTool(evidence_repository, role_repository),
         VerifyOfficialTool(adapters, role_repository), ExtractSourceDocumentTool(blob_store, evidence_repository),
         NormalizeJobTool(evidence_repository, role_repository), NormalizeExperienceTool(evidence_repository, role_repository),
         ClassifyRoleFamilyTool(role_repository), DeduplicateJobsTool(role_repository), DeduplicateExperienceTool(role_repository),
@@ -468,6 +978,10 @@ def build_role_profile_registry(*, blob_store: BlobStore, evidence_repository: E
         LinkJobIdentityTool(role_repository), AssessRoleDetailEvidenceTool(evidence_repository, role_repository),
         ExtractRoleClaimsTool(evidence_repository, role_repository), ResolveJobFieldsTool(evidence_repository, role_repository),
         ProjectJobInstanceTool(evidence_repository, profile_repository, role_repository), AggregateRoleFamilyTool(profile_repository),
+        BuildCompanyRoleGroupsTool(role_repository), PlanCommunitySearchTool(role_repository),
+        ClassifyCommunityDocumentsTool(evidence_repository, role_repository, community_extractor),
+        BuildOfficialEscalationReceiptsTool(role_repository),
+        ProjectRoleIntelligenceTool(evidence_repository, role_repository),
         ImportCredentialTool(credential_store), ValidateCredentialRefTool(credential_store),
     ]: registry.register(tool)
     return registry

@@ -31,6 +31,13 @@ class RoleSearchBudget(BaseModel):
     # needs 58 calls, so keep the default above that valid baseline while
     # preserving the same hard-budget behaviour for explicitly smaller limits.
     max_tool_calls: int = Field(default=80, ge=1)
+    max_recruitment_detail_documents: int = Field(default=20, ge=1)
+    max_community_groups: int = Field(default=10, ge=0)
+    max_community_queries_per_group: int = Field(default=12, ge=0, le=12)
+    max_community_rounds_per_source: int = Field(default=3, ge=1, le=3)
+    max_community_sources_per_purpose: int = Field(default=2, ge=1, le=2)
+    community_target_documents_per_purpose: int = Field(default=2, ge=1, le=5)
+    max_community_detail_documents_per_query: int = Field(default=3, ge=0, le=10)
 
 
 class RoleSearchCounter(BaseModel):
@@ -41,6 +48,10 @@ class RoleSearchCounter(BaseModel):
     documents: int = Field(default=0, ge=0)
     llm_calls: int = Field(default=0, ge=0)
     tool_calls: int = Field(default=0, ge=0)
+    recruitment_searches: int = Field(default=0, ge=0)
+    recruitment_details: int = Field(default=0, ge=0)
+    community_searches: int = Field(default=0, ge=0)
+    community_details: int = Field(default=0, ge=0)
 
 
 class RoleCoverageGap(BaseModel):
@@ -90,6 +101,7 @@ class RoleCoverageAssessment(BaseModel):
 
 
 class RoleProfileGraphState(TypedDict, total=False):
+    workflow_version: str
     run_id: str
     thread_id: str
     user_id: str
@@ -105,10 +117,15 @@ class RoleProfileGraphState(TypedDict, total=False):
     skipped_source_ids: Annotated[list[str], stable_union]
     source_capabilities: dict[str, dict[str, Any]]
     official_domains: dict[str, list[str]]
+    user_requested_official_job_ids: list[str]
     next_cursors: dict[str, str]
     pending_auth_source_id: str | None
     credential_refs: dict[str, str]
     source_batch_ids: Annotated[list[str], stable_union]
+    recruitment_search_document_ids: Annotated[list[str], stable_union]
+    recruitment_detail_candidate_ids: Annotated[list[str], stable_union]
+    recruitment_detail_request_ids: Annotated[list[str], stable_union]
+    recruitment_detail_document_ids: Annotated[list[str], stable_union]
     source_run_receipts: Annotated[list[dict[str, Any]], append_items]
     raw_artifact_ids: Annotated[list[str], stable_union]
     extraction_ids: Annotated[list[str], stable_union]
@@ -117,6 +134,38 @@ class RoleProfileGraphState(TypedDict, total=False):
     role_family_membership_ids: Annotated[list[str], stable_union]
     experience_record_ids: Annotated[list[str], stable_union]
     job_cluster_ids: Annotated[list[str], stable_union]
+    company_role_group_ids: Annotated[list[str], stable_union]
+    community_search_plan_ids: Annotated[list[str], stable_union]
+    community_attempt_queue: list[dict[str, Any]]
+    community_attempt_index: int
+    community_current_query: dict[str, Any] | None
+    community_current_group_id: str | None
+    community_current_purpose: str | None
+    community_current_source_id: str | None
+    community_current_source_priority: int | None
+    community_current_round: int | None
+    community_current_search_document_ids: list[str]
+    community_current_candidate_ids: list[str]
+    community_current_detail_document_ids: list[str]
+    community_current_evidence_document_ids: list[str]
+    community_current_evidence_segment_ids: list[str]
+    community_attempt_receipt_ids: Annotated[list[str], stable_union]
+    community_coverage_ids: Annotated[list[str], stable_union]
+    community_accepted_document_ids_by_scope: dict[str, list[str]]
+    community_exhausted_source_ids_by_scope: dict[str, list[str]]
+    community_sufficient_scope_keys: Annotated[list[str], stable_union]
+    community_last_query_by_lane: dict[str, str]
+    community_route: str | None
+    community_skip_current_source: bool
+    community_query_group_map: dict[str, str]
+    community_query_intended_types: dict[str, list[str]]
+    community_search_document_ids: Annotated[list[str], stable_union]
+    community_post_candidate_ids: Annotated[list[str], stable_union]
+    community_detail_request_ids: Annotated[list[str], stable_union]
+    community_detail_document_ids: Annotated[list[str], stable_union]
+    community_evidence_document_ids: Annotated[list[str], stable_union]
+    community_evidence_segment_ids: Annotated[list[str], stable_union]
+    community_classification_receipt_ids: Annotated[list[str], stable_union]
     experience_scope_link_ids: Annotated[list[str], stable_union]
     official_verification_plan_ids: Annotated[list[str], stable_union]
     job_identity_link_ids: Annotated[list[str], stable_union]
@@ -124,9 +173,16 @@ class RoleProfileGraphState(TypedDict, total=False):
     eligible_job_cluster_ids: Annotated[list[str], stable_union]
     field_resolution_ids: Annotated[list[str], stable_union]
     official_status_by_cluster: dict[str, str]
+    official_escalation_receipt_ids: Annotated[list[str], stable_union]
     claim_ids: Annotated[list[str], stable_union]
     job_instance_profile_snapshot_ids: Annotated[list[str], stable_union]
     role_family_profile_snapshot_id: str | None
+    job_demand_profile_ids: Annotated[list[str], stable_union]
+    role_family_demand_profile_id: str | None
+    job_reputation_profile_ids: Annotated[list[str], stable_union]
+    company_reputation_profile_ids: Annotated[list[str], stable_union]
+    role_intelligence_bundle_id: str | None
+    missing_sections: list[str]
     coverage_assessment: dict[str, Any] | None
     coverage_gaps: list[dict[str, Any]]
     next_action: str | None
@@ -135,8 +191,13 @@ class RoleProfileGraphState(TypedDict, total=False):
     last_auth_action: str | None
     budgets: dict[str, Any]
     counters: dict[str, Any]
-    tool_results: Annotated[list[dict[str, Any]], append_items]
+    # Tool payloads are persisted in domain repositories.  The checkpoint only
+    # keeps the latest small diagnostic batch; appending extracted document
+    # records would duplicate full page text at every graph step.
+    tool_results: list[dict[str, Any]]
     llm_calls: Annotated[list[dict[str, Any]], append_items]
     trace: Annotated[list[dict[str, Any]], append_items]
     errors: Annotated[list[dict[str, Any]], append_items]
+    recruitment_errors: Annotated[list[dict[str, Any]], append_items]
+    community_errors: Annotated[list[dict[str, Any]], append_items]
     report: dict[str, Any] | None

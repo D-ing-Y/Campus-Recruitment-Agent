@@ -120,6 +120,22 @@ def _build_parser() -> argparse.ArgumentParser:
     intent_show = intent_commands.add_parser("show")
     intent_show.add_argument("snapshot_id")
 
+    role = commands.add_parser("role", help="research role demand and reputation evidence")
+    role_commands = role.add_subparsers(dest="role_command", required=True)
+    role_research = role_commands.add_parser("research")
+    role_research.add_argument("session_id")
+    role_research.add_argument("--handoff", required=True)
+    role_resume = role_commands.add_parser("resume")
+    role_resume.add_argument("session_id")
+    role_resume.add_argument(
+        "--action", required=True,
+        choices=("authorized", "skip-source", "cancel"),
+    )
+    role_resume.add_argument("--response-id", required=True)
+    role_resume.add_argument("--credential-ref")
+    role_show = role_commands.add_parser("show")
+    role_show.add_argument("bundle_id")
+
     model = commands.add_parser("model", help="manage CC Switch-style model providers")
     model_commands = model.add_subparsers(dest="model_command", required=True)
     model_add = model_commands.add_parser("add")
@@ -231,6 +247,8 @@ def _dispatch(args: argparse.Namespace) -> int:
         return _candidate(runtime, args)
     if args.command == "intent":
         return _intent(runtime, args)
+    if args.command == "role":
+        return _role(runtime, args)
     if args.command == "run":
         return _legacy_run(runtime, args)
     if args.command == "auth":
@@ -722,6 +740,34 @@ def _intent(runtime: Any, args: argparse.Namespace) -> int:
     return _emit(payload, json_mode=args.json_output)
 
 
+def _role(runtime: Any, args: argparse.Namespace) -> int:
+    service = runtime.application_services["role"]
+    command = f"role.{args.role_command}"
+    if args.role_command == "research":
+        payload = service.research(
+            session_id=args.session_id, handoff_id=args.handoff
+        )
+        return _emit(payload, json_mode=args.json_output)
+    if args.role_command == "resume":
+        payload = service.resume(
+            session_id=args.session_id,
+            action=args.action,
+            response_id=args.response_id,
+            credential_ref=args.credential_ref,
+        )
+        return _emit(payload, json_mode=args.json_output)
+    result = service.show(args.bundle_id)
+    return _emit({
+        "schema_version": "v0.7.1",
+        "command": command,
+        "status": "completed",
+        "result": result,
+        "next_action": None,
+        "warnings": [],
+        "errors": [],
+    }, json_mode=args.json_output)
+
+
 def _model(runtime: Any, args: argparse.Namespace) -> int:
     command = f"model.{args.model_command}"
     service = runtime.model_profile_service
@@ -892,6 +938,8 @@ def _next_action(
             return "resume.resume"
         if pending_request.startswith("request-intent-"):
             return "intent.resume"
+        if pending_request.startswith("request-role-auth-"):
+            return "role.resume"
         if stage == "candidate":
             return "candidate.resume"
     refs = current_refs or {}
@@ -973,11 +1021,12 @@ def _handle_error(exc: Exception, *, json_mode: bool) -> int:
     from campus_job_agent.llm import LLMConfigError, LLMProviderError, StructuredOutputError
     from campus_job_agent.runtime import (
         ArtifactWriteError, CandidateApplicationError, IntentApplicationError,
-        ModelProfileError, ResumeApplicationError, SessionError,
+        ModelProfileError, ResumeApplicationError, RoleApplicationError, SessionError,
         exit_code_for_error,
     )
     from campus_job_agent.workflows.career_intent import CareerIntentWorkflowError
     from campus_job_agent.workflows.resume_evidence import ResumeEvidenceWorkflowError
+    from campus_job_agent.workflows.role_profile import RoleProfileWorkflowError
 
     if isinstance(exc, CLIArgumentError):
         return _emit_error("invalid_input", str(exc), 2, json_mode=json_mode, recovery_hint="check command arguments")
@@ -994,6 +1043,11 @@ def _handle_error(exc: Exception, *, json_mode: bool) -> int:
         )
     if isinstance(exc, (IntentApplicationError, CareerIntentWorkflowError)):
         return _emit_error("contract_violation", str(exc), 3, json_mode=json_mode, recovery_hint="inspect the CareerIntent run and resume with the current request")
+    if isinstance(exc, (RoleApplicationError, RoleProfileWorkflowError)):
+        return _emit_error(
+            "contract_violation", str(exc), 3, json_mode=json_mode,
+            recovery_hint="inspect the WP3.1 role run and resume with the current request",
+        )
     if isinstance(exc, ModelProfileError):
         return _emit_error(exc.error_type, str(exc), 3, json_mode=json_mode, recovery_hint="inspect model providers and choose a valid profile")
     if isinstance(exc, KeyError):

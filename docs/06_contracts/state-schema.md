@@ -2,6 +2,29 @@
 
 本文件用于维护 AgentState 的跨模块契约。
 
+## v0.7.1 WP3.1.1 Community Attempt State
+
+RoleProfileGraph checkpoint 只保存当前确定性游标和对象 ID：
+
+```text
+community_group_queue[]
+community_current_group_id?
+community_current_purpose?
+community_current_source_id?
+community_current_source_priority?
+community_current_round?
+community_current_query_id?
+community_attempt_receipt_ids[]
+community_coverage_ids[]
+community_accepted_document_ids_by_scope{}
+community_exhausted_source_ids_by_scope{}
+community_route: collect | next_round | switch_source | next_purpose |
+                 next_group | project | await_auth | partial
+```
+
+正文、Cookie、xsec_token、Sidecar 输出路径和未脱敏 MCP 响应不得进入 checkpoint。旧 WP3.1
+checkpoint 因图拓扑变化返回 `legacy_session_incompatible`。
+
 ## v0.1 AgentState
 
 关联：
@@ -324,7 +347,8 @@ fail
 
 | 字段 | 合并方式 | 说明 |
 | --- | --- | --- |
-| `trace`、`errors`、`llm_calls`、`tool_results`、`source_run_receipts` | append | 保存每轮增量摘要 |
+| `trace`、`errors`、`llm_calls`、`source_run_receipts` | append | 保存每轮增量摘要 |
+| `tool_results` | replace | 只保存当前节点有界诊断摘要；禁止 records、页面正文、Cookie、Prompt 和未脱敏异常进入 checkpoint |
 | Artifact/Extraction/Fragment/Record/Cluster/Verification/Identity/Resolution/Claim/Snapshot ID | stable union | 去重并保持首次顺序 |
 | `search_scope`、`budgets`、`enabled_source_ids` | initialize once | 节点不得扩大 scope、预算或来源权限 |
 | `pending_queries` | replace after consume | 完成/失败的 query 写入 history |
@@ -368,6 +392,8 @@ fail
 ### 授权与 Checkpoint
 
 - `credential_refs` 只保存 source→ref，不保存 Cookie、Authorization 或 cURL。
+- `tool_results` 只保存 tool name、status、record count、evidence ID、error type 和白名单元数据；
+  `SourceDocument.records`、Fragment 正文和 adapter 原始异常不得进入 State。授权恢复与最终化会清空该短期摘要，避免跨轮累积。
 - `resume_input` 只允许 `authorized`、`skip_source`、`cancel` 及相关 ID。
 - 用户在 Graph 外正常登录和导入凭据；Graph 恢复时只验证 ref。
 - checkpointer 在 compile 时注入，Evidence/Source Repository 与 checkpoint 分库。

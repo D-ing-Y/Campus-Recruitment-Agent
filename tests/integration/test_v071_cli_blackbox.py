@@ -14,7 +14,9 @@ from campus_job_agent.schemas import (
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-CLI = REPO_ROOT / ".venv" / "bin" / "campus-agent"
+CLI = Path(os.environ.get(
+    "CAMPUS_AGENT_TEST_CLI", str(REPO_ROOT / ".venv" / "bin" / "campus-agent")
+))
 
 
 def _run(tmp_path: Path, *args: str, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
@@ -88,6 +90,7 @@ def test_session_status_routes_pending_workflow_review(tmp_path: Path) -> None:
     cases = (
         ("request-resume-review", "resume.resume"),
         ("request-intent-review", "intent.resume"),
+        ("request-role-auth-nowcoder", "role.resume"),
         ("request-candidate-opaque", "candidate.resume"),
     )
     for pending_request, expected_action in cases:
@@ -97,7 +100,7 @@ def test_session_status_routes_pending_workflow_review(tmp_path: Path) -> None:
             expected_version=session.session_version,
             operation="test_interrupted_route",
             status="interrupted",
-            current_stage="candidate",
+            current_stage=("role" if pending_request.startswith("request-role-") else "candidate"),
             pending_request=pending_request,
         )
         result = _run(

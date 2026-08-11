@@ -12,11 +12,13 @@ from uuid import NAMESPACE_URL, uuid5
 
 import httpx
 
+from campus_job_agent.integrations.social_media import SocialBridgeError
 from campus_job_agent.schemas import (
     EvidenceArtifact,
     OfficialVerificationPlan,
     SourceBatch,
     SourceCapabilities,
+    SourceDetailRequest,
     SourceDocument,
     SourceQuery,
 )
@@ -42,6 +44,12 @@ class OfficialCareerAdapter(Protocol):
     source_id: str
     capabilities: SourceCapabilities
     def verify(self, plan: OfficialVerificationPlan, credential_ref: str | None = None) -> SourceBatch: ...
+
+
+class SourceDetailAdapter(Protocol):
+    source_id: str
+    capabilities: SourceCapabilities
+    def fetch_detail(self, request: SourceDetailRequest, credential_ref: str | None = None) -> SourceBatch: ...
 
 
 class SourceAdapterRegistry:
@@ -71,6 +79,7 @@ class _FixtureAdapter:
         role_repository: SQLiteRoleRepository,
         owner_id: str,
         requires_auth: bool = False,
+        detail_pages: dict[str, dict[str, Any]] | None = None,
     ) -> None:
         self.source_id = source_id
         self.fixture_pages = fixture_pages
@@ -78,6 +87,7 @@ class _FixtureAdapter:
         self.evidence_repository = evidence_repository
         self.role_repository = role_repository
         self.owner_id = owner_id
+        self.detail_pages = detail_pages or {}
         self.capabilities = SourceCapabilities(
             source_id=source_id,
             channel=channel,
@@ -86,6 +96,7 @@ class _FixtureAdapter:
             supports_location=True,
             supports_company=True,
             supports_pagination=True,
+            supports_detail_fetch=True,
             requires_auth=requires_auth,
         )
 
@@ -134,6 +145,55 @@ class _FixtureAdapter:
             channel=query.channel, query_id=query.query_id, cursor=query.cursor,
             status=status, error_type=status, retryable=status in {"rate_limited", "network_timeout"},
             needs_user_action=needs_user_action, idempotency_key=key,
+        ))
+
+    def fetch_detail(
+        self, request: SourceDetailRequest, credential_ref: str | None = None,
+    ) -> SourceBatch:
+        if request.source_id != self.source_id or request.channel != self.capabilities.channel:
+            raise ValueError("detail request does not match fixture adapter")
+        key = hashlib.sha256(
+            f"{request.idempotency_key}:{self.capabilities.adapter_version}".encode()
+        ).hexdigest()
+        existing = self.role_repository.get_batch(key)
+        if existing is not None and not (
+            existing.status == "authentication_required" and credential_ref
+        ):
+            return existing
+        if self.capabilities.requires_auth and not credential_ref:
+            return self.role_repository.save_batch(SourceBatch(
+                batch_id=str(uuid5(NAMESPACE_URL, key)), source_id=self.source_id,
+                channel=request.channel, query_id=request.query_id,
+                status="authentication_required", error_type="authentication_required",
+                needs_user_action=True, idempotency_key=key,
+            ))
+        payload = self.detail_pages.get(request.detail_url)
+        if payload is None:
+            payload = next((
+                item
+                for values in self.fixture_pages.values()
+                for item in values
+                if str(item.get("source_url") or item.get("detail_url") or "") == request.detail_url
+            ), None)
+        if payload is None:
+            return self.role_repository.save_batch(SourceBatch(
+                batch_id=str(uuid5(NAMESPACE_URL, key)), source_id=self.source_id,
+                channel=request.channel, query_id=request.query_id,
+                status="empty", error_type="detail_not_found", idempotency_key=key,
+            ))
+        raw = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        document = _archive_document(
+            raw=raw, owner_id=self.owner_id, source_id=self.source_id,
+            channel=request.channel, query_id=request.query_id,
+            source_url=request.detail_url,
+            document_kind=request.expected_document_kind,
+            content_type="application/json", adapter_version=self.capabilities.adapter_version,
+            blob_store=self.blob_store, evidence_repository=self.evidence_repository,
+        )
+        return self.role_repository.save_batch(SourceBatch(
+            batch_id=str(uuid5(NAMESPACE_URL, key)), source_id=self.source_id,
+            channel=request.channel, query_id=request.query_id,
+            documents=[document], status="success", idempotency_key=key,
         ))
 
 
@@ -186,7 +246,8 @@ class _HttpAdapter:
         self.capabilities = SourceCapabilities(
             source_id=source_id, channel=channel, source_type=source_type,
             adapter_version=f"{source_id}_v1", supports_location=True,
-            supports_company=True, supports_pagination=True, requires_auth=requires_auth,
+            supports_company=True, supports_pagination=True, supports_detail_fetch=True,
+            requires_auth=requires_auth,
             live_enabled=live_enabled, rate_limit_per_minute=rate_limit_per_minute,
         )
 
@@ -238,6 +299,64 @@ class _HttpAdapter:
         except Exception:
             return self._error_batch(query, key, "failed", False)
 
+    def fetch_detail(
+        self, request: SourceDetailRequest, credential_ref: str | None = None,
+    ) -> SourceBatch:
+        if request.source_id != self.source_id or request.channel != self.capabilities.channel:
+            raise ValueError("detail request does not match source adapter")
+        key = hashlib.sha256(
+            f"{request.idempotency_key}:{self.capabilities.adapter_version}".encode()
+        ).hexdigest()
+        existing = self.role_repository.get_batch(key)
+        if existing is not None and not (
+            existing.status == "authentication_required" and credential_ref
+        ):
+            return existing
+        if not self.capabilities.live_enabled:
+            return self._detail_error_batch(request, key, "policy_blocked", False)
+        if not self.robots_allowed:
+            return self._detail_error_batch(request, key, "robots_disallowed", False)
+        if self.capabilities.requires_auth and not credential_ref:
+            return self._detail_error_batch(
+                request, key, "authentication_required", False, True
+            )
+        try:
+            _assert_allowed_url(request.detail_url, self.allowed_domains)
+            headers: dict[str, str] = {}
+            if credential_ref and self.credential_resolver:
+                headers = self.credential_resolver(credential_ref, source_id=self.source_id)
+            response = self._request(request.detail_url, self.request_headers(headers))
+            _assert_allowed_url(str(response.url), self.allowed_domains)
+            preliminary = _classify_http_metadata(response)
+            document = _archive_document(
+                raw=response.content, owner_id=self.owner_id, source_id=self.source_id,
+                channel=request.channel, query_id=request.query_id,
+                source_url=str(response.url),
+                document_kind=request.expected_document_kind,
+                content_type=response.headers.get("content-type", "text/html"),
+                adapter_version=self.capabilities.adapter_version,
+                blob_store=self.blob_store, evidence_repository=self.evidence_repository,
+                http_status=response.status_code, access_status=preliminary,
+            )
+            status = self.classify_detail_response(response, request)
+            if status != "success":
+                document = document.model_copy(update={"access_status": status})
+                return self._detail_error_batch(
+                    request, key, status, status in {"rate_limited", "network_timeout"},
+                    status == "authentication_required", [document],
+                )
+            return self.role_repository.save_batch(SourceBatch(
+                batch_id=str(uuid5(NAMESPACE_URL, key)), source_id=self.source_id,
+                channel=request.channel, query_id=request.query_id,
+                documents=[document], status="success", idempotency_key=key,
+            ))
+        except httpx.TimeoutException:
+            return self._detail_error_batch(request, key, "network_timeout", True)
+        except ValueError:
+            return self._detail_error_batch(request, key, "policy_blocked", False)
+        except Exception:
+            return self._detail_error_batch(request, key, "failed", False)
+
     def build_url(self, query: SourceQuery) -> str:
         raise NotImplementedError
 
@@ -246,6 +365,11 @@ class _HttpAdapter:
 
     def classify_response(self, response: httpx.Response) -> AccessStatus:
         return _classify_http_response(response)
+
+    def classify_detail_response(
+        self, response: httpx.Response, request: SourceDetailRequest,
+    ) -> AccessStatus:
+        return self.classify_response(response)
 
     def _request(self, url: str, headers: dict[str, str]) -> httpx.Response:
         minimum_interval = 60.0 / self.capabilities.rate_limit_per_minute
@@ -278,13 +402,30 @@ class _HttpAdapter:
             needs_user_action=needs_user_action, idempotency_key=key,
         ))
 
+    def _detail_error_batch(
+        self, request: SourceDetailRequest, key: str, status: str, retryable: bool,
+        needs_user_action: bool = False, documents: list[SourceDocument] | None = None,
+    ) -> SourceBatch:
+        batch_status = status if status in {
+            "empty", "authentication_required", "rate_limited", "source_changed",
+            "robots_disallowed", "official_not_found", "official_unavailable",
+            "adapter_required", "policy_blocked",
+        } else "failed"
+        return self.role_repository.save_batch(SourceBatch(
+            batch_id=str(uuid5(NAMESPACE_URL, key)), source_id=self.source_id,
+            channel=request.channel, query_id=request.query_id,
+            documents=documents or [], status=batch_status, error_type=status,
+            retryable=retryable, needs_user_action=needs_user_action,
+            idempotency_key=key,
+        ))
+
 
 class ZhaopinJobsAdapter(_HttpAdapter):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(
             source_id="zhaopin_jobs", channel="recruitment_discovery",
             source_type="recruitment_platform", requires_auth=False,
-            allowed_domains={"sou.zhaopin.com", "www.zhaopin.com"},
+            allowed_domains={"sou.zhaopin.com", "www.zhaopin.com", "jobs.zhaopin.com"},
             follow_redirects=True, **kwargs,
         )
 
@@ -324,6 +465,19 @@ class ZhaopinJobsAdapter(_HttpAdapter):
             return "authentication_required"
         return "source_changed"
 
+    def classify_detail_response(
+        self, response: httpx.Response, request: SourceDetailRequest,
+    ) -> AccessStatus:
+        status = self.classify_response(response)
+        if status != "success":
+            return status
+        lowered = response.text[:500_000].casefold()
+        return "success" if (
+            "/jobdetail/" in str(response.url).casefold()
+            or "jobdetaildata" in lowered
+            or '"@type":"jobposting"' in lowered.replace(" ", "")
+        ) else "source_changed"
+
 
 class NowcoderExperienceAdapter(_HttpAdapter):
     def __init__(self, **kwargs: Any) -> None:
@@ -332,6 +486,146 @@ class NowcoderExperienceAdapter(_HttpAdapter):
     def build_url(self, query: SourceQuery) -> str:
         from urllib.parse import quote
         return f"https://www.nowcoder.com/search/all?query={quote(' '.join(query.keywords))}"
+
+    def classify_detail_response(
+        self, response: httpx.Response, request: SourceDetailRequest,
+    ) -> AccessStatus:
+        status = _classify_http_response(response)
+        if status != "success":
+            return status
+        url = str(response.url).casefold()
+        text = response.text[:500_000]
+        if "/feed/main/detail/" not in url and "/discuss/" not in url:
+            return "source_changed"
+        if len(text.strip()) < 100:
+            return "empty"
+        return "success"
+
+
+class XiaohongshuExperienceAdapter:
+    """Read-only adapter over the project-owned MediaCrawler bridge service."""
+
+    source_id = "xiaohongshu_experience"
+
+    def __init__(
+        self, *, bridge_client: Any | None, blob_store: BlobStore,
+        evidence_repository: EvidenceRepository, role_repository: SQLiteRoleRepository,
+        owner_id: str, live_enabled: bool = False, **_: Any,
+    ) -> None:
+        self.bridge_client = bridge_client
+        self.blob_store = blob_store
+        self.evidence_repository = evidence_repository
+        self.role_repository = role_repository
+        self.owner_id = owner_id
+        self.capabilities = SourceCapabilities(
+            source_id=self.source_id, channel="experience",
+            source_type="community_experience", adapter_version="xiaohongshu_sidecar_v1",
+            supports_keyword=True, supports_company=True, supports_pagination=False,
+            supports_detail_fetch=True, requires_auth=True,
+            authorization_mode="external_session", live_enabled=live_enabled,
+            rate_limit_per_minute=3,
+        )
+
+    def collect(self, query: SourceQuery, credential_ref: str | None = None) -> SourceBatch:
+        key = _batch_key(self.source_id, query.fingerprint, query.cursor, self.capabilities.adapter_version)
+        existing = self.role_repository.get_batch(key)
+        if existing is not None and existing.status not in {
+            "authentication_required", "risk_controlled", "adapter_required",
+        }:
+            return existing
+        if not self.capabilities.live_enabled:
+            return self._error(query.query_id, key, "policy_blocked")
+        if self.bridge_client is None:
+            return self._error(query.query_id, key, "adapter_required")
+        try:
+            payload = self.bridge_client.search_posts(
+                keywords=" ".join(query.keywords), limit=query.page_size,
+            )
+            raw = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+            source_url = f"mediacrawler://xhs/search/{hashlib.sha256(raw).hexdigest()[:24]}"
+            document = _archive_document(
+                raw=raw, owner_id=self.owner_id, source_id=self.source_id,
+                channel="experience", query_id=query.query_id, source_url=source_url,
+                document_kind="experience_search", content_type="application/json",
+                adapter_version=self.capabilities.adapter_version, blob_store=self.blob_store,
+                evidence_repository=self.evidence_repository,
+            )
+            return self.role_repository.save_batch(SourceBatch(
+                batch_id=str(uuid5(NAMESPACE_URL, key)), source_id=self.source_id,
+                channel="experience", query_id=query.query_id, documents=[document],
+                status="success" if payload.get("candidates") else "empty",
+                idempotency_key=key,
+            ))
+        except SocialBridgeError as exc:
+            return self._error(
+                query.query_id, key, exc.code,
+                needs_user_action=exc.code in {"authentication_required", "risk_controlled"},
+            )
+
+    def fetch_detail(
+        self, request: SourceDetailRequest, credential_ref: str | None = None,
+    ) -> SourceBatch:
+        if request.source_id != self.source_id or request.channel != "experience":
+            raise ValueError("detail request does not match xiaohongshu adapter")
+        key = hashlib.sha256(
+            f"{request.idempotency_key}:{self.capabilities.adapter_version}".encode()
+        ).hexdigest()
+        existing = self.role_repository.get_batch(key)
+        if existing is not None and existing.status not in {
+            "authentication_required", "risk_controlled", "adapter_required",
+        }:
+            return existing
+        if not self.capabilities.live_enabled:
+            return self._error(request.query_id, key, "policy_blocked")
+        if self.bridge_client is None:
+            return self._error(request.query_id, key, "adapter_required")
+        if not request.external_locator_ref:
+            return self._error(request.query_id, key, "unsupported_input")
+        try:
+            payload = self.bridge_client.fetch_post_detail(
+                candidate_ref=request.external_locator_ref
+            )
+            raw = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+            document = _archive_document(
+                raw=raw, owner_id=self.owner_id, source_id=self.source_id,
+                channel="experience", query_id=request.query_id,
+                source_url=str(payload["canonical_url"]), document_kind="experience_post",
+                content_type="application/json", adapter_version=self.capabilities.adapter_version,
+                blob_store=self.blob_store, evidence_repository=self.evidence_repository,
+            )
+            return self.role_repository.save_batch(SourceBatch(
+                batch_id=str(uuid5(NAMESPACE_URL, key)), source_id=self.source_id,
+                channel="experience", query_id=request.query_id, documents=[document],
+                status="success", idempotency_key=key,
+            ))
+        except SocialBridgeError as exc:
+            return self._error(
+                request.query_id, key, exc.code,
+                needs_user_action=exc.code in {"authentication_required", "risk_controlled"},
+            )
+
+    def authorization_status(self) -> str:
+        if not self.capabilities.live_enabled or self.bridge_client is None:
+            return "adapter_required"
+        try:
+            return str(self.bridge_client.auth_status().get("status"))
+        except SocialBridgeError as exc:
+            return exc.code
+
+    def _error(
+        self, query_id: str, key: str, status: str, *, needs_user_action: bool = False,
+    ) -> SourceBatch:
+        allowed = {
+            "empty", "authentication_required", "risk_controlled", "adapter_required",
+            "policy_blocked", "unsupported_input", "rate_limited",
+        }
+        value = status if status in allowed else "failed"
+        return self.role_repository.save_batch(SourceBatch(
+            batch_id=str(uuid5(NAMESPACE_URL, key)), source_id=self.source_id,
+            channel="experience", query_id=query_id, status=value,
+            error_type=status, needs_user_action=needs_user_action,
+            retryable=status in {"rate_limited", "network_timeout"}, idempotency_key=key,
+        ))
 
 
 class OfficialCareersAdapter(_HttpAdapter):

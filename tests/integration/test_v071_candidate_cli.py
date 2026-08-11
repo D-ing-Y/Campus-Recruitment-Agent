@@ -7,7 +7,9 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-CLI = REPO_ROOT / ".venv" / "bin" / "campus-agent"
+CLI = Path(os.environ.get(
+    "CAMPUS_AGENT_TEST_CLI", str(REPO_ROOT / ".venv" / "bin" / "campus-agent")
+))
 
 
 def _run(tmp_path: Path, *args: str) -> subprocess.CompletedProcess[str]:

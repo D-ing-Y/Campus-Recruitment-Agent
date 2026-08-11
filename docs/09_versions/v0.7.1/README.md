@@ -1,6 +1,6 @@
 # v0.7.1 版本入口：子 Workflow 纵向闭环与 CLI 加固
 
-状态：Implementation In Progress（WP1/WP2 通过；WP3.1 设计修订 Ready for Implementation）
+状态：Implementation In Progress（WP1/WP2 通过；WP3.1.1 offline + L1 通过，多平台 L2 pending）
 路线确认日期：2026-07-28  
 代码版本：仍为 0.7.0；完成实现、测试和 Eval 后才升级 0.7.1
 
@@ -81,9 +81,10 @@ v0.7.1 的唯一目标是把现有 v0.3-v0.7 能力从“独立子图与离线�
 2. WP1.3 已将 PDF 转录与画像分析拆图；WP1.3.2 进一步隔离旧 Resume/legacy model Claim，保留
    conversation/feedback overlay。真实 CandidateSnapshot 与 WP2 typed-input 重验均已通过。
 3. CareerIntent 已有首次生产入口；PreparationConstraints 仍没有首次生产入口。
-4. Role live 必须要求真实 detail raw，搜索页不能冒充详情；招聘平台 job detail 可默认发布 Demand，
-   官网只在冲突、过期、字段缺失或用户要求时升级。
-5. 社区内容尚未实现 interview/employment typed segment 分流，旧混合 HiringSignal 只作兼容读取。
+4. Role 已实现真实 detail raw 门禁；智联 L1 已通过。官网只在冲突、过期、字段缺失或用户要求时升级。
+5. 社区已实现 interview/employment typed segment 分流，但本轮牛客真实搜索没有合格帖子详情候选，
+   因此旧 L2 仍为 partial。WP3.1.1 已加入三层放宽、牛客/小红书来源级联和外部 Sidecar，
+   但尚未执行多平台 live；旧混合 HiringSignal 只作兼容读取。
 6. Matching/Preparation/Feedback 存在名义节点与真实业务边界不一致的问题。
 7. Feedback 只有 Candidate 特例 saga，缺少通用 typed dispatcher。
 8. Role 至 Feedback 子图仍需逐工作包接入统一节点日志、运行产物和 inspect。
@@ -135,6 +136,6 @@ v0.7.1 的唯一目标是把现有 v0.3-v0.7 能力从“独立子图与离线�
 
 ## 7. 下一步
 
-WP1.3.2 已完成 Claim 生命周期、增量投影、真实 Candidate 重建与 WP2 重验。下一步按 WP3.1
-先实现招聘平台 detail→Demand，再实现社区 detail→typed segment→Demand/Reputation；官方来源只做
-条件升级。仍不实现 v1.0 Parent Graph，也不把文档完成或 WP3 typed handoff 的产生表述为已消费。
+WP3.1.1 离线代码与门禁已完成。下一步配置固定版本 MediaCrawler、本机 Chrome/CDP 正常登录和
+DeepSeek，执行牛客/小红书多平台 L2；达到两种用途各 2 篇独立详情后再收口 WP3 并进入 WP4。
+官方来源仍只做条件升级。仍不实现 v1.0 Parent Graph，也不把 offline/fixture 结果表述为 live accepted。

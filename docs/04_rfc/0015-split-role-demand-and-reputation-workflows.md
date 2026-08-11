@@ -1,7 +1,7 @@
 # RFC-0015：拆分岗位需求画像与评价画像 Workflow
 
-状态：Accepted / Ready for Implementation
-日期：2026-08-06
+状态：Accepted / WP3.1.1 Implemented and Offline Verified（multi-platform live pending）
+日期：2026-08-11
 关联 Requirements：`docs/03_requirements/v0.7.1-wp3.1-role-demand-and-reputation-profiles.md`
 关联 ADR：`docs/05_adr/0015-use-platform-detail-as-default-and-split-role-intelligence.md`
 关联 Contract：`docs/06_contracts/role-demand-reputation-contract.md`
@@ -131,3 +131,28 @@ query kind 和 detail count 限制，不能因公司岗位数量相乘而无界�
 3. 实现两个确定性投影与消费权限校验；
 4. 接入现有 RoleProfileGraph、CLI、持久化和可观测性；
 5. 完成 fixture、集成和受控 live 验收后再收口 WP3。
+
+## 11. WP3.1.1：社区检索反馈循环补丁
+
+旧实现一次生成牛客的精确岗位面经与工作体验查询。空搜索或无法发现详情时，Graph 无法区分
+“确实无样本”和“查询过窄”，也无法把本轮覆盖结果反馈给下一次查询。WP3.1.1 将社区阶段改为
+确定性 bounded loop：
+
+```text
+plan_next_attempt
+  -> collect_search -> discover_candidates -> fetch_details -> classify
+  -> assess_coverage
+       sufficient(>=2 independent details) -> next purpose/group
+       round < 3 -> next relaxation level
+       primary exhausted/blocked -> fallback source
+       both exhausted/budget exhausted -> partial or blocked
+```
+
+循环策略不交给 LLM。LLM 仍只处理详情文档分类与精确原文引文。面经使用
+`nowcoder_experience -> xiaohongshu_experience`，工作体验使用反向级联。所有搜索结果只做发现，
+作用域必须重新由详情正文验证。
+
+小红书通过本机 MediaCrawler HTTP Sidecar 接入。主仓库提供只读 Social Media MCP Bridge，只暴露
+health、auth status、search posts 和 fetch post detail；不保存 Cookie、xsec_token 或其他传输参数。
+Graph/checkpoint 只接收 opaque candidate ref。Sidecar 必须是 localhost、固定 commit、显式许可证
+确认，并关闭评论、创作者遍历、代理和发布能力。验证码、风控或登录失效立即中断，不执行绕过。

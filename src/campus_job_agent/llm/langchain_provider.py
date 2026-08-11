@@ -7,8 +7,6 @@ from typing import Any
 from urllib.parse import urlparse
 
 from langchain_core.messages import AIMessage, BaseMessage
-from langchain_deepseek import ChatDeepSeek
-from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, ValidationError
 
 from campus_job_agent.llm.base import LLMConfigError, LLMProviderError
@@ -21,6 +19,12 @@ from campus_job_agent.schemas import (
     ModelIntegration,
     StructuredOutputStrategy,
 )
+
+
+# Public injection points retained for provider-factory tests and custom
+# integrations.  ``None`` means the optional provider SDK has not been loaded.
+ChatDeepSeek: Any | None = None
+ChatOpenAI: Any | None = None
 
 
 def infer_model_integration(config: LLMConfig) -> ModelIntegration:
@@ -260,6 +264,8 @@ def build_llm_provider(
     *,
     chat_model: Any | None = None,
 ) -> MockLLMProvider | LangChainChatProvider:
+    global ChatDeepSeek, ChatOpenAI
+
     integration = infer_model_integration(config)
     if integration == "mock":
         return MockLLMProvider(config.mock_mode)
@@ -276,8 +282,22 @@ def build_llm_provider(
             "max_retries": config.max_retries,
         }
         if integration == "deepseek":
+            # Keep provider SDK imports off the CLI startup path.  Most local
+            # commands (and the mock test runtime) never construct a network
+            # model, while eagerly importing both integrations loads hundreds
+            # of OpenAI schema modules in every short-lived CLI process.
+            if ChatDeepSeek is None:
+                from langchain_deepseek import ChatDeepSeek as _ChatDeepSeek
+
+                ChatDeepSeek = _ChatDeepSeek
+
             chat_model = ChatDeepSeek(**common)
         else:
+            if ChatOpenAI is None:
+                from langchain_openai import ChatOpenAI as _ChatOpenAI
+
+                ChatOpenAI = _ChatOpenAI
+
             chat_model = ChatOpenAI(**common)
     return LangChainChatProvider(
         chat_model=chat_model,

@@ -1,6 +1,6 @@
 # v0.7.1 Workflow 验收矩阵
 
-状态：WP1/WP2 Passed；WP3 基础门禁 Offline Passed；WP3.1 设计修订 Ready for Implementation
+状态：WP1/WP2 Passed；WP3.1.1 Offline + Recruitment L1 Passed；Multi-platform Community L2 Pending
 日期：2026-08-06
 
 状态枚举：`not_started | failing | blocked | partial | passed | not_applicable`。
@@ -13,7 +13,7 @@
 | ResumeEvidence | passed | passed | passed | passed | passed | passed | passed | passed | passed | passed |
 | Candidate | passed | passed | passed | passed | passed | passed | passed | passed | passed | passed |
 | CareerIntent | passed | passed | passed | passed | passed | passed | passed | passed | passed | passed |
-| Role | passed | partial | partial | passed | partial | passed | partial | failing | partial | partial |
+| Role | passed | partial | partial | passed | passed | passed | passed | passed | partial | partial |
 | Matching/Decision | partial | not_applicable | partial | partial | partial | partial | partial | failing | partial | partial |
 | Preparation | partial | not_applicable | partial | partial | partial | partial | partial | failing | partial | partial |
 | Feedback | partial | partial | partial | partial | partial | partial | partial | failing | partial | partial |
@@ -171,7 +171,7 @@ WP2 已用新 CandidateSnapshot 重验；领域模型未重写，新的 create m
 | Detail gate | search-only 不产生岗位画像 | passed | search-only/detail Role Graph cases |
 | Experience scope | family/company/job 可追溯，ambiguous 不投影 | passed | scope-link unit/integration |
 | Replay | gate 记录幂等，旧 official plan 可恢复 | passed | cross-thread fixture replay |
-| Live source | 真实 search → detail Raw Artifact | not_started | `v0.7.1-wp3-live-source-support-matrix.md` |
+| Live source | 真实 search → detail Raw Artifact | partial | 智联 L1 accepted；牛客 L2 无合格帖子详情样本 |
 
 补丁的详细数据见 `docs/07_evaluation/v0.7.1-wp3-role-hierarchy-evidence-gates-eval-report.md`。
 这里的 passed 是 contract/deterministic gate/offline replay，不表示 Role Workflow 已完成 live 验收。
@@ -183,12 +183,15 @@ WP2 已用新 CandidateSnapshot 重验；领域模型未重写，新的 create m
 | Design contract | 平台详情默认主路径、官网可选升级 | passed | RFC/ADR-0015、WP3.1 Requirements |
 | Community typing | interview/employment/mixed/unknown 与片段引用 | passed | `role-demand-reputation-contract.md` |
 | Consumer boundary | Matching/Preparation 不消费 Reputation | passed | Matching/Preparation contract amendment |
-| Recruitment live | search → platform detail Raw → Demand | not_started | live support matrix |
-| Community live | search → post detail Raw → typed segment | not_started | live support matrix |
-| Projection code | Demand/Reputation/Bundle 持久化与 Graph 接线 | not_started | WP3.1 implementation tasks |
-| WP3.1 Eval | 泄漏、追溯、幂等与 live 指标 | not_started | `v0.7.1-wp3.1-eval-plan.md` |
+| Recruitment live | search → platform detail Raw → Demand | passed | 3 detail Raw、3 JobDemand、1 family demand；trace=1.0 |
+| Community live | search → post detail Raw → typed segment | partial | 两类 authenticated search Raw；无合格 post candidate，0 Segment |
+| Projection code | Demand/Reputation/Bundle 持久化与 Graph 接线 | passed | WP3.1 unit/Graph/application/CLI 聚焦测试 |
+| WP3.1 Eval | 泄漏、追溯、幂等与 live 指标 | partial | L1 accepted；L2 真实 detail/typed segment 门禁未满足 |
+| WP3.1.1 search loop | 三轮放宽、两篇停止、主备切换、详情 scope | passed offline | unit/Graph/fake Sidecar；query-only scope projection=0 |
+| WP3.1.1 Xiaohongshu | localhost Sidecar、external session、opaque ref | pending live | adapter/MCP contract passed；真实登录与详情未运行 |
 
-本节 `passed` 仅代表文档契约已经接受，不代表对应代码或 live 数据源已完成。Role 总状态保持 partial。
+本节的代码和离线门禁已完成；`partial/pending` 指真实社区 L2 尚缺两种用途各 2 篇详情样本。Role 总状态
+保持 partial，不能把 authenticated search 或 fixture 描述为 L2 accepted。
 
 ## 7. WP3-WP7
 

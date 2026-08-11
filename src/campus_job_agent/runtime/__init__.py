@@ -6,6 +6,7 @@ from campus_job_agent.runtime.artifacts import (
 from campus_job_agent.runtime.candidate import CandidateApplicationError, CandidateApplicationService
 from campus_job_agent.runtime.intent import IntentApplicationError, IntentApplicationService
 from campus_job_agent.runtime.resume import ResumeApplicationError, ResumeApplicationService
+from campus_job_agent.runtime.role import RoleApplicationError, RoleApplicationService
 from campus_job_agent.runtime.model_profiles import (
     ModelProfileError,
     ModelProfileService,
@@ -32,6 +33,7 @@ __all__ = [
     "ValidationReceipt", "CandidateApplicationError", "CandidateApplicationService",
     "IntentApplicationError", "IntentApplicationService",
     "ResumeApplicationError", "ResumeApplicationService",
+    "RoleApplicationError", "RoleApplicationService",
     "ModelProfileError", "ModelProfileService", "ModelProviderProfile",
     "ModelProviderSettings", "SQLiteModelProfileRepository",
     "exit_code_for_error", "redact",

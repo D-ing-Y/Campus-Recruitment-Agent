@@ -33,6 +33,8 @@ AccessStatus = Literal[
     "identity_ambiguous",
     "adapter_required",
     "policy_blocked",
+    "risk_controlled",
+    "unsupported_input",
     "failed",
 ]
 
@@ -88,9 +90,19 @@ class SourceCapabilities(BaseModel):
     supports_location: bool = False
     supports_company: bool = False
     supports_pagination: bool = False
+    supports_detail_fetch: bool = False
     requires_auth: bool = False
+    authorization_mode: Literal["credential_ref", "external_session", "none"] | None = None
     live_enabled: bool = False
     rate_limit_per_minute: int = Field(default=6, ge=1)
+
+    @model_validator(mode="after")
+    def normalize_authorization_mode(self) -> "SourceCapabilities":
+        if self.authorization_mode is None:
+            self.authorization_mode = "credential_ref" if self.requires_auth else "none"
+        if self.authorization_mode != "none":
+            self.requires_auth = True
+        return self
 
 
 class SourceQuery(BaseModel):
@@ -120,6 +132,55 @@ class SourceQuery(BaseModel):
         if self.fingerprint and self.fingerprint != computed:
             raise ValueError("source query fingerprint does not match canonical content")
         self.fingerprint = computed
+        return self
+
+
+class SourceDetailRequest(BaseModel):
+    """A bounded, auditable transition from search discovery to one detail URL."""
+
+    detail_request_id: str = ""
+    schema_version: Literal["v0.7.1"] = "v0.7.1"
+    source_id: str
+    channel: SourceChannel
+    query_id: str
+    candidate_id: str
+    parent_document_id: str
+    detail_url: str
+    external_locator_ref: str | None = None
+    expected_document_kind: Literal[
+        "job_detail", "employer_job_detail", "official_job_detail", "experience_post"
+    ]
+    idempotency_key: str = ""
+    created_at: datetime = Field(default_factory=utc_now)
+
+    @model_validator(mode="after")
+    def normalize_identity(self) -> "SourceDetailRequest":
+        allowed = {
+            "recruitment_discovery": {"job_detail"},
+            "employer_official": {"employer_job_detail", "official_job_detail"},
+            "experience": {"experience_post"},
+        }
+        if self.expected_document_kind not in allowed[self.channel]:
+            raise ValueError("detail document kind is not allowed for source channel")
+        # Detail identity is the source URL and declared document kind. Search
+        # query/candidate provenance remains on the request, but must not make
+        # the same detail page archive multiple times.
+        payload = {
+            "source_id": self.source_id,
+            "channel": self.channel,
+            (
+                "detail_locator" if self.external_locator_ref else "detail_url"
+            ): self.external_locator_ref or self.detail_url,
+            "expected_document_kind": self.expected_document_kind,
+        }
+        computed = canonical_hash("source-detail", payload)
+        expected_id = f"detail-request:{computed[:24]}"
+        if self.idempotency_key and self.idempotency_key != computed:
+            raise ValueError("detail request idempotency key does not match canonical content")
+        if self.detail_request_id and self.detail_request_id != expected_id:
+            raise ValueError("detail request id does not match canonical content")
+        self.idempotency_key = computed
+        self.detail_request_id = expected_id
         return self
 
 

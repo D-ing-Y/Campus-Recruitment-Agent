@@ -212,6 +212,46 @@ authority_violation
 - ToolResult 只能返回 ref、source、类型、验证时间和错误摘要。
 - trace、checkpoint、Artifact metadata 和 report 不得记录秘密正文。
 
+## v0.7.1 WP3.1 Role Intelligence Tool
+
+实现状态：Implemented；招聘 L1 live accepted，社区 L2 因无合格帖子详情样本保持 partial。
+
+| Tool | 输入摘要 | 输出/副作用 |
+| --- | --- | --- |
+| `source.discover_job_detail_candidates` | recruitment search document IDs | 只保存 `JobDetailCandidate`，不投影画像 |
+| `source.discover_community_post_candidates` | community search document IDs、query scope | 只保存 `CommunityPostCandidate` |
+| `source.fetch_detail` | `SourceDetailRequest`、credential ref | 详情 Raw Artifact、SourceDocument、batch receipt |
+| `role.build_company_role_groups` | accepted cluster IDs、SearchScope | 幂等 `CompanyRoleGroup` |
+| `role.plan_community_search` | group IDs、source、预算 | 旧 WP3.1 首轮查询兼容计划 |
+| `role.plan_next_community_attempt` | group、purpose、source priority、round | 单条确定性分层查询 |
+| `role.assess_community_coverage` | attempt、已确认详情 IDs、预算 | coverage、下一轮/切源/停止动作 |
+| `role.classify_community_documents` | post-detail SourceDocument IDs、scope hints | exact-quote Document、Segment、classification receipt |
+| `role.build_official_escalation_receipts` | eligible clusters、用户指定岗位 | `not_required` 或条件升级回执/plan |
+| `profile.project_role_intelligence` | eligible clusters、typed segments、receipts | Demand、Reputation 与 `RoleIntelligenceBundle` |
+
+WP3.1 调用边界：
+
+- search 页、card 和 snippet 的画像投影数固定为 0；
+- `source.fetch_detail` 只调用声明 `supports_detail_fetch=true` 的 adapter，实际详情类型必须与
+  request 一致；
+- 社区模型输出不包含内部 ID 或自由 locator；quote 必须由应用在归档正文中唯一定位；
+- `profile.project_role_intelligence` 分别校验 Demand 与 Reputation allowlist，不允许评价 ID
+  进入 Matching，也不允许工作体验进入 assessment signal；
+
+WP3.1.1 Social Media MCP Bridge 只读 allowlist：
+
+```text
+social.health
+social.auth_status
+social.search_posts
+social.fetch_post_detail
+```
+
+Bridge 只接受 localhost MediaCrawler Sidecar，拒绝评论、创作者遍历、代理与发布参数。MCP 返回必须
+先归档 Raw Artifact；主应用只接收 opaque candidate ref，不接收 Cookie 或 xsec_token。未固定 commit、
+未确认非商业许可证或外部会话无效时返回明确失败，不降级为搜索摘要证据。
+- ToolResult 与运行日志只返回 ID、计数、状态和脱敏错误，不复制完整 JD、帖子或 Prompt。
+
 ## v0.6 Profile Matching Service/Tool
 
 实现状态：Implemented / Accepted。

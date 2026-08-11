@@ -15,11 +15,13 @@ from urllib.parse import urljoin, urlparse
 from uuid import NAMESPACE_URL, uuid5
 
 from campus_job_agent.schemas import (
+    CommunityPostCandidate,
     DocumentExtraction,
     EvidenceFragment,
     ExperienceEvidenceRecord,
     ExtractionUnit,
     JobIdentityLink,
+    JobDetailCandidate,
     JobPostingCluster,
     NormalizedJobPosting,
     OfficialSiteAdapterSpec,
@@ -33,6 +35,106 @@ from campus_job_agent.storage.base import BlobStore, EvidenceRepository
 
 
 WEB_PARSER_VERSION = "web_document_v1"
+
+
+def discover_job_detail_candidates(
+    document: SourceDocument,
+    fragments: list[EvidenceFragment],
+) -> list[JobDetailCandidate]:
+    """Discover detail URLs without treating search content as role evidence."""
+
+    if document.document_kind != "search_page" or document.access_status != "success":
+        return []
+    if not fragments or not document.raw_artifact_id:
+        return []
+    raw = fragments[0].text
+    payloads: list[dict[str, Any]] = []
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, dict):
+        values = parsed.get("candidates") or parsed.get("jobs") or [parsed]
+        payloads = [item for item in values if isinstance(item, dict)]
+    elif document.source_id == "zhaopin_jobs":
+        payloads = _zhaopin_jobs_payload(raw, document).get("jobs", [])
+    results: list[JobDetailCandidate] = []
+    for item in payloads:
+        url = str(item.get("detail_url") or item.get("source_url") or item.get("application_url") or "")
+        if document.source_id == "zhaopin_jobs":
+            url = _canonical_zhaopin_job_url(url) or ""
+        if not url:
+            continue
+        payload = [document.source_id, document.query_id, document.source_document_id, url]
+        results.append(JobDetailCandidate(
+            candidate_id=f"job-candidate:{canonical_hash('job-detail-candidate', payload)[:24]}",
+            source_id=document.source_id, query_id=document.query_id,
+            search_document_id=document.source_document_id,
+            search_artifact_id=str(document.raw_artifact_id),
+            supporting_fragment_id=fragments[0].fragment_id,
+            detail_url=url, platform_job_id=_optional_string(item.get("job_id")),
+            company_hint=_optional_string(item.get("company")),
+            role_title_hint=_optional_string(item.get("role_title") or item.get("title")),
+        ))
+    unique = {item.detail_url: item for item in results}
+    return [unique[key] for key in sorted(unique)]
+
+
+def discover_community_post_candidates(
+    document: SourceDocument,
+    fragments: list[EvidenceFragment],
+    *,
+    intended_document_types: list[str] | None = None,
+    company_hint: str | None = None,
+    role_family_hint: str | None = None,
+) -> list[CommunityPostCandidate]:
+    """Discover community post URLs; snippets are never normalized as evidence."""
+
+    if document.document_kind != "experience_search" or document.access_status != "success":
+        return []
+    if not fragments or not document.raw_artifact_id:
+        return []
+    raw = fragments[0].text
+    records: list[dict[str, Any]] = []
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, dict):
+        values = parsed.get("candidates") or parsed.get("experiences") or [parsed]
+        records = [item for item in values if isinstance(item, dict)]
+    elif document.source_id == "nowcoder_experience":
+        records = _nowcoder_experiences_from_html(raw)
+    results: list[CommunityPostCandidate] = []
+    for item in records:
+        url = str(
+            item.get("detail_url") or item.get("canonical_url")
+            or item.get("source_url") or ""
+        )
+        parsed_url = urlparse(url)
+        if document.source_id == "nowcoder_experience" and (
+            parsed_url.scheme != "https" or parsed_url.hostname != "www.nowcoder.com"
+        ):
+            continue
+        if not url:
+            continue
+        payload = [document.source_id, document.query_id, document.source_document_id, url]
+        results.append(CommunityPostCandidate(
+            candidate_id=f"community-candidate:{canonical_hash('community-post-candidate', payload)[:24]}",
+            source_id=document.source_id, query_id=document.query_id,
+            search_document_id=document.source_document_id,
+            search_artifact_id=str(document.raw_artifact_id),
+            supporting_fragment_id=fragments[0].fragment_id,
+            detail_url=url,
+            external_locator_ref=_optional_string(item.get("candidate_ref")),
+            platform_post_id=_optional_string(item.get("platform_post_id")),
+            title_hint=_optional_string(item.get("title")),
+            company_hint=_optional_string(item.get("company")) or company_hint,
+            role_family_hint=_optional_string(item.get("role_family")) or role_family_hint,
+            intended_document_types=list(intended_document_types or []),
+        ))
+    unique = {item.detail_url: item for item in results}
+    return [unique[key] for key in sorted(unique)]
 
 
 def extract_archived_document(
@@ -378,6 +480,40 @@ def _json_from_fragments(fragments: list[EvidenceFragment]) -> Any:
 def _zhaopin_jobs_payload(text: str, document: SourceDocument) -> dict[str, Any]:
     """Parse archived Zhaopin HTML after raw evidence has been persisted."""
     jobs: list[dict[str, Any]] = []
+    try:
+        structured = json.loads(text)
+    except json.JSONDecodeError:
+        structured = None
+    structured_records: list[dict[str, Any]] = []
+    if isinstance(structured, dict) and isinstance(structured.get("jobs"), list):
+        structured_records = [
+            item for item in structured["jobs"] if isinstance(item, dict)
+        ]
+    elif isinstance(structured, dict) and (
+        structured.get("role_title") or structured.get("title")
+    ) and structured.get("company"):
+        structured_records = [structured]
+    for raw in structured_records:
+        application_url = _canonical_zhaopin_job_url(
+            str(
+                raw.get("application_url")
+                or raw.get("source_url")
+                or document.source_url
+            )
+        )
+        if application_url is None:
+            continue
+        jobs.append({
+            **raw,
+            "job_id": raw.get("job_id") or _zhaopin_job_id(application_url),
+            "source_url": application_url,
+            "application_url": application_url,
+            "confidence": float(raw.get("confidence", 0.9)),
+            "notes": [
+                *[str(item) for item in raw.get("notes", [])],
+                "zhaopin_archived_structured_detail",
+            ],
+        })
     for raw in _json_ld_jobs(text):
         application_url = _canonical_zhaopin_job_url(str(raw.get("application_url") or ""))
         if application_url is None:
@@ -466,7 +602,86 @@ def _zhaopin_initial_state_jobs(text: str) -> list[dict[str, Any]]:
         state, _ = json.JSONDecoder().raw_decode(text[start + len(marker):])
     except json.JSONDecodeError:
         return []
-    records = state.get("positionList", []) if isinstance(state, dict) else []
+    if not isinstance(state, dict):
+        return []
+    detail_root = state.get("jobDetail")
+    if isinstance(detail_root, dict):
+        position = detail_root.get("detailedPosition")
+        company = detail_root.get("detailedCompany")
+        if isinstance(position, dict) and isinstance(company, dict):
+            application_url = _canonical_zhaopin_job_url(
+                str(position.get("positionUrl") or position.get("url") or "")
+            )
+            if application_url is not None:
+                description = _clean_html_text(
+                    position.get("description") or position.get("jobDesc"),
+                    limit=12000,
+                )
+                skill_labels = position.get("skillLabel") or position.get("labels") or []
+                tags = [
+                    _clean_html_text(value, limit=100)
+                    for value in skill_labels
+                    if isinstance(value, str)
+                ] if isinstance(skill_labels, list) else []
+                salary_min, salary_max, salary_unit = _zhaopin_salary(
+                    position.get("salary")
+                )
+                return [{
+                    "job_id": str(
+                        position.get("positionNumber")
+                        or position.get("number")
+                        or state.get("jobNumber")
+                        or _zhaopin_job_id(application_url)
+                    ),
+                    "company": _clean_html_text(
+                        company.get("companyName") or "unknown", limit=300
+                    ),
+                    "company_type": _clean_html_text(
+                        company.get("financingStageName") or "unknown", limit=100
+                    ),
+                    "role_title": _clean_html_text(
+                        position.get("positionName") or position.get("name") or "unknown",
+                        limit=500,
+                    ),
+                    "city": _clean_html_text(
+                        position.get("positionWorkCity")
+                        or position.get("workCity")
+                        or "unknown",
+                        limit=100,
+                    ),
+                    "work_location_detail": _clean_html_text(
+                        position.get("workAddress")
+                        or position.get("positionCityDistrict"),
+                        limit=1000,
+                    ) or None,
+                    "salary_min": salary_min,
+                    "salary_max": salary_max,
+                    "salary_unit": salary_unit,
+                    "salary_source": (
+                        "third_party_only" if salary_min is not None else "unknown"
+                    ),
+                    "job_description": description,
+                    "requirements_raw": description,
+                    "requirements_normalized": [value for value in tags if value],
+                    "degree_requirement": _clean_html_text(
+                        position.get("education"), limit=100
+                    ) or None,
+                    "source_date": (
+                        position.get("positionPublishTime")
+                        or position.get("publishTime")
+                        or None
+                    ),
+                    "source_url": application_url,
+                    "application_url": application_url,
+                    "status": (
+                        "closed"
+                        if position.get("positionStatus") not in {None, 1, "1"}
+                        else "included"
+                    ),
+                    "confidence": 0.95,
+                    "notes": ["zhaopin_embedded_detail_state_v1"],
+                }]
+    records = state.get("positionList", [])
     results: list[dict[str, Any]] = []
     for record in records[:100] if isinstance(records, list) else []:
         if not isinstance(record, dict):

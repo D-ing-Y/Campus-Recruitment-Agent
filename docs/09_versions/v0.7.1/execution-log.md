@@ -1,6 +1,6 @@
 # v0.7.1 执行日志
 
-状态：WP1.3.2 与 WP1/WP2 Revalidation Passed；WP3.1 文档修订完成、实现未开始
+状态：WP1/WP2 Revalidation Passed；WP3.1.1 Offline Verified；Multi-platform L2 Pending
 创建日期：2026-07-28
 
 本文件只记录实际执行事实，不记录计划性成功。每个工作包追加一节，保留失败、修复、命令、结果、
@@ -530,8 +530,55 @@ Next action:
   不建立公司知识图谱、不生成整体公司分数、不动态生成逐公司爬虫。
 - Documents：新增 WP3.1 Requirements/Tasks、RFC-0015、ADR-0015、Contract 与 Eval Plan；修订旧
   RFC/ADR、Source/Role/Matching/Preparation contracts、support matrix、版本入口和验收矩阵。
-- Code changes：无。本节只形成 Ready for Implementation 的设计补丁。
-- Validation：仅执行文档一致性检查与 `git diff --check`；没有运行代码测试或 live source。
-- Gate decision：document design accepted；WP3.1 implementation/live 仍为 not_started。
-- Next action：先实现 recruitment search -> platform detail Raw -> Demand，再实现 community
-  search -> post detail Raw -> typed segment -> Demand/Reputation，最后按触发条件补 official escalation。
+- Contracts/Source：新增 SourceDetailRequest、search candidate、detail adapter capability、严格社区
+  Tool Schema、classification receipt 和 exact quote locator；智联/牛客均实现 search 与 detail 分离，
+  search 页投影固定为 0。
+- Graph/Runtime：RoleProfileGraph 内部改为 RecruitmentCollection → Demand → CompanyRoleGroup →
+  CommunityCollection → typed segment → Reputation → Bundle；招聘与社区预算/失败独立，授权支持
+  interrupt/resume/skip/cancel 和 response 幂等。CLI 新增 `role research/resume/show`，仅消费 pending
+  `role_research_required` handoff。
+- Persistence/Isolation：新对象复用 `role_records` JSON payload 与内容哈希 ID，无破坏性迁移；旧 Role
+  snapshot 只读。统一 consumer selector 阻止 Reputation 进入 Matching，并限制 Preparation 输入。
+- Offline verification：WP3.1 单元、Graph、application、CLI 聚焦回归 33 passed；另单独验证 installed
+  Candidate CLI 跨进程恢复 1 passed。最终全量 `484 passed, 1 skipped in 111.22s`，默认
+  live 分组 `1 skipped`，`compileall`、`git diff --check` 与安装态 Role/Model CLI 冒烟通过。
+  由于原 `.venv` 的 iCloud 按需卸载会使 import 阻塞，最终全量回归在 `/private/tmp`
+  干净环境中按同一 `pyproject.toml` 约束安装后执行，不将环境阻塞记为代码通过。
+- Live L1：智联真实 search → detail 产生 3 个 `job_detail` Raw Artifact、3 个 JobDemandProfile 与 1 个
+  RoleFamilyDemandProfile；`search_only_projection_count=0`、`detail_artifact_trace_rate=1.0`。当前
+  Bundle 为 `role-intelligence-bundle:96e7107270407b42d9532a1d`。
+- Live L2：本地牛客 credential 完成“面经/工作体验”两类真实搜索 Raw 归档，但搜索结果未发现可接受的
+  post detail 候选，因而 0 Segment；如实记为 partial，没有用搜索摘要、Fixture 或模型常识替代。
+- Privacy：Git/运行日志仅记录对象 ID、数量、状态和脱敏错误；真实 JD、帖子正文、Cookie 与 Prompt
+  只保存在本地数据目录或不落盘。
+- Checkpoint correction：真实授权恢复发现旧 `tool_results` 把详情页提取 records 按轮追加，
+  使本地 Role checkpoint 膨胀到数百 MB。现只保存 tool/status/count/evidence ID/error type/白名单元数据，
+  授权恢复和最终化会清空短期摘要；历史 checkpoint 保留审计且 SQLite `quick_check` 为 `ok`。
+- Public CLI recovery：`session-772ebdf5-79aa-47a2-a9e9-1b5433c82506` 经 `role resume --action skip-source`
+  发布 Demand-only Bundle `role-intelligence-bundle:7c2658bd38e72b9abd35c8b7`；handoff
+  `handoff:edabd05ea040767b9fe4ef0a` 已 resolved，Session version 15 进入 `matching`。Bundle 含 20 个
+  JobDemandProfile、0 个 ReputationProfile，并明确保留三个评价缺失区块。
+- CLI composition correction：活动 Provider 为 DeepSeek 时，旧 RuntimeFactory 会在 `model list`、
+  `session status`、`role show` 等不调用模型的命令中提前实例化网络 SDK。现改为在第一次
+  真正 LLM `generate` 边界才构造 Provider，不改变 Tool Calling 或 Provider health check 的真实调用。
+- Gate decision：WP3.1 code implemented，L1 accepted，L2 partial；在真实面经与工作体验各至少一条
+  detail Segment 通过前，不标记 WP3.1 完整 live accepted，v0.7.1 仍为 In Progress。
+
+## WP3.1.1 Community Search Relaxation / 2026-08-11 / working tree（未提交）
+
+- Problem fixed：旧 Graph 一次性发出两条牛客精确查询，0 candidate 时无法区分查询过窄和真实无样本；
+  query 所属 group 还可能被误当成详情 scope 证明，且没有工作体验优先的小红书来源。
+- Contracts：CommunitySearchQuery 增加 purpose/round/relaxation/parent/source priority；新增 append-only
+  AttemptReceipt 和确定性 Coverage；SourceCapabilities 增加 credential/external-session/none。
+- Graph：每次只执行一条查询，按详情分类结果决定下一轮、切源或停止；单来源单用途最多 3 轮，
+  每用途 2 篇独立详情即停，最坏每组 12 次并受全局预算限制。旧 checkpoint 以 `wp3.1.1`
+  版本门禁拒绝恢复。
+- Scope correction：查询只发现候选；正文/标题必须确认公司以及完整岗位或岗位族才能进入 Demand/
+  具体岗位 Reputation，只出现公司时最多进入 CompanyReputation。
+- Xiaohongshu：新增项目自有只读 Social Media MCP Bridge 和 `xiaohongshu_experience` adapter；
+  MediaCrawler 保持外部 localhost Sidecar、固定 commit、显式非商业许可证确认，仅允许 search/detail，
+  关闭评论/creator/代理/发布；xsec_token 只留在 Sidecar root 的本地 opaque candidate cache。
+- Verification：三层查询、提前停止、三轮不足、主备切换、跨轮去重、详情 scope、external auth、
+  假 Sidecar/MCP allowlist 均通过；安装态 Role/Model CLI、compileall 和 `git diff --check` 通过。
+  全量结果为 `498 passed, 1 skipped`（live 默认跳过）；本轮没有真实 MediaCrawler/小红书会话，
+  因此多平台 L2 保持 pending，旧牛客 L2 仍为 partial。

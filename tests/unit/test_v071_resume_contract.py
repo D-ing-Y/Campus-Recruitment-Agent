@@ -89,15 +89,15 @@ def test_boss_section_order_and_model_tool_schema_exclude_personal_information()
 
 def test_personal_information_is_local_and_redacted_before_model_input() -> None:
     raw = (
-        "姓名：丁乙\n性别：男\n出生年月：2002-02\n当前求职状态：在校-考虑机会\n"
-        "牛人身份：学生\n电话：15100000024\n微信号：DingYi_13\n"
+        "姓名：张三\n性别：男\n出生年月：2002-02\n当前求职状态：在校-考虑机会\n"
+        "牛人身份：学生\n电话：13900000000\n微信号：test_user_13\n"
         "邮箱：dingyi@example.com\n出生地：山东济南\n"
         "项目经历\nImplemented a LangGraph workflow."
     )
     fragment = _fragment(raw)
     personal = extract_personal_information([fragment])
-    assert personal.name == "丁乙"
-    assert personal.phone == "15100000024"
+    assert personal.name == "张三"
+    assert personal.phone == "13900000000"
     assert personal.email == "dingyi@example.com"
     assert personal.job_search_status == "在校-考虑机会"
     assert personal.identity == "学生"
@@ -111,7 +111,7 @@ def test_personal_information_is_local_and_redacted_before_model_input() -> None
 
 def test_unlabelled_resume_header_extracts_birth_date_and_birthplace() -> None:
     fragment = _fragment(
-        "丁乙\n2002-02   男   云南\n15100000024\n\n教育背景\n某大学"
+        "张三\n2002-02   男   云南\n13900000000\n\n教育背景\n某大学"
     )
     personal = extract_personal_information([fragment])
     assert personal.birth_date == "2002-02"

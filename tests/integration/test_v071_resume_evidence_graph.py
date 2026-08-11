@@ -81,7 +81,7 @@ def _runtime(tmp_path: Path, repository: SQLiteRepository) -> ResumeEvidenceGrap
 def _start(tmp_path: Path, runtime: ResumeEvidenceGraphRuntime) -> dict:
     resume = tmp_path / "resume.pdf"
     _text_pdf(resume, [
-        "Ding Yi email hidden@example.com phone 15100000024 University 2027 "
+        "Anonymous Candidate email hidden@example.com phone 13900000000 University 2027 "
         "Project Agent platform responsibility implemented Python LangGraph RAG LLM "
         "skills and evaluation evidence. " * 2
     ])

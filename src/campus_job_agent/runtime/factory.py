@@ -13,12 +13,19 @@ from typing import Any, Iterator
 from campus_job_agent.evidence import ClaimExtractorService
 from campus_job_agent.llm import (
     LLMCache, LLMConfigError, LLMProviderError, build_llm_provider,
+    infer_model_integration,
     load_llm_config,
 )
 from campus_job_agent.schemas import LLMConfig
+from campus_job_agent.integrations import (
+    MediaCrawlerSidecarClient,
+    MediaCrawlerSidecarConfig,
+    SocialBridgeError,
+)
 from campus_job_agent.sources import (
-    LocalCredentialStore, MeituanOfficialCareersAdapter, NowcoderExperienceAdapter,
-    OfficialCareersAdapter, SourceAdapterRegistry, SQLiteRoleRepository, ZhaopinJobsAdapter,
+    CommunityEvidenceExtractor, LocalCredentialStore, MeituanOfficialCareersAdapter, NowcoderExperienceAdapter,
+    OfficialCareersAdapter, SourceAdapterRegistry, SQLiteRoleRepository,
+    XiaohongshuExperienceAdapter, ZhaopinJobsAdapter,
 )
 from campus_job_agent.storage import LocalBlobStore, SQLiteRepository
 from campus_job_agent.tools import build_candidate_profile_registry, build_role_profile_registry
@@ -47,6 +54,7 @@ from campus_job_agent.runtime.artifacts import RunArtifactWriter
 from campus_job_agent.runtime.candidate import CandidateApplicationService
 from campus_job_agent.runtime.intent import IntentApplicationService
 from campus_job_agent.runtime.resume import ResumeApplicationService
+from campus_job_agent.runtime.role import RoleApplicationService
 from campus_job_agent.runtime.model_profiles import (
     ModelProfileError,
     ModelProfileService,
@@ -289,8 +297,13 @@ class RuntimeFactory:
         llm_cache = LLMCache(str(self.paths.cache_root / "llm"))
         if llm_config_error:
             provider = _UnavailableLLMProvider()
-        else:
+        elif infer_model_integration(llm_config) == "mock":
             provider = build_llm_provider(llm_config)
+        else:
+            # Configuration, session and object-inspection commands must not
+            # import and construct a network SDK.  The concrete provider is
+            # created only when a workflow actually sends an LLM request.
+            provider = _LazyLLMProvider(llm_config)
         extractor = ClaimExtractorService(llm_config, provider, llm_cache)
 
         live_enabled = os.getenv("CAMPUS_AGENT_ENABLE_LIVE_SOURCES", "").lower() in {"1", "true", "yes"}
@@ -300,9 +313,22 @@ class RuntimeFactory:
             "credential_resolver": credential_store.resolve,
         }
         adapters = SourceAdapterRegistry()
+        social_bridge = None
+        if os.getenv("CAMPUS_AGENT_MEDIACRAWLER_ROOT"):
+            try:
+                social_bridge = MediaCrawlerSidecarClient(
+                    MediaCrawlerSidecarConfig.from_env()
+                )
+            except SocialBridgeError:
+                # Optional sidecar configuration remains observable through the
+                # registered adapter's adapter_required status.
+                social_bridge = None
         for adapter in (
             ZhaopinJobsAdapter(**adapter_kwargs),
             NowcoderExperienceAdapter(**adapter_kwargs),
+            XiaohongshuExperienceAdapter(
+                bridge_client=social_bridge, **adapter_kwargs,
+            ),
             OfficialCareersAdapter(**adapter_kwargs),
             MeituanOfficialCareersAdapter(**adapter_kwargs),
         ):
@@ -315,6 +341,7 @@ class RuntimeFactory:
         role_tools = build_role_profile_registry(
             blob_store=blob, evidence_repository=evidence, profile_repository=evidence,
             role_repository=role, adapters=adapters, credential_store=credential_store,
+            community_extractor=CommunityEvidenceExtractor(llm_config, provider, llm_cache),
         )
         tools = ToolRegistry()
         for registry in (candidate_tools, role_tools):
@@ -364,6 +391,7 @@ class RuntimeFactory:
         runtime.application_services["candidate"] = CandidateApplicationService(runtime)
         runtime.application_services["resume"] = ResumeApplicationService(runtime)
         runtime.application_services["intent"] = IntentApplicationService(runtime)
+        runtime.application_services["role"] = RoleApplicationService(runtime)
         runtime.application_services["model"] = model_profile_service
         return runtime
 
@@ -384,3 +412,18 @@ class _UnavailableLLMProvider:
 
     def generate(self, request: Any) -> Any:
         raise LLMProviderError("LLM provider configuration is incomplete")
+
+
+class _LazyLLMProvider:
+    """Delay optional network SDK construction until the model boundary."""
+
+    def __init__(self, config: LLMConfig) -> None:
+        self.config = config
+        self.integration = infer_model_integration(config)
+        self.name = f"langchain_{self.integration}"
+        self._provider: Any | None = None
+
+    def generate(self, request: Any) -> Any:
+        if self._provider is None:
+            self._provider = build_llm_provider(self.config)
+        return self._provider.generate(request)

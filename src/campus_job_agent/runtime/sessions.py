@@ -33,6 +33,7 @@ _REF_TYPES = {
     "candidate_profile_snapshot_id": "candidate_profile_snapshot",
     "career_intent_snapshot_id": "career_intent_snapshot",
     "role_profile_snapshot_ids": "role_profile_snapshot",
+    "role_intelligence_bundle_ids": "role_intelligence_bundle",
     "comparison_set_id": "comparison_set",
     "target_decision_ids": "target_decision",
     "learning_plan_id": "learning_plan",

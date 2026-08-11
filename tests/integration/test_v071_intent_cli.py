@@ -8,7 +8,9 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-CLI = REPO_ROOT / ".venv" / "bin" / "campus-agent"
+CLI = Path(os.environ.get(
+    "CAMPUS_AGENT_TEST_CLI", str(REPO_ROOT / ".venv" / "bin" / "campus-agent")
+))
 RAW_INTENT = (
     "我想找 Agent 开发岗位，工作地点必须成都，2027 年毕业，"
     "参加校招，优先大型企业以及互联网科技公司"

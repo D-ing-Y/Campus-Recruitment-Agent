@@ -25,6 +25,7 @@ dependencies = [
 
 [project.scripts]
 campus-agent = "campus_job_agent.cli:main"
+campus-agent-social-mcp = "campus_job_agent.integrations.social_media_mcp_server:main"
 
 [project.optional-dependencies]
 dev = [
@@ -41,3 +42,6 @@ campus_job_agent = ["storage/migrations/*.sql", "ontology/*.json"]
 testpaths = ["tests"]
 pythonpath = ["src", "."]
 addopts = ["-p", "no:langsmith_plugin", "-p", "no:anyio"]
+markers = [
+  "live: opt-in tests that access authenticated or public external sources",
+]

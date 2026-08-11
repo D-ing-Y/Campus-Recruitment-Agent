@@ -1,7 +1,7 @@
 # Role Demand and Reputation Contract
 
-状态：Ready for Implementation
-日期：2026-08-06
+状态：WP3.1.1 Implemented / Offline Verified / Multi-platform Live Pending
+日期：2026-08-11
 
 ## 1. 适用范围
 
@@ -35,18 +35,67 @@ CommunitySearchPlan
   company_role_group_id
   queries[]:
     query_id
+    evidence_purpose: interview_experience | employment_experience
+    round_index: 1 | 2 | 3
+    relaxation_level: exact_role | role_family | company_only
+    parent_query_id?
+    source_priority: 1 | 2
+    source_id
     query_kind: company_exact_role | company_role_family |
                 company_reputation | generic_family_interview
     query_text
     intended_document_types[]
-    source_ids[]
+    source_ids[]  # legacy read compatibility
     search_budget
     detail_budget
     expansion_reason
   status: planned | running | completed | partially_blocked | blocked
 ```
 
-每个 query 具有独立预算和回执。`company_reputation` 的结果默认只有 company scope，不能自动绑定 job。
+每个新 query 只绑定一个 source，具有独立预算和回执。`source_ids/query_kind` 只保留旧对象读取兼容。
+round 1/2/3 分别使用完整岗位名、岗位族展示名、公司；company-only 结果不能自动绑定 job。
+
+## 3.1 CommunitySearchAttemptReceipt
+
+```text
+CommunitySearchAttemptReceipt
+  attempt_id
+  company_role_group_id
+  query_id
+  source_id
+  evidence_purpose
+  round_index
+  relaxation_level
+  status: completed | empty | blocked | failed | budget_exhausted
+  discovered_candidate_ids[]
+  detail_document_ids[]
+  accepted_document_ids[]
+  reason_codes[]
+  created_at
+```
+
+Attempt ID 由 group、purpose、source、round 和 query 内容生成；恢复或重复 response 不产生新对象。
+
+## 3.2 CommunityEvidenceCoverage
+
+```text
+CommunityEvidenceCoverage
+  coverage_id
+  company_role_group_id
+  evidence_purpose
+  target_document_count: 2
+  accepted_document_ids[]
+  independent_document_count
+  attempted_query_ids[]
+  exhausted_source_ids[]
+  status: sufficient | insufficient | blocked | budget_exhausted
+  next_action: next_round | switch_source | next_purpose | next_group | complete | finalize_partial
+  reason_codes[]
+  assessed_at
+```
+
+独立详情按 canonical URL、平台帖子 ID、正文 hash 去重。Coverage 是确定性对象，不接受模型输出。
+两篇即停止；未满两篇不得把搜索摘要、重复转载或模型常识计入覆盖率。
 
 ## 4. CommunityEvidenceDocument
 
@@ -54,6 +103,7 @@ CommunitySearchPlan
 CommunityEvidenceDocument
   document_id
   artifact_id
+  source_document_id
   source_id
   detail_url
   retrieved_at
@@ -67,6 +117,25 @@ CommunityEvidenceDocument
 ```
 
 search result/snippet 不能创建本对象；必须存在成功的社区 detail Raw Artifact。
+
+## 4.1 CommunityDocumentClassificationReceipt
+
+```text
+CommunityDocumentClassificationReceipt
+  receipt_id
+  source_document_id
+  artifact_id
+  document_type
+  accepted_segment_ids[]
+  rejected_segment_count
+  reason_codes[]
+  provider / model / prompt_version
+  created_at
+```
+
+LLM 只提供 document type、原文 quote 和 scope 建议；应用定位 quote、计算字符范围与 hash、
+生成 Fragment/Segment ID 后，才创建本回执。不存在或不能唯一定位的 quote 计入 rejected，
+不得保存为 accepted Segment。
 
 ## 5. CommunityEvidenceSegment
 
@@ -214,7 +283,9 @@ OfficialEscalationReceipt
   created_at
 ```
 
-不存在 receipt 不阻止已通过 recruitment detail gate 的 Demand 发布。
+充分的平台详情必须创建 `trigger=not_required,status=not_requested` 的可审计回执；存在 escalation
+trigger 时才创建 OfficialVerificationPlan。官网不可用或未实现 adapter 不阻止已通过 recruitment
+detail gate 的 Demand 发布，但必须保留对应状态。
 
 ## 11. RoleIntelligenceBundle
 
@@ -227,7 +298,9 @@ RoleIntelligenceBundle
   job_reputation_profile_ids[]
   company_reputation_profile_ids[]
   raw_evidence_refs[]
+  source_receipt_ids[]
   missing_sections[]
+  evidence_cutoff
   created_at
 ```
 
