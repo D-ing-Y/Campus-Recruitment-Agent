@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from datetime import datetime
 from typing import Any, Literal
 
@@ -10,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from campus_job_agent.schemas.evidence import utc_now
 from campus_job_agent.schemas.role import FamilyRequirementAggregate, Qualification, RoleRequirement
-from campus_job_agent.schemas.source import canonical_hash
+from campus_job_agent.schemas.source import canonical_hash, normalize_text
 
 
 CommunityDocumentType = Literal[
@@ -26,6 +27,10 @@ CommunityUsage = Literal[
 ]
 CommunityEvidencePurpose = Literal["interview_experience", "employment_experience"]
 CommunityRelaxationLevel = Literal["exact_role", "role_family", "company_only"]
+CommunitySearchOutcome = Literal[
+    "post_candidates_found", "non_post_cards_only", "search_empty",
+    "parser_changed", "authentication_required", "risk_controlled", "failed",
+]
 
 INTERVIEW_SEGMENT_TYPES = {
     "written_exam", "interview_process", "interview_question", "recruiter_feedback",
@@ -49,6 +54,7 @@ class JobDetailCandidate(BaseModel):
     platform_job_id: str | None = None
     company_hint: str | None = None
     role_title_hint: str | None = None
+    location_hint: str | None = None
 
 
 class CommunityPostCandidate(BaseModel):
@@ -75,11 +81,29 @@ class CompanyRoleGroup(BaseModel):
     company_key: str
     company_display_name: str
     company_aliases: list[str] = Field(default_factory=list)
+    company_search_term: str | None = None
+    verified_company_aliases: list[str] = Field(default_factory=list)
+    company_alias_policy_version: str = "company_alias_v1"
     role_family_id: str
     job_instance_ids: list[str] = Field(min_length=1)
     exact_role_terms: list[str] = Field(default_factory=list)
     status: Literal["active", "insufficient_identity", "excluded"] = "active"
     created_at: datetime = Field(default_factory=utc_now)
+
+    @model_validator(mode="after")
+    def validate_search_identity(self) -> "CompanyRoleGroup":
+        aliases = sorted({item.strip() for item in self.verified_company_aliases if item.strip()})
+        search_term = (self.company_search_term or self.company_display_name).strip()
+        allowed = {normalize_text(self.company_display_name), *(normalize_text(item) for item in aliases)}
+        if normalize_text(search_term) not in allowed:
+            raise ValueError("company search term must be the display name or a verified alias")
+        self.company_search_term = search_term
+        self.verified_company_aliases = aliases
+        self.company_aliases = sorted({
+            *(item.strip() for item in self.company_aliases if item.strip()),
+            self.company_display_name.strip(), *aliases,
+        })
+        return self
 
 
 class CommunitySearchQuery(BaseModel):
@@ -151,8 +175,140 @@ class CommunitySearchAttemptReceipt(BaseModel):
     discovered_candidate_ids: list[str] = Field(default_factory=list)
     detail_document_ids: list[str] = Field(default_factory=list)
     accepted_document_ids: list[str] = Field(default_factory=list)
+    diagnostic_id: str | None = None
     reason_codes: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=utc_now)
+
+
+class CommunitySearchDiagnostic(BaseModel):
+    diagnostic_id: str
+    schema_version: Literal["v0.7.1"] = "v0.7.1"
+    source_id: str
+    query_id: str
+    outcome: CommunitySearchOutcome
+    raw_record_count: int = Field(default=0, ge=0)
+    post_candidate_count: int = Field(default=0, ge=0)
+    non_post_record_count: int = Field(default=0, ge=0)
+    parser_signature: str
+    reason_codes: list[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=utc_now)
+
+    @model_validator(mode="after")
+    def validate_counts(self) -> "CommunitySearchDiagnostic":
+        if self.post_candidate_count + self.non_post_record_count > self.raw_record_count:
+            raise ValueError("classified search records cannot exceed raw record count")
+        if self.outcome == "post_candidates_found" and self.post_candidate_count == 0:
+            raise ValueError("post candidate outcome requires at least one candidate")
+        return self
+
+
+class CommunitySourceEvaluation(BaseModel):
+    evaluation_id: str
+    schema_version: Literal["v0.7.1"] = "v0.7.1"
+    run_id: str
+    source_id: str
+    evidence_purpose: CommunityEvidencePurpose
+    sampled_detail_count: int = Field(default=0, ge=0, le=2)
+    relevant_detail_count: int = Field(default=0, ge=0)
+    valid_body_count: int = Field(default=0, ge=0)
+    scope_hit_count: int = Field(default=0, ge=0)
+    accepted_segment_count: int = Field(default=0, ge=0)
+    duplicate_detail_count: int = Field(default=0, ge=0)
+    failed_detail_count: int = Field(default=0, ge=0)
+    relevance_rate: float = Field(default=0.0, ge=0.0, le=1.0)
+    valid_body_rate: float = Field(default=0.0, ge=0.0, le=1.0)
+    scope_hit_rate: float = Field(default=0.0, ge=0.0, le=1.0)
+    duplicate_rate: float = Field(default=0.0, ge=0.0, le=1.0)
+    failure_rate: float = Field(default=0.0, ge=0.0, le=1.0)
+    latency_ms: int = Field(default=0, ge=0)
+    search_cost_units: float = Field(default=0.0, ge=0.0)
+    reason_codes: list[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=utc_now)
+
+    @model_validator(mode="after")
+    def validate_sample_counts(self) -> "CommunitySourceEvaluation":
+        for value in (
+            self.relevant_detail_count, self.valid_body_count,
+            self.scope_hit_count, self.duplicate_detail_count,
+            self.failed_detail_count,
+        ):
+            if value > self.sampled_detail_count:
+                raise ValueError("community source metric exceeds sampled details")
+        return self
+
+
+class CommunityContentCluster(BaseModel):
+    cluster_id: str
+    schema_version: Literal["v0.7.1"] = "v0.7.1"
+    company_role_group_id: str
+    evidence_purpose: CommunityEvidencePurpose
+    representative_document_id: str
+    member_document_ids: list[str] = Field(min_length=1)
+    member_segment_ids: list[str] = Field(default_factory=list)
+    source_ids: list[str] = Field(min_length=1)
+    merge_methods: list[Literal[
+        "not_merged", "canonical_url", "platform_post_id", "body_hash",
+        "shingle_jaccard", "semantic_segment_receipt",
+    ]] = Field(default_factory=lambda: ["not_merged"])
+    max_similarity: float = Field(default=1.0, ge=0.0, le=1.0)
+    semantic_decision_receipt_id: str | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+
+    @model_validator(mode="after")
+    def validate_cluster_members(self) -> "CommunityContentCluster":
+        self.member_document_ids = list(dict.fromkeys(self.member_document_ids))
+        self.member_segment_ids = list(dict.fromkeys(self.member_segment_ids))
+        self.source_ids = sorted(set(self.source_ids))
+        if self.representative_document_id not in self.member_document_ids:
+            raise ValueError("cluster representative must be a member")
+        if "semantic_segment_receipt" in self.merge_methods and not self.semantic_decision_receipt_id:
+            raise ValueError("semantic merge requires a decision receipt")
+        return self
+
+
+class CommunitySearchDecisionReceipt(BaseModel):
+    decision_id: str
+    schema_version: Literal["v0.7.1"] = "v0.7.1"
+    run_id: str
+    evidence_purpose: CommunityEvidencePurpose
+    source_evaluation_ids: list[str] = Field(default_factory=list)
+    ranked_source_ids: list[str] = Field(default_factory=list)
+    budget_allocation: dict[str, float] = Field(default_factory=dict)
+    missing_topics: list[str] = Field(default_factory=list, max_length=10)
+    proposed_keywords: list[str] = Field(default_factory=list, max_length=10)
+    semantic_duplicate_segment_groups: list[list[str]] = Field(
+        default_factory=list, max_length=20
+    )
+    cluster_ids: list[str] = Field(default_factory=list)
+    verdict: Literal["sufficient", "insufficient"]
+    hard_floor_met: bool
+    provider: str
+    model: str
+    prompt_version: str = "community_search_decision_v1"
+    reason_codes: list[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=utc_now)
+
+    @model_validator(mode="after")
+    def validate_bounded_decision(self) -> "CommunitySearchDecisionReceipt":
+        ranked = list(dict.fromkeys(self.ranked_source_ids))
+        if ranked != self.ranked_source_ids:
+            raise ValueError("ranked community sources must be unique")
+        if set(self.budget_allocation) - set(ranked):
+            raise ValueError("budget allocation contains an unranked source")
+        total = sum(self.budget_allocation.values())
+        if self.budget_allocation and abs(total - 1.0) > 1e-6:
+            raise ValueError("community source allocation must sum to one")
+        if any(value not in {0.0, 0.3, 0.7, 1.0} for value in self.budget_allocation.values()):
+            raise ValueError("community source allocation must use policy weights")
+        if self.verdict == "sufficient" and not self.hard_floor_met:
+            raise ValueError("LLM cannot override the independent-cluster hard floor")
+        for keyword in self.proposed_keywords:
+            if len(keyword) > 80 or re.search(
+                r"https?://|\b(?:site|inurl|intitle|filetype):", keyword,
+                re.IGNORECASE,
+            ):
+                raise ValueError("proposed community keyword exceeds policy")
+        return self
 
 
 class CommunityEvidenceCoverage(BaseModel):
@@ -160,9 +316,13 @@ class CommunityEvidenceCoverage(BaseModel):
     schema_version: Literal["v0.7.1"] = "v0.7.1"
     company_role_group_id: str
     evidence_purpose: CommunityEvidencePurpose
-    target_document_count: int = Field(default=2, ge=1, le=10)
+    target_document_count: int = Field(default=3, ge=1, le=10)
     accepted_document_ids: list[str] = Field(default_factory=list)
     independent_document_count: int = Field(default=0, ge=0)
+    target_cluster_count: int = Field(default=3, ge=1, le=10)
+    accepted_cluster_ids: list[str] = Field(default_factory=list)
+    independent_cluster_count: int = Field(default=0, ge=0)
+    decision_receipt_id: str | None = None
     attempted_query_ids: list[str] = Field(default_factory=list)
     exhausted_source_ids: list[str] = Field(default_factory=list)
     status: Literal["sufficient", "insufficient", "blocked", "budget_exhausted"]
@@ -177,8 +337,10 @@ class CommunityEvidenceCoverage(BaseModel):
     def validate_count(self) -> "CommunityEvidenceCoverage":
         if self.independent_document_count != len(set(self.accepted_document_ids)):
             raise ValueError("independent document count must match unique accepted documents")
-        if self.status == "sufficient" and self.independent_document_count < self.target_document_count:
-            raise ValueError("sufficient coverage requires target document count")
+        if self.independent_cluster_count != len(set(self.accepted_cluster_ids)):
+            raise ValueError("independent cluster count must match unique accepted clusters")
+        if self.status == "sufficient" and self.independent_cluster_count < self.target_cluster_count:
+            raise ValueError("sufficient coverage requires target cluster count")
         return self
 
 
@@ -429,8 +591,9 @@ def quote_hash(value: str) -> str:
 
 __all__ = [
     "AssessmentSignal", "CommunityDocumentClassificationReceipt",
-    "CommunityEvidenceDocument", "CommunityEvidenceSegment", "CommunityExtractionBatch",
+    "CommunityContentCluster", "CommunityEvidenceDocument", "CommunityEvidenceSegment", "CommunityExtractionBatch",
     "CommunityEvidenceCoverage", "CommunityEvidencePurpose", "CommunityExtractionSegment",
+    "CommunitySearchDecisionReceipt", "CommunitySourceEvaluation",
     "CommunityPostCandidate", "CommunityRelaxationLevel", "CommunitySearchAttemptReceipt",
     "CommunitySearchPlan", "CommunitySearchQuery", "CompanyReputationProfile", "CompanyRoleGroup",
     "DemandDenominator", "INTERVIEW_SEGMENT_TYPES", "JobDemandProfile",

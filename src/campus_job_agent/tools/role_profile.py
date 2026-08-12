@@ -4,9 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from campus_job_agent.llm import StructuredOutputError
 from campus_job_agent.schemas import (
-    CommunityEvidenceDocument, CommunityEvidenceSegment, CommunityExtractionBatch,
-    CommunityPostCandidate, CommunitySearchPlan, CompanyRoleGroup,
+    CommunityContentCluster, CommunityEvidenceDocument, CommunityEvidenceSegment,
+    CommunityExtractionBatch,
+    CommunityPostCandidate, CommunitySearchDecisionReceipt,
+    CommunitySearchDiagnostic, CommunitySearchPlan, CommunitySourceEvaluation,
+    CompanyRoleGroup,
     ExperienceEvidenceRecord, ExperienceScopeLink, FieldResolution, JobDemandProfile,
     JobDetailCandidate, JobIdentityLink, JobReputationProfile,
     JobPostingCluster, NormalizedJobPosting, OfficialVerificationPlan,
@@ -14,16 +18,18 @@ from campus_job_agent.schemas import (
     RoleFamilyMembership, RoleIntelligenceBundle, SearchScope, SourceDetailRequest,
     SourceDocument, SourceQuery, SourceRunReceipt, ToolResult,
 )
+from campus_job_agent.schemas.evidence import utc_now
 from campus_job_agent.sources.adapters import SourceAdapterRegistry
 from campus_job_agent.sources.credential_store import LocalCredentialStore
 from campus_job_agent.sources.processing import (
-    discover_community_post_candidates, discover_job_detail_candidates,
+    diagnose_community_search, discover_community_post_candidates, discover_job_detail_candidates,
     deduplicate_experience, deduplicate_jobs, extract_archived_document,
     link_job_identity, normalize_experience_document, normalize_job_document,
     parse_official_document, plan_official_verification,
 )
 from campus_job_agent.sources.role_intelligence import (
     CommunityEvidenceExtractor, build_community_search_plan,
+    CommunitySearchEvaluator,
     build_company_role_groups, ensure_community_body_fragment,
     materialize_community_evidence,
 )
@@ -64,8 +70,14 @@ class CollectSourceTool:
             adapter = self.adapters.get(query.source_id)
             if adapter is None:
                 return _fail(self.name, f"source adapter not registered: {query.source_id}", "source_changed")
+            started_at = utc_now()
             batch = adapter.collect(query, args.get("credential_ref"))
-            receipt = _save_receipt(self.role_repository, str(args["run_id"]), adapter, batch, bool(args.get("credential_ref")))
+            completed_at = utc_now()
+            receipt = _save_receipt(
+                self.role_repository, str(args["run_id"]), adapter, batch,
+                bool(args.get("credential_ref")), started_at=started_at,
+                completed_at=completed_at,
+            )
             if batch.status not in {"success", "empty"}:
                 return _fail(self.name, batch.error_type or batch.status, batch.error_type or batch.status,
                              retryable=batch.retryable, needs_user_action=batch.needs_user_action,
@@ -123,6 +135,114 @@ class FetchSourceDetailTool:
             return _fail(self.name, str(exc), "storage_error", retryable=True)
 
 
+class FetchCommunityDetailsTool:
+    """Fetch a bounded homogeneous community batch through one domain Tool call."""
+
+    name = "source.fetch_community_details"
+
+    def __init__(
+        self, adapters: SourceAdapterRegistry,
+        role_repository: SQLiteRoleRepository,
+    ) -> None:
+        self.adapters, self.role_repository = adapters, role_repository
+
+    def run(self, args: dict[str, Any]) -> ToolResult:
+        try:
+            requests = [
+                SourceDetailRequest.model_validate(item)
+                for item in args.get("requests", [])
+            ]
+            if not 1 <= len(requests) <= 10:
+                return _fail(
+                    self.name, "community detail batch size must be 1..10",
+                    "unsupported_input",
+                )
+            source_ids = {item.source_id for item in requests}
+            if len(source_ids) != 1 or any(
+                item.channel != "experience" for item in requests
+            ):
+                return _fail(
+                    self.name, "community detail batch must use one experience source",
+                    "unsupported_input",
+                )
+            adapter = self.adapters.get(next(iter(source_ids)))
+            if adapter is None or not callable(getattr(adapter, "fetch_detail", None)):
+                return _fail(
+                    self.name, "community detail adapter is unavailable",
+                    "unsupported_input",
+                )
+            for request in requests:
+                self.role_repository.save(
+                    "source_detail_request", request,
+                    idempotency_key=f"source-detail-request:{request.idempotency_key}",
+                )
+            fetch_many = getattr(adapter, "fetch_details", None)
+            started_at = utc_now()
+            if callable(fetch_many):
+                batches = fetch_many(
+                    requests, credential_ref=args.get("credential_ref"),
+                    max_concurrency=min(int(args.get("max_concurrency", 2)), 2),
+                )
+            else:
+                batches = [
+                    adapter.fetch_detail(request, args.get("credential_ref"))
+                    for request in requests
+                ]
+            completed_at = utc_now()
+            if len(batches) != len(requests):
+                return _fail(
+                    self.name, "community detail adapter returned an incomplete batch",
+                    "source_changed",
+                )
+            records: list[dict[str, Any]] = []
+            evidence_ids: list[str] = []
+            failures = []
+            for request, batch in zip(requests, batches, strict=True):
+                receipt = _save_receipt(
+                    self.role_repository, str(args["run_id"]), adapter, batch,
+                    bool(args.get("credential_ref")),
+                    started_at=started_at, completed_at=completed_at,
+                )
+                for document in batch.documents:
+                    self.role_repository.save(
+                        "source_document", document,
+                        idempotency_key=(
+                            f"source-document:{document.source_document_id}"
+                        ),
+                    )
+                    if document.raw_artifact_id:
+                        evidence_ids.append(str(document.raw_artifact_id))
+                records.append({
+                    "detail_request_id": request.detail_request_id,
+                    "batch": batch.model_dump(mode="json"),
+                    "receipt": receipt.model_dump(mode="json"),
+                })
+                if batch.status not in {"success", "empty"}:
+                    failures.append(batch)
+            if failures:
+                first = failures[0]
+                return _fail(
+                    self.name, first.error_type or first.status,
+                    first.error_type or first.status,
+                    retryable=any(item.retryable for item in failures),
+                    needs_user_action=any(
+                        item.needs_user_action for item in failures
+                    ),
+                    records=records, evidence_ids=evidence_ids,
+                )
+            return _ok(
+                self.name, records, evidence_ids,
+                request_count=len(requests),
+                success_count=sum(
+                    item.status == "success" for item in batches
+                ),
+            )
+        except ValueError as exc:
+            return _fail(self.name, str(exc), "unsupported_input")
+        except Exception as exc:
+            return _fail(self.name, str(exc), "storage_error", retryable=True)
+
+
 class ValidateExternalSessionTool:
     name = "source.validate_external_session"
 
@@ -152,12 +272,20 @@ class DiscoverJobDetailCandidatesTool:
     def run(self, args: dict[str, Any]) -> ToolResult:
         try:
             candidates: list[JobDetailCandidate] = []
+            scope_value = args.get("search_scope")
+            preferred_locations = (
+                SearchScope.model_validate(scope_value).locations
+                if scope_value is not None else []
+            )
             for document_id in args.get("source_document_ids", []):
                 document = self.role_repository.get(str(document_id), SourceDocument)
                 if document is None or not document.raw_artifact_id:
                     continue
                 fragments = self.evidence_repository.list_fragments(document.raw_artifact_id)
-                for item in discover_job_detail_candidates(document, fragments):
+                for item in discover_job_detail_candidates(
+                    document, fragments,
+                    preferred_locations=preferred_locations,
+                ):
                     candidates.append(self.role_repository.save(
                         "job_detail_candidate", item,
                         idempotency_key=f"job-detail-candidate:{item.candidate_id}",
@@ -179,6 +307,7 @@ class DiscoverCommunityPostCandidatesTool:
     def run(self, args: dict[str, Any]) -> ToolResult:
         try:
             candidates: list[CommunityPostCandidate] = []
+            diagnostics: list[CommunitySearchDiagnostic] = []
             intended_by_query = dict(args.get("intended_by_query", {}))
             group_by_query = dict(args.get("group_by_query", {}))
             for document_id in args.get("source_document_ids", []):
@@ -193,6 +322,11 @@ class DiscoverCommunityPostCandidatesTool:
                     company_hint=group.company_display_name if group else None,
                     role_family_hint=group.role_family_id if group else None,
                 )
+                diagnostic = diagnose_community_search(document, fragments, values)
+                diagnostics.append(self.role_repository.save(
+                    "community_search_diagnostic", diagnostic,
+                    idempotency_key=f"community-search-diagnostic:{diagnostic.diagnostic_id}",
+                ))
                 for item in values:
                     candidates.append(self.role_repository.save(
                         "community_post_candidate", item,
@@ -201,6 +335,8 @@ class DiscoverCommunityPostCandidatesTool:
             return _ok(
                 self.name, [item.model_dump(mode="json") for item in candidates],
                 [item.candidate_id for item in candidates],
+                diagnostic_ids=[item.diagnostic_id for item in diagnostics],
+                diagnostic_outcomes={item.diagnostic_id: item.outcome for item in diagnostics},
             )
         except Exception as exc:
             return _fail(self.name, str(exc), "normalization_error")
@@ -634,11 +770,12 @@ class ClassifyCommunityDocumentsTool:
         self.extractor = extractor
 
     def run(self, args: dict[str, Any]) -> ToolResult:
+        documents: list[CommunityEvidenceDocument] = []
+        segments: list[CommunityEvidenceSegment] = []
+        receipts = []
+        llm_calls: list[dict[str, Any]] = []
         try:
-            documents: list[CommunityEvidenceDocument] = []
-            segments: list[CommunityEvidenceSegment] = []
-            receipts = []
-            llm_calls: list[dict[str, Any]] = []
+            remaining_llm_calls = max(0, int(args.get("max_llm_calls", 10**6)))
             group_by_query = dict(args.get("group_by_query", {}))
             candidate_by_url = {
                 item.detail_url: item
@@ -655,7 +792,14 @@ class ClassifyCommunityDocumentsTool:
                 fragments = self.evidence_repository.list_fragments(source_document.raw_artifact_id)
                 if not fragments:
                     continue
-                source_fragment = max(fragments, key=lambda item: len(item.text))
+                source_fragment = next(
+                    (
+                        item for item in fragments
+                        if item.metadata.get("parser_version")
+                        == "nowcoder_main_body_v1"
+                    ),
+                    max(fragments, key=lambda item: len(item.text)),
+                )
                 body = ensure_community_body_fragment(
                     source_document, source_fragment, self.evidence_repository
                 )
@@ -670,21 +814,28 @@ class ClassifyCommunityDocumentsTool:
                         fixture_payload = __import__("json").loads(source_fragment.text)
                     except (ValueError, TypeError):
                         fixture_payload = None
-                    if not (
+                    is_fixture = (
                         isinstance(fixture_payload, dict)
                         and (
                             "community_extraction" in fixture_payload
                             or {"document_type", "segments"}.issubset(fixture_payload)
                         )
-                    ):
+                    )
+                    if not is_fixture:
                         extraction_text = body.text
+                        if remaining_llm_calls <= 0:
+                            continue
                     batch, calls = self.extractor.extract(
                         text=extraction_text,
                         company=group.company_display_name if group else None,
                         role_family=group.role_family_id if group else None,
                         intended_document_types=intended,
+                        max_total_attempts=max(1, remaining_llm_calls),
                     )
                     llm_calls.extend(item.model_dump(mode="json") for item in calls)
+                    remaining_llm_calls -= sum(
+                        int(item.retry_count) + 1 for item in calls
+                    )
                     provider = self.extractor.provider.name
                     model = self.extractor.config.model
                 else:
@@ -724,8 +875,188 @@ class ClassifyCommunityDocumentsTool:
                     *[item.receipt_id for item in receipts],
                 ],
             )
+        except StructuredOutputError as exc:
+            failed_calls = [
+                *llm_calls,
+                *(item.model_dump(mode="json") for item in exc.call_records),
+            ]
+            return _fail(
+                self.name, str(exc),
+                exc.error_type if exc.error_type in {
+                    "network_timeout", "rate_limited", "auth_required",
+                    "provider_error",
+                } else "llm_output_error",
+                retryable=exc.retryable,
+                records=[{
+                    "documents": [], "segments": [], "receipts": [],
+                    "llm_calls": failed_calls,
+                }],
+            )
         except Exception as exc:
-            return _fail(self.name, str(exc), "llm_output_error")
+            return _fail(
+                self.name, str(exc), "llm_output_error",
+                records=[{
+                    "documents": [], "segments": [], "receipts": [],
+                    "llm_calls": llm_calls,
+                }],
+            )
+
+
+class EvaluateCommunitySearchTool:
+    name = "role.evaluate_community_search"
+
+    def __init__(
+        self, evidence_repository: EvidenceRepository,
+        role_repository: SQLiteRoleRepository,
+        evaluator: CommunitySearchEvaluator | None,
+    ) -> None:
+        self.evidence_repository = evidence_repository
+        self.role_repository = role_repository
+        self.evaluator = evaluator
+
+    def run(self, args: dict[str, Any]) -> ToolResult:
+        calls: list[Any] = []
+        try:
+            evaluations = [
+                item for value in args.get("source_evaluation_ids", [])
+                if (item := self.role_repository.get(
+                    str(value), CommunitySourceEvaluation
+                )) is not None
+            ]
+            clusters = [
+                item for value in args.get("cluster_ids", [])
+                if (item := self.role_repository.get(
+                    str(value), CommunityContentCluster
+                )) is not None
+            ]
+            if not evaluations:
+                return _fail(
+                    self.name, "community source calibration is unavailable",
+                    "validation_error",
+                )
+            segment_summaries: list[dict[str, str]] = []
+            for cluster in clusters[:12]:
+                for segment_id in cluster.member_segment_ids[:6]:
+                    segment = self.role_repository.get(
+                        segment_id, CommunityEvidenceSegment
+                    )
+                    if segment is None or segment.validation_status != "accepted":
+                        continue
+                    fragment = self.evidence_repository.get_fragment(
+                        segment.fragment_id
+                    )
+                    if fragment is None:
+                        continue
+                    segment_summaries.append({
+                        "segment_id": segment.segment_id,
+                        "quote": fragment.text,
+                        "limited_summary": segment.limited_summary,
+                    })
+            hard_floor_met = len(clusters) >= 3
+            if self.evaluator is None or self.evaluator.provider.name == "mock":
+                ranked = sorted(
+                    evaluations,
+                    key=lambda item: (
+                        item.valid_body_rate + item.relevance_rate
+                        + item.scope_hit_rate
+                        + min(item.accepted_segment_count, 3) / 3
+                        - item.duplicate_rate - item.failure_rate
+                        - min(item.latency_ms / 30_000, 1.0) * 0.1
+                        - min(item.search_cost_units, 1.0) * 0.05,
+                        item.source_id,
+                    ),
+                    reverse=True,
+                )
+                available = [
+                    item.source_id for item in ranked
+                    if item.sampled_detail_count > 0
+                ]
+                allocation = (
+                    {available[0]: 1.0} if len(available) == 1
+                    else {available[0]: 0.7, available[1]: 0.3}
+                    if len(available) >= 2 else {}
+                )
+                decision = CommunitySearchDecisionReceipt(
+                    decision_id=(
+                        "community-search-decision:deterministic:"
+                        + __import__("hashlib").sha256(
+                            ":".join(item.evaluation_id for item in ranked).encode()
+                        ).hexdigest()[:24]
+                    ),
+                    run_id=str(args["run_id"]),
+                    evidence_purpose=str(args["evidence_purpose"]),
+                    source_evaluation_ids=[item.evaluation_id for item in ranked],
+                    ranked_source_ids=[item.source_id for item in ranked],
+                    budget_allocation=allocation,
+                    proposed_keywords=[], cluster_ids=[item.cluster_id for item in clusters],
+                    verdict="sufficient" if hard_floor_met else "insufficient",
+                    hard_floor_met=hard_floor_met, provider="deterministic",
+                    model="community-metric-fallback-v1",
+                    reason_codes=[
+                        "mock_or_unavailable_evaluator_fallback",
+                        "hard_floor_met" if hard_floor_met else "hard_floor_not_met",
+                    ],
+                )
+            else:
+                decision, calls = self.evaluator.evaluate(
+                    run_id=str(args["run_id"]),
+                    evidence_purpose=str(args["evidence_purpose"]),
+                    evaluations=evaluations, clusters=clusters,
+                    segment_summaries=segment_summaries,
+                    allowed_keywords=[
+                        str(value) for value in args.get("allowed_keywords", [])
+                    ],
+                    hard_floor_met=hard_floor_met,
+                    max_total_attempts=max(
+                        1, int(args.get("max_llm_calls", 3))
+                    ),
+                )
+            saved = self.role_repository.save(
+                "community_search_decision_receipt", decision,
+                idempotency_key=f"community-search-decision:{decision.decision_id}",
+            )
+            return _ok(
+                self.name, [{
+                    "decision": saved.model_dump(mode="json"),
+                    "llm_calls": [item.model_dump(mode="json") for item in calls],
+                }], [saved.decision_id],
+            )
+        except StructuredOutputError as exc:
+            return _fail(
+                self.name, str(exc),
+                exc.error_type if exc.error_type in {
+                    "network_timeout", "rate_limited", "auth_required",
+                    "provider_error",
+                } else "llm_output_error",
+                retryable=exc.retryable,
+                records=[{
+                    "decision": None,
+                    "llm_calls": [
+                        item.model_dump(mode="json")
+                        for item in exc.call_records
+                    ],
+                }],
+            )
+        except ValueError as exc:
+            return _fail(
+                self.name, str(exc), "policy_blocked",
+                records=[{
+                    "decision": None,
+                    "llm_calls": [
+                        item.model_dump(mode="json") for item in calls
+                    ],
+                }],
+            )
+        except Exception as exc:
+            return _fail(
+                self.name, str(exc), "llm_output_error",
+                records=[{
+                    "decision": None,
+                    "llm_calls": [
+                        item.model_dump(mode="json") for item in calls
+                    ],
+                }],
+            )
 
 
 class BuildOfficialEscalationReceiptsTool:
@@ -900,7 +1231,11 @@ class ValidateCredentialRefTool:
         except Exception as exc: return _fail(self.name, str(exc), "credential_invalid")
 
 
-def _save_receipt(repository: SQLiteRoleRepository, run_id: str, adapter: Any, batch: Any, auth_used: bool) -> SourceRunReceipt:
+def _save_receipt(
+    repository: SQLiteRoleRepository, run_id: str, adapter: Any, batch: Any,
+    auth_used: bool, *, started_at: Any | None = None,
+    completed_at: Any | None = None,
+) -> SourceRunReceipt:
     receipt = SourceRunReceipt(
         run_id=run_id, source_id=batch.source_id, channel=batch.channel, adapter_version=adapter.capabilities.adapter_version,
         query_ids=[batch.query_id], received_count=len(batch.documents), archived_count=sum(bool(item.raw_artifact_id) for item in batch.documents),
@@ -908,6 +1243,7 @@ def _save_receipt(repository: SQLiteRoleRepository, run_id: str, adapter: Any, b
         public_source_urls=[item.source_url for item in batch.documents if item.source_url.startswith("http")], auth_used=auth_used,
         status="completed" if batch.status in {"success", "empty", "official_not_found"} else "interrupted" if batch.needs_user_action else "failed",
         warnings=[value for value in [batch.error_type] if value],
+        started_at=started_at or utc_now(), completed_at=completed_at or utc_now(),
     )
     # An auth-required batch can be replaced by a successful batch after the user
     # resumes with a credential ref. Preserve both state transitions while keeping
@@ -963,11 +1299,13 @@ def _legacy_fixture_community_extraction(payload: dict[str, Any]) -> dict[str, A
 def build_role_profile_registry(*, blob_store: BlobStore, evidence_repository: EvidenceRepository,
                                 profile_repository: ProfileRepository, role_repository: SQLiteRoleRepository,
                                 adapters: SourceAdapterRegistry, credential_store: LocalCredentialStore,
-                                community_extractor: CommunityEvidenceExtractor | None = None) -> ToolRegistry:
+                                community_extractor: CommunityEvidenceExtractor | None = None,
+                                community_evaluator: CommunitySearchEvaluator | None = None) -> ToolRegistry:
     registry = ToolRegistry()
     for tool in [
         CollectSourceTool("source.discover_jobs", adapters, role_repository), CollectSourceTool("source.collect_experience", adapters, role_repository),
         FetchSourceDetailTool(adapters, role_repository),
+        FetchCommunityDetailsTool(adapters, role_repository),
         ValidateExternalSessionTool(adapters),
         DiscoverJobDetailCandidatesTool(evidence_repository, role_repository),
         DiscoverCommunityPostCandidatesTool(evidence_repository, role_repository),
@@ -980,6 +1318,9 @@ def build_role_profile_registry(*, blob_store: BlobStore, evidence_repository: E
         ProjectJobInstanceTool(evidence_repository, profile_repository, role_repository), AggregateRoleFamilyTool(profile_repository),
         BuildCompanyRoleGroupsTool(role_repository), PlanCommunitySearchTool(role_repository),
         ClassifyCommunityDocumentsTool(evidence_repository, role_repository, community_extractor),
+        EvaluateCommunitySearchTool(
+            evidence_repository, role_repository, community_evaluator,
+        ),
         BuildOfficialEscalationReceiptsTool(role_repository),
         ProjectRoleIntelligenceTool(evidence_repository, role_repository),
         ImportCredentialTool(credential_store), ValidateCredentialRefTool(credential_store),

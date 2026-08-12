@@ -21,10 +21,6 @@ _CHROME_SOURCES = {
         "domain": ".zhaopin.com",
         "required_cookies": set(),
     },
-    "nowcoder_experience": {
-        "domain": ".nowcoder.com",
-        "required_cookies": set(),
-    },
 }
 
 
@@ -113,6 +109,23 @@ class LocalCredentialStore:
         return CredentialRef(
             credential_ref=f"local-secret://llm/{profile_id}",
             source_id="llm", credential_type="api_key_ref",
+        )
+
+    def save_source_api_key(
+        self, *, source_id: str, api_key: str, name: str = "default"
+    ) -> CredentialRef:
+        """Persist a source API key without returning or logging its payload."""
+        if source_id != "nowcoder_experience":
+            raise ValueError("source API key import is not allowed for this source")
+        if not api_key or not api_key.strip():
+            raise ValueError("API key is required")
+        self._write(
+            source_id=source_id, name=name, credential_type="api_key_ref",
+            headers={"api_key": api_key.strip()},
+        )
+        return CredentialRef(
+            credential_ref=f"local-secret://{source_id}/{name}",
+            source_id=source_id, credential_type="api_key_ref",
         )
 
     def resolve_api_key(self, credential_ref: str) -> str:

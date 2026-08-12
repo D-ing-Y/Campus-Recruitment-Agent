@@ -21,7 +21,7 @@
 | v0.5 | 已完成 | 岗位需求画像 Graph | 招聘/官网/面经证据、岗位族与具体岗位画像、检索循环 |
 | v0.6 | 已完成 | 双画像匹配与用户决策 | 四类差距、可解释匹配、偏好调整、回退与重检索 |
 | v0.7 | 已完成 | 准备计划与反馈闭环 | 最小准备包、容量排期、反馈证据、画像更新、动态重排 |
-| v0.7.1 | 实施中 | 子图纵向闭环与 CLI 加固 | WP3.1.1 offline 通过，下一门禁为社区多平台 L2 live |
+| v0.7.1 | 实施中 | 子图纵向闭环与 CLI 加固 | WP3.2 代码/offline 通过；社区 Brave/Crawl4AI/REST L2 partial |
 | v0.8 | 计划中 | Hybrid RAG 与长期记忆 | 稀疏+稠密检索、metadata filter、rerank、引用回答 |
 | v1.0 | 计划中 | 单 Agent 端到端产品 | 父图、subgraph、checkpoint、interrupt、完整 eval |
 | v1.1 | 计划中 | 分布式存储与异步执行 | PostgreSQL、对象存储、向量存储、队列、幂等与恢复 |
@@ -250,9 +250,10 @@ DeepSeek、智联、牛客、企业官网传输和真实 auth resume 已通过�
 ## v0.7.1：子 Workflow 纵向闭环与 CLI 加固
 
 状态：In Progress（2026-07-30）。Requirements / RFC / ADR / CLI-Run Contract、实现任务和
-Eval plan 已确认；WP0、WP1.1、WP1.2、WP1.3.2 与 WP2 重验已通过；WP3.1.1 已完成社区三层
-确定性放宽、牛客/小红书来源级联和 Sidecar 离线闭环，招聘真实 L1 已通过；多平台社区真实 L2
-尚未运行，旧牛客精确搜索仍为 partial；WP3 完整验收及 WP4-WP7
+Eval plan 已确认；WP0、WP1.1、WP1.2、WP1.3.2 与 WP2 重验已通过；WP3.2 已用 Brave Search、
+Crawl4AI 进程内批量抓取和 MediaCrawler REST 取代牛客站内搜索与专用社媒 MCP，招聘真实 L1 已通过；
+WP3.2 离线门禁通过，但 Brave 当前凭据被拒绝、牛客详情返回登录墙、MediaCrawler 服务未启动，
+所以社区 L2 保持 partial；WP3 完整验收及 WP4-WP7
 尚未完成。当前通过的是分阶段验收，
 不等同于 v0.7.1 整体 Implemented / Accepted。
 

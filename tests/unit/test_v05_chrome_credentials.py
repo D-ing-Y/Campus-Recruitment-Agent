@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import io
 import os
+import sys
 from dataclasses import dataclass
 
 import pytest
@@ -59,29 +61,33 @@ def test_zhaopin_rejects_empty_cookie_jar(tmp_path):
     assert not list((tmp_path / "credentials").glob("*.json"))
 
 
-def test_nowcoder_import_and_validation_preserve_cookie_type(tmp_path):
+def test_nowcoder_uses_source_api_key_and_rejects_chrome_cookie_import(tmp_path):
     store = LocalCredentialStore(tmp_path / "credentials")
-    ref = store.import_chrome(
-        source_id="nowcoder_experience",
-        cookie_loader=lambda **_: [Cookie("token", "secret", ".nowcoder.com")],
+    ref = store.save_source_api_key(
+        source_id="nowcoder_experience", api_key="brave-secret",
     )
-    assert store.validate_ref(ref.credential_ref, source_id="nowcoder_experience").credential_type == "cookie"
-
-
-def test_cli_prints_reference_but_never_cookie(monkeypatch, tmp_path, capsys):
-    real_import = LocalCredentialStore.import_chrome
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("CAMPUS_AGENT_DATA_ROOT", str(tmp_path / "data"))
-
-    def fake_import(self, **kwargs):
-        return real_import(LocalCredentialStore(tmp_path / "target"),
-            source_id=kwargs["source_id"],
-            cookie_loader=lambda **_: [Cookie("token", "super-secret", ".nowcoder.com")],
+    assert store.validate_ref(
+        ref.credential_ref, source_id="nowcoder_experience"
+    ).credential_type == "api_key_ref"
+    assert store.resolve(
+        ref.credential_ref, source_id="nowcoder_experience"
+    )["api_key"] == "brave-secret"
+    with pytest.raises(ValueError, match="not allowed"):
+        store.import_chrome(
+            source_id="nowcoder_experience",
+            cookie_loader=lambda **_: [
+                Cookie("token", "secret", ".nowcoder.com")
+            ],
         )
 
-    monkeypatch.setattr(LocalCredentialStore, "import_chrome", fake_import)
+
+def test_cli_prints_brave_reference_but_never_api_key(monkeypatch, tmp_path, capsys):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("CAMPUS_AGENT_DATA_ROOT", str(tmp_path / "data"))
+    monkeypatch.setattr(sys, "stdin", io.StringIO("super-secret\n"))
     assert main([
-        "auth", "import-chrome", "--source", "nowcoder",
+        "auth", "import-api-key", "--source", "brave_search",
+        "--api-key-stdin",
     ]) == 0
     output = capsys.readouterr().out
     assert "local-secret://nowcoder_experience/default" in output

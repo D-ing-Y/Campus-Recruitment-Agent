@@ -1,6 +1,6 @@
 # v0.7.1 Workflow 验收矩阵
 
-状态：WP1/WP2 Passed；WP3.1.1 Offline + Recruitment L1 Passed；Multi-platform Community L2 Pending
+状态：WP1/WP2 Passed；WP3.2 Code/Offline + Recruitment L1 Passed；Community L2 Partial
 日期：2026-08-06
 
 状态枚举：`not_started | failing | blocked | partial | passed | not_applicable`。
@@ -184,13 +184,21 @@ WP2 已用新 CandidateSnapshot 重验；领域模型未重写，新的 create m
 | Community typing | interview/employment/mixed/unknown 与片段引用 | passed | `role-demand-reputation-contract.md` |
 | Consumer boundary | Matching/Preparation 不消费 Reputation | passed | Matching/Preparation contract amendment |
 | Recruitment live | search → platform detail Raw → Demand | passed | 3 detail Raw、3 JobDemand、1 family demand；trace=1.0 |
-| Community live | search → post detail Raw → typed segment | partial | 两类 authenticated search Raw；无合格 post candidate，0 Segment |
+| Community live | search → post detail Raw → typed segment | partial | 牛客非帖子卡后 credential 失效；小红书内容访问 blocked；0 detail/Segment |
 | Projection code | Demand/Reputation/Bundle 持久化与 Graph 接线 | passed | WP3.1 unit/Graph/application/CLI 聚焦测试 |
 | WP3.1 Eval | 泄漏、追溯、幂等与 live 指标 | partial | L1 accepted；L2 真实 detail/typed segment 门禁未满足 |
 | WP3.1.1 search loop | 三轮放宽、两篇停止、主备切换、详情 scope | passed offline | unit/Graph/fake Sidecar；query-only scope projection=0 |
-| WP3.1.1 Xiaohongshu | localhost Sidecar、external session、opaque ref | pending live | adapter/MCP contract passed；真实登录与详情未运行 |
+| WP3.1.1 Xiaohongshu | localhost Sidecar、external session、opaque ref | passed protocol | adapter/MCP contract 与真实 stdio MCP passed；内容级 live 由 WP3.1.2 单列 |
+| WP3.1.2 protocol/diagnostic | 真实 `/api`、别名、诊断、失败分类、城市详情预算 | passed | 44 focused passed；真实 stdio MCP passed；成都 L1 detail trace=1.0 |
+| WP3.1.2 Nowcoder | 三层 live 与确定性诊断 | partial | 4 次 `non_post_cards_only`，随后 `authentication_required` |
+| WP3.1.2 Xiaohongshu content | 正常登录后的 search/detail Raw | blocked | 浏览器页面导航超时且安全策略禁止跨浏览器/CDP 绕行 |
+| WP3.2 Tool boundary | Brave + Crawl4AI in-process + MediaCrawler REST；无专用社区 MCP | passed offline | 单元/Graph/安装态 CLI；通用 MCP 保留 |
+| WP3.2 adaptive coverage | 70/30、三层去重、每用途 3 簇、有限 LLM 上下文 | passed offline | duplicate-heavy Eval 与三簇 Graph case |
+| WP3.2 Brave live | `site:nowcoder.com` → allowlisted detail URL | partial | 本地 key 存在且脱敏，但官方接口返回 `authentication_required` |
+| WP3.2 Crawl4AI live | 公开详情 → 唯一主帖 Fragment | partial | 0.9.2/Chromium ready；显式公开 URL 返回 `authentication_required` 登录墙 |
+| WP3.2 MediaCrawler live | localhost REST search/detail | blocked | doctor=`adapter_required`，本机服务未启动 |
 
-本节的代码和离线门禁已完成；`partial/pending` 指真实社区 L2 尚缺两种用途各 2 篇详情样本。Role 总状态
+本节的代码和离线门禁已完成；`partial/blocked` 指真实社区 L2 尚缺两种用途各 3 个独立内容簇。Role 总状态
 保持 partial，不能把 authenticated search 或 fixture 描述为 L2 accepted。
 
 ## 7. WP3-WP7

@@ -5,7 +5,9 @@ import json
 import pytest
 
 from campus_job_agent.runtime import Handoff, ObjectRef, RuntimeFactory
-from campus_job_agent.schemas import SearchScope
+from campus_job_agent.schemas import (
+    CommunitySearchAttemptReceipt, CommunitySearchDiagnostic, SearchScope,
+)
 from campus_job_agent.sources import (
     FixtureExperienceAdapter,
     FixtureRecruitmentAdapter,
@@ -13,8 +15,8 @@ from campus_job_agent.sources import (
 
 
 JOB_URL = "https://jobs.zhaopin.com/job-1.htm"
-INTERVIEW_URL = "https://www.nowcoder.com/discuss/interview-1"
-EMPLOYMENT_URL = "https://www.nowcoder.com/discuss/employment-1"
+INTERVIEW_URL = "https://www.nowcoder.com/discuss/1001"
+EMPLOYMENT_URL = "https://www.nowcoder.com/discuss/1002"
 
 
 def _runtime(tmp_path, monkeypatch, *, requires_auth: bool = False):
@@ -144,11 +146,24 @@ def test_role_application_consumes_handoff_and_advances_to_matching(
         session_id=session.session_id, handoff_id=handoff.handoff_id,
     )
 
-    assert payload["status"] == "completed"
+    assert payload["status"] == "completed_with_unknowns"
     assert payload["next_action"] == "match.run"
     assert payload["metrics"]["search_only_projection_count"] == 0
     assert payload["metrics"]["detail_artifact_trace_rate"] == 1.0
     assert payload["metrics"]["community_usage_crossover_count"] == 0
+    diagnostics = runtime.role_repository.list(
+        "community_search_diagnostic", CommunitySearchDiagnostic
+    )
+    attempts = runtime.role_repository.list(
+        "community_search_attempt_receipt", CommunitySearchAttemptReceipt
+    )
+    assert diagnostics
+    assert all(item.outcome == "post_candidates_found" for item in diagnostics)
+    assert all(item.diagnostic_id for item in attempts if item.status != "blocked")
+    assert all(
+        not item.diagnostic_id and item.reason_codes
+        for item in attempts if item.status == "blocked"
+    )
     current = runtime.session_service.status(session.session_id)
     assert current.current_stage == "matching"
     assert current.pending_handoff_ids == []
@@ -227,14 +242,8 @@ def test_role_authorization_resume_is_idempotent(tmp_path, monkeypatch):
     assert interrupted["status"] == "interrupted"
     assert interrupted["pending_request"]["source_id"] == "nowcoder_experience"
 
-    curl = tmp_path / "nowcoder.curl.txt"
-    curl.write_text(
-        "curl 'https://www.nowcoder.com/search' -H 'Cookie: session=safe-test'",
-        encoding="utf-8",
-    )
-    ref = runtime.credential_resolver.import_curl(
-        source_id="nowcoder_experience", path=curl,
-        allowed_path_roots=[str(tmp_path)],
+    ref = runtime.credential_resolver.save_source_api_key(
+        source_id="nowcoder_experience", api_key="safe-test-key",
     ).credential_ref
     completed = runtime.application_services["role"].resume(
         session_id=session.session_id, action="authorized",
@@ -245,7 +254,7 @@ def test_role_authorization_resume_is_idempotent(tmp_path, monkeypatch):
         response_id="role-response-1", credential_ref=ref,
     )
 
-    assert completed["status"] == "completed"
+    assert completed["status"] == "completed_with_unknowns"
     assert duplicate["deduplicated"] is True
     assert duplicate["output_refs"]["role_intelligence_bundle_id"] == (
         completed["output_refs"]["role_intelligence_bundle_id"]

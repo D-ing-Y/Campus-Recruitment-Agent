@@ -20,6 +20,21 @@ from campus_job_agent.runtime import (
     exit_code_for_error,
 )
 from campus_job_agent.runtime.models import ErrorEvent
+from campus_job_agent.runtime.factory import _playwright_chromium_available
+
+
+def test_chromium_doctor_check_does_not_start_playwright_driver(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    browser = (
+        tmp_path / "browsers" / "chromium_headless_shell-1234"
+        / "chrome-headless-shell-mac-arm64" / "chrome-headless-shell"
+    )
+    browser.parent.mkdir(parents=True)
+    browser.write_text("fixture", encoding="utf-8")
+    browser.chmod(0o700)
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path / "browsers"))
+    assert _playwright_chromium_available() is True
 
 
 def test_runtime_factory_uses_explicit_absolute_data_root(tmp_path: Path) -> None:

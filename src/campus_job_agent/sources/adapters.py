@@ -12,9 +12,19 @@ from uuid import NAMESPACE_URL, uuid5
 
 import httpx
 
+from campus_job_agent.integrations.community_retrieval import (
+    BRAVE_SEARCH_ENDPOINT,
+    BraveSearchClient,
+    CommunityRetrievalError,
+    Crawl4AICommunityFetcher,
+    canonical_nowcoder_detail_url,
+    classify_crawl4ai_result,
+    extract_nowcoder_main_body,
+)
 from campus_job_agent.integrations.social_media import SocialBridgeError
 from campus_job_agent.schemas import (
     EvidenceArtifact,
+    EvidenceFragment,
     OfficialVerificationPlan,
     SourceBatch,
     SourceCapabilities,
@@ -479,27 +489,290 @@ class ZhaopinJobsAdapter(_HttpAdapter):
         ) else "source_changed"
 
 
-class NowcoderExperienceAdapter(_HttpAdapter):
-    def __init__(self, **kwargs: Any) -> None:
-        super().__init__(source_id="nowcoder_experience", channel="experience", source_type="community_experience", requires_auth=True, allowed_domains={"www.nowcoder.com"}, **kwargs)
+class BraveNowcoderExperienceAdapter:
+    """Brave discovery plus in-process Crawl4AI public-detail retrieval."""
 
-    def build_url(self, query: SourceQuery) -> str:
-        from urllib.parse import quote
-        return f"https://www.nowcoder.com/search/all?query={quote(' '.join(query.keywords))}"
+    source_id = "nowcoder_experience"
 
-    def classify_detail_response(
-        self, response: httpx.Response, request: SourceDetailRequest,
-    ) -> AccessStatus:
-        status = _classify_http_response(response)
-        if status != "success":
-            return status
-        url = str(response.url).casefold()
-        text = response.text[:500_000]
-        if "/feed/main/detail/" not in url and "/discuss/" not in url:
-            return "source_changed"
-        if len(text.strip()) < 100:
-            return "empty"
-        return "success"
+    def __init__(
+        self, *, blob_store: BlobStore, evidence_repository: EvidenceRepository,
+        role_repository: SQLiteRoleRepository, owner_id: str,
+        live_enabled: bool = False, credential_resolver: Any | None = None,
+        search_client: BraveSearchClient | None = None,
+        detail_fetcher: Crawl4AICommunityFetcher | None = None, **_: Any,
+    ) -> None:
+        self.blob_store = blob_store
+        self.evidence_repository = evidence_repository
+        self.role_repository = role_repository
+        self.owner_id = owner_id
+        self.credential_resolver = credential_resolver
+        self.search_client = search_client or BraveSearchClient()
+        self.detail_fetcher = detail_fetcher or Crawl4AICommunityFetcher()
+        self.capabilities = SourceCapabilities(
+            source_id=self.source_id, channel="experience",
+            source_type="community_experience",
+            adapter_version="brave_search_crawl4ai_v1",
+            supports_keyword=True, supports_company=True,
+            supports_pagination=False, supports_detail_fetch=True,
+            requires_auth=True, authorization_mode="credential_ref",
+            live_enabled=live_enabled, rate_limit_per_minute=6,
+        )
+
+    def collect(
+        self, query: SourceQuery, credential_ref: str | None = None,
+    ) -> SourceBatch:
+        if query.source_id != self.source_id or query.channel != "experience":
+            raise ValueError("query does not match Brave Nowcoder adapter")
+        key = _batch_key(
+            self.source_id, query.fingerprint, query.cursor,
+            self.capabilities.adapter_version,
+        )
+        existing = self.role_repository.get_batch(key)
+        if existing is not None and existing.status not in {
+            "authentication_required", "rate_limited", "adapter_required",
+        }:
+            return existing
+        if not self.capabilities.live_enabled:
+            return self._error(query.query_id, key, "policy_blocked")
+        if not credential_ref or self.credential_resolver is None:
+            return self._error(
+                query.query_id, key, "authentication_required",
+                needs_user_action=True,
+            )
+        try:
+            try:
+                credential = self.credential_resolver(
+                    credential_ref, source_id=self.source_id
+                )
+            except ValueError:
+                return self._error(
+                    query.query_id, key, "authentication_required",
+                    needs_user_action=True,
+                )
+            raw, request_metadata = self.search_client.search_nowcoder(
+                keywords=query.keywords, limit=query.page_size,
+                api_key=str(credential.get("api_key") or ""),
+            )
+            document = _archive_document(
+                raw=raw, owner_id=self.owner_id, source_id=self.source_id,
+                channel="experience", query_id=query.query_id,
+                source_url=BRAVE_SEARCH_ENDPOINT,
+                document_kind="experience_search",
+                content_type="application/json",
+                adapter_version=self.capabilities.adapter_version,
+                blob_store=self.blob_store,
+                evidence_repository=self.evidence_repository,
+                artifact_metadata={"request": request_metadata},
+            )
+            count = _brave_nowcoder_candidate_count(raw)
+            return self.role_repository.save_batch(SourceBatch(
+                batch_id=str(uuid5(NAMESPACE_URL, key)),
+                source_id=self.source_id, channel="experience",
+                query_id=query.query_id, documents=[document],
+                status="success" if count else "empty",
+                error_type=None if count else "search_empty",
+                idempotency_key=key,
+            ))
+        except CommunityRetrievalError as exc:
+            return self._error(
+                query.query_id, key, exc.code,
+                needs_user_action=exc.code == "authentication_required",
+            )
+        except ValueError:
+            return self._error(query.query_id, key, "policy_blocked")
+        except httpx.TimeoutException:
+            return self._error(query.query_id, key, "network_timeout")
+        except Exception:
+            return self._error(query.query_id, key, "failed")
+
+    def fetch_detail(
+        self, request: SourceDetailRequest, credential_ref: str | None = None,
+    ) -> SourceBatch:
+        return self.fetch_details(
+            [request], credential_ref=credential_ref, max_concurrency=1
+        )[0]
+
+    def fetch_details(
+        self, requests: list[SourceDetailRequest], *,
+        credential_ref: str | None = None, max_concurrency: int = 2,
+    ) -> list[SourceBatch]:
+        validated = [SourceDetailRequest.model_validate(item) for item in requests]
+        if any(
+            item.source_id != self.source_id or item.channel != "experience"
+            for item in validated
+        ):
+            raise ValueError("detail request does not match Brave Nowcoder adapter")
+        batches: dict[str, SourceBatch] = {}
+        pending: list[SourceDetailRequest] = []
+        keys: dict[str, str] = {}
+        for request in validated:
+            key = hashlib.sha256(
+                f"{request.idempotency_key}:{self.capabilities.adapter_version}".encode()
+            ).hexdigest()
+            keys[request.detail_request_id] = key
+            existing = self.role_repository.get_batch(key)
+            if existing is not None and existing.status not in {
+                "rate_limited", "adapter_required", "failed",
+            }:
+                batches[request.detail_request_id] = existing
+            else:
+                pending.append(request)
+        if not self.capabilities.live_enabled:
+            for item in pending:
+                batches[item.detail_request_id] = self._detail_error(
+                    item, keys[item.detail_request_id], "policy_blocked"
+                )
+            return [batches[item.detail_request_id] for item in validated]
+        canonical_urls: list[str] = []
+        for item in pending:
+            canonical = canonical_nowcoder_detail_url(item.detail_url)
+            if canonical is None:
+                batches[item.detail_request_id] = self._detail_error(
+                    item, keys[item.detail_request_id], "policy_blocked"
+                )
+            else:
+                canonical_urls.append(canonical)
+        fetchable = [
+            item for item in pending if item.detail_request_id not in batches
+        ]
+        if fetchable:
+            try:
+                fetched = self.detail_fetcher.fetch_many(
+                    canonical_urls, max_concurrency=max_concurrency
+                )
+            except CommunityRetrievalError as exc:
+                for item in fetchable:
+                    batches[item.detail_request_id] = self._detail_error(
+                        item, keys[item.detail_request_id], exc.code,
+                        needs_user_action=exc.code == "authentication_required",
+                    )
+            else:
+                by_requested = {
+                    canonical_nowcoder_detail_url(item.requested_url): item
+                    for item in fetched
+                }
+                for item in fetchable:
+                    canonical = canonical_nowcoder_detail_url(item.detail_url)
+                    result = by_requested.get(canonical)
+                    if result is None:
+                        batches[item.detail_request_id] = self._detail_error(
+                            item, keys[item.detail_request_id], "failed"
+                        )
+                        continue
+                    final_url = canonical_nowcoder_detail_url(result.final_url)
+                    if final_url is None:
+                        document = _archive_document(
+                            raw=result.raw_payload(), owner_id=self.owner_id,
+                            source_id=self.source_id, channel="experience",
+                            query_id=item.query_id, source_url=str(canonical),
+                            document_kind="experience_post",
+                            content_type="application/json",
+                            adapter_version=self.capabilities.adapter_version,
+                            blob_store=self.blob_store,
+                            evidence_repository=self.evidence_repository,
+                            http_status=result.status_code,
+                            access_status="policy_blocked",
+                            artifact_metadata={
+                                "requested_url": canonical,
+                                "redirect_validation": "rejected",
+                            },
+                        )
+                        batches[item.detail_request_id] = self._detail_error(
+                            item, keys[item.detail_request_id], "policy_blocked",
+                            documents=[document],
+                        )
+                        continue
+                    status = classify_crawl4ai_result(result)
+                    document = _archive_document(
+                        raw=result.raw_payload(), owner_id=self.owner_id,
+                        source_id=self.source_id, channel="experience",
+                        query_id=item.query_id, source_url=final_url,
+                        document_kind="experience_post",
+                        content_type="application/json",
+                        adapter_version=self.capabilities.adapter_version,
+                        blob_store=self.blob_store,
+                        evidence_repository=self.evidence_repository,
+                        http_status=result.status_code, access_status=(
+                            status if status in {
+                                "success", "empty", "authentication_required",
+                                "rate_limited", "robots_disallowed",
+                                "risk_controlled", "failed",
+                            } else "failed"
+                        ),
+                        artifact_metadata={"requested_url": canonical},
+                    )
+                    if status == "success":
+                        main_body = extract_nowcoder_main_body(
+                            html=result.html, cleaned_html=result.cleaned_html,
+                            title=str(result.metadata.get("title") or ""),
+                        )
+                        if main_body is None:
+                            status = "source_changed"
+                            document = document.model_copy(
+                                update={"access_status": "source_changed"}
+                            )
+                        else:
+                            _save_nowcoder_body_fragment(
+                                document=document, body=main_body[0],
+                                selector=main_body[1],
+                                repository=self.evidence_repository,
+                            )
+                    if status != "success":
+                        batches[item.detail_request_id] = self._detail_error(
+                            item, keys[item.detail_request_id], status,
+                            retryable=status in {"rate_limited", "network_timeout"},
+                            needs_user_action=status == "authentication_required",
+                            documents=[document],
+                        )
+                    else:
+                        batches[item.detail_request_id] = self.role_repository.save_batch(
+                            SourceBatch(
+                                batch_id=str(uuid5(
+                                    NAMESPACE_URL, keys[item.detail_request_id]
+                                )),
+                                source_id=self.source_id, channel="experience",
+                                query_id=item.query_id, documents=[document],
+                                status="success",
+                                idempotency_key=keys[item.detail_request_id],
+                            )
+                        )
+        return [batches[item.detail_request_id] for item in validated]
+
+    def _error(
+        self, query_id: str, key: str, status: str, *,
+        needs_user_action: bool = False,
+    ) -> SourceBatch:
+        allowed = {
+            "empty", "authentication_required", "rate_limited",
+            "adapter_required", "policy_blocked", "source_changed",
+        }
+        value = status if status in allowed else "failed"
+        return self.role_repository.save_batch(SourceBatch(
+            batch_id=str(uuid5(NAMESPACE_URL, key)), source_id=self.source_id,
+            channel="experience", query_id=query_id, status=value,
+            error_type=status, retryable=status in {
+                "rate_limited", "network_timeout", "external_dependency",
+            }, needs_user_action=needs_user_action, idempotency_key=key,
+        ))
+
+    def _detail_error(
+        self, request: SourceDetailRequest, key: str, status: str, *,
+        retryable: bool = False, needs_user_action: bool = False,
+        documents: list[SourceDocument] | None = None,
+    ) -> SourceBatch:
+        allowed = {
+            "empty", "authentication_required", "rate_limited",
+            "adapter_required", "policy_blocked", "source_changed",
+            "robots_disallowed", "risk_controlled",
+        }
+        value = status if status in allowed else "failed"
+        return self.role_repository.save_batch(SourceBatch(
+            batch_id=str(uuid5(NAMESPACE_URL, key)), source_id=self.source_id,
+            channel="experience", query_id=request.query_id,
+            documents=documents or [], status=value, error_type=status,
+            retryable=retryable, needs_user_action=needs_user_action,
+            idempotency_key=key,
+        ))
 
 
 class XiaohongshuExperienceAdapter:
@@ -519,7 +792,7 @@ class XiaohongshuExperienceAdapter:
         self.owner_id = owner_id
         self.capabilities = SourceCapabilities(
             source_id=self.source_id, channel="experience",
-            source_type="community_experience", adapter_version="xiaohongshu_sidecar_v1",
+            source_type="community_experience", adapter_version="xiaohongshu_sidecar_v2",
             supports_keyword=True, supports_company=True, supports_pagination=False,
             supports_detail_fetch=True, requires_auth=True,
             authorization_mode="external_session", live_enabled=live_enabled,
@@ -719,6 +992,7 @@ def _archive_document(
     source_url: str, document_kind: str, content_type: str, adapter_version: str,
     blob_store: BlobStore, evidence_repository: EvidenceRepository, http_status: int | None = 200,
     access_status: AccessStatus = "success",
+    artifact_metadata: dict[str, Any] | None = None,
 ) -> SourceDocument:
     digest = hashlib.sha256(raw).hexdigest()
     existing = evidence_repository.find_artifact_by_hash(digest, owner_id)
@@ -731,7 +1005,8 @@ def _archive_document(
             content_type=content_type, source_url=source_url, original_name=f"{source_id}-{document_kind}",
             raw_uri=raw_uri, content_hash=digest, parser_name=None, parser_version=None,
             metadata={"source_id": source_id, "channel": channel, "query_id": query_id, "document_kind": document_kind,
-                      "http_status": http_status, "adapter_version": adapter_version, "access_status": access_status, "warnings": []},
+                      "http_status": http_status, "adapter_version": adapter_version, "access_status": access_status,
+                      "warnings": [], **dict(artifact_metadata or {})},
         ))
     else:
         artifact = existing
@@ -750,6 +1025,46 @@ def _batch_key(source_id: str, fingerprint: str, cursor: str | None, adapter_ver
 
 def _default_kind(channel: str) -> str:
     return {"recruitment_discovery": "search_page", "employer_official": "official_search", "experience": "experience_search"}[channel]
+
+
+def _brave_nowcoder_candidate_count(raw: bytes) -> int:
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return 0
+    web = payload.get("web") if isinstance(payload, dict) else None
+    results = web.get("results") if isinstance(web, dict) else None
+    if not isinstance(results, list):
+        return 0
+    return sum(
+        canonical_nowcoder_detail_url(str(item.get("url") or "")) is not None
+        for item in results if isinstance(item, dict)
+    )
+
+
+def _save_nowcoder_body_fragment(
+    *, document: SourceDocument, body: str, selector: str,
+    repository: EvidenceRepository,
+) -> EvidenceFragment:
+    if not document.raw_artifact_id:
+        raise ValueError("raw-before-parse: Nowcoder detail artifact is missing")
+    digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
+    return repository.save_fragment(EvidenceFragment(
+        fragment_id=str(uuid5(
+            NAMESPACE_URL,
+            f"nowcoder-main-body:{document.raw_artifact_id}:{digest}",
+        )),
+        artifact_id=document.raw_artifact_id,
+        locator_type="css_selector_and_char_range",
+        locator={"selector": selector, "start": 0, "end": len(body)},
+        text=body, text_hash=digest,
+        metadata={
+            "source_id": document.source_id,
+            "source_document_id": document.source_document_id,
+            "document_kind": document.document_kind,
+            "parser_version": "nowcoder_main_body_v1",
+        },
+    ))
 
 
 def _assert_allowed_url(url: str, allowed_domains: set[str]) -> None:

@@ -119,6 +119,33 @@ def test_search_documents_only_create_candidates() -> None:
     assert candidates[0].search_document_id == document.source_document_id
 
 
+def test_search_candidate_discovery_preserves_archived_platform_order() -> None:
+    raw = json.dumps({"candidates": [
+        {"detail_url": "https://www.zhaopin.com/jobdetail/z", "company": "甲", "role_title": "A", "city": "北京"},
+        {"detail_url": "https://www.zhaopin.com/jobdetail/a", "company": "乙", "role_title": "B", "city": "成都市"},
+        {"detail_url": "https://www.zhaopin.com/jobdetail/z", "company": "重复", "role_title": "C"},
+    ]})
+    digest = hashlib.sha256(raw.encode()).hexdigest()
+    fragment = EvidenceFragment(
+        artifact_id="artifact-order", locator_type="char",
+        locator={"start": 0, "end": len(raw)}, text=raw, text_hash=digest,
+    )
+    document = SourceDocument(
+        source_id="zhaopin_jobs", channel="recruitment_discovery", query_id="q-order",
+        source_url="https://sou.zhaopin.com/", document_kind="search_page",
+        raw_artifact_id="artifact-order", content_hash=digest,
+    )
+
+    candidates = discover_job_detail_candidates(document, [fragment])
+
+    assert [item.detail_url.rsplit("/", 1)[-1] for item in candidates] == ["z", "a"]
+    preferred = discover_job_detail_candidates(
+        document, [fragment], preferred_locations=["成都"],
+    )
+    assert [item.detail_url.rsplit("/", 1)[-1] for item in preferred] == ["a", "z"]
+    assert preferred[0].location_hint == "成都市"
+
+
 def test_current_zhaopin_detail_initial_state_is_normalized() -> None:
     payload = {
         "jobNumber": "CC-test",
@@ -163,14 +190,15 @@ def test_current_zhaopin_detail_initial_state_is_normalized() -> None:
 
 
 def test_community_search_snippet_only_creates_post_candidate() -> None:
-    raw = '{"candidates":[{"detail_url":"https://www.nowcoder.com/feed/main/detail/1","title":"甲公司面经"}]}'
+    raw = '{"web":{"results":[{"url":"https://www.nowcoder.com/feed/main/detail/1","title":"甲公司面经","description":"只用于发现"}]}}'
     fragment = EvidenceFragment(
         artifact_id="artifact", locator_type="char", locator={"start": 0, "end": len(raw)},
         text=raw, text_hash=hashlib.sha256(raw.encode()).hexdigest(),
     )
     document = SourceDocument(
         source_id="nowcoder_experience", channel="experience", query_id="q",
-        source_url="https://www.nowcoder.com/search/all", document_kind="experience_search",
+        source_url="https://api.search.brave.com/res/v1/web/search",
+        document_kind="experience_search",
         raw_artifact_id="artifact", content_hash=hashlib.sha256(raw.encode()).hexdigest(),
     )
     candidates = discover_community_post_candidates(
@@ -281,6 +309,13 @@ def test_company_groups_and_dual_type_queries_are_bounded() -> None:
     plan = build_community_search_plan(groups[0], detail_budget=3)
     assert {item.query_kind for item in plan.queries} == {"company_exact_role", "company_reputation"}
     assert all(item.search_budget == 1 and item.detail_budget == 3 for item in plan.queries)
+    excluded = job.model_copy(update={
+        "status": "excluded_hard_scope", "exclusion_code": "location_mismatch",
+        "exclusion_evidence_fragment_ids": ["fragment"],
+    })
+    assert build_company_role_groups(
+        scope, [cluster], {"job-1": excluded}
+    ) == []
 
 
 def test_usage_validator_rejects_reputation_as_demand() -> None:

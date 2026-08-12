@@ -1,6 +1,6 @@
 # v0.7.1 版本入口：子 Workflow 纵向闭环与 CLI 加固
 
-状态：Implementation In Progress（WP1/WP2 通过；WP3.1.1 offline + L1 通过，多平台 L2 pending）
+状态：Implementation In Progress（WP1/WP2 通过；WP3.2 code/offline + L1 通过，社区 L2 partial）
 路线确认日期：2026-07-28  
 代码版本：仍为 0.7.0；完成实现、测试和 Eval 后才升级 0.7.1
 
@@ -82,9 +82,9 @@ v0.7.1 的唯一目标是把现有 v0.3-v0.7 能力从“独立子图与离线�
    conversation/feedback overlay。真实 CandidateSnapshot 与 WP2 typed-input 重验均已通过。
 3. CareerIntent 已有首次生产入口；PreparationConstraints 仍没有首次生产入口。
 4. Role 已实现真实 detail raw 门禁；智联 L1 已通过。官网只在冲突、过期、字段缺失或用户要求时升级。
-5. 社区已实现 interview/employment typed segment 分流，但本轮牛客真实搜索没有合格帖子详情候选，
-   因此旧 L2 仍为 partial。WP3.1.1 已加入三层放宽、牛客/小红书来源级联和外部 Sidecar，
-   但尚未执行多平台 live；旧混合 HiringSignal 只作兼容读取。
+5. 社区已实现 interview/employment typed segment 分流。WP3.2 不再请求牛客 `/search`：Brave 只发现
+   公开详情 URL，Crawl4AI 批量渲染详情，MediaCrawler 只走 localhost REST。当前 Brave 凭据被拒绝，
+   显式公开牛客详情返回登录墙，MediaCrawler 服务未启动，因此 L2 保持 partial。
 6. Matching/Preparation/Feedback 存在名义节点与真实业务边界不一致的问题。
 7. Feedback 只有 Candidate 特例 saga，缺少通用 typed dispatcher。
 8. Role 至 Feedback 子图仍需逐工作包接入统一节点日志、运行产物和 inspect。
@@ -136,6 +136,7 @@ v0.7.1 的唯一目标是把现有 v0.3-v0.7 能力从“独立子图与离线�
 
 ## 7. 下一步
 
-WP3.1.1 离线代码与门禁已完成。下一步配置固定版本 MediaCrawler、本机 Chrome/CDP 正常登录和
-DeepSeek，执行牛客/小红书多平台 L2；达到两种用途各 2 篇独立详情后再收口 WP3 并进入 WP4。
+WP3.2 代码、离线门禁、Crawl4AI 0.9.2/Chromium 和招聘 L1 已完成。下一步刷新 Brave API Key、
+启动已授权的 MediaCrawler REST 服务并重跑内容 L2；面经和风评各达到 3 个独立内容簇后再收口 WP3
+并进入 WP4。
 官方来源仍只做条件升级。仍不实现 v1.0 Parent Graph，也不把 offline/fixture 结果表述为 live accepted。

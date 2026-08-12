@@ -1,7 +1,7 @@
 # RFC-0015：拆分岗位需求画像与评价画像 Workflow
 
-状态：Accepted / WP3.1.1 Implemented and Offline Verified（multi-platform live pending）
-日期：2026-08-11
+状态：Accepted / WP3.1.2 Implemented（multi-platform L2 partial）
+日期：2026-08-12
 关联 Requirements：`docs/03_requirements/v0.7.1-wp3.1-role-demand-and-reputation-profiles.md`
 关联 ADR：`docs/05_adr/0015-use-platform-detail-as-default-and-split-role-intelligence.md`
 关联 Contract：`docs/06_contracts/role-demand-reputation-contract.md`
@@ -156,3 +156,18 @@ plan_next_attempt
 health、auth status、search posts 和 fetch post detail；不保存 Cookie、xsec_token 或其他传输参数。
 Graph/checkpoint 只接收 opaque candidate ref。Sidecar 必须是 localhost、固定 commit、显式许可证
 确认，并关闭评论、创作者遍历、代理和发布能力。验证码、风控或登录失效立即中断，不执行绕过。
+
+## 12. WP3.1.2：真实协议与公司别名补丁
+
+离线假 Sidecar 使用了 `/crawler/*`、`/data/*` 和 JSONL，而固定版本 MediaCrawler 实际通过
+`/api/crawler/*`、`/api/data/*` 暴露任务和文件接口，默认端口为 8080，文件 API 只枚举其支持的
+格式。WP3.1.2 先以真实上游协议重写 Bridge contract，再执行小红书 live；假服务必须复刻同一协议，
+不能继续维护测试专用 wire shape。
+
+公司检索增加最小身份别名层：法定名称继续作为 `company_key`，经过显式 allowlist 核验的品牌名作为
+`company_search_term/verified_company_aliases`。别名只能扩大 discovery 召回，不能自动合并公司或
+跳过详情 scope 验证。牛客每轮同时生成确定性诊断，区分帖子命中、非帖子卡片、空结果、解析漂移、
+登录和风控。
+
+DeepSeek V4 分类继续使用 Tool Calling，并在结构化调用边界显式设置 non-thinking。采集与模型仍然
+解耦：没有合格详情时不调用模型，模型失败也不得删除已归档详情。

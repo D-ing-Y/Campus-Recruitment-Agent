@@ -146,7 +146,7 @@ class RoleApplicationService:
         try:
             with self.runtime.open_workflow("role") as workflow:
                 previous = dict(workflow.get_state(parent.thread_id).values or {})
-                if previous.get("workflow_version") != "wp3.1.1":
+                if previous.get("workflow_version") != "wp3.2":
                     raise RoleApplicationError("legacy_session_incompatible")
                 pending = previous.get("pending_interaction")
                 if not isinstance(pending, dict):

@@ -14,16 +14,22 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
 from campus_job_agent.schemas import (
-    CommunityEvidenceCoverage, CommunityEvidenceDocument, CommunityEvidenceSegment,
-    CommunityPostCandidate, CommunitySearchAttemptReceipt, CommunitySearchPlan,
+    CommunityContentCluster, CommunityEvidenceCoverage,
+    CommunityEvidenceDocument, CommunityEvidenceSegment,
+    CommunityPostCandidate, CommunitySearchAttemptReceipt, CommunitySearchDiagnostic,
+    CommunitySearchDecisionReceipt, CommunitySearchPlan,
+    CommunitySourceEvaluation,
     CompanyRoleGroup, JobDetailCandidate, JobPostingCluster, NormalizedJobPosting,
     OfficialEscalationReceipt, RoleDetailEvidenceReceipt, RoleFamilyMembership,
     RoleProfileGraphState, RoleSearchBudget, RoleSearchCounter, SearchScope,
     SourceBatch, SourceDetailRequest, SourceDocument, SourceQuery,
+    SourceRunReceipt,
 )
 from campus_job_agent.sources.role_intelligence import (
     COMMUNITY_SOURCE_CASCADES,
     build_community_search_query,
+    cluster_community_documents,
+    community_allowed_keywords,
 )
 from campus_job_agent.sources.repository import SQLiteRoleRepository
 from campus_job_agent.storage.base import EvidenceRepository, ProfileRepository
@@ -32,7 +38,7 @@ from campus_job_agent.workflows.candidate_profile.graph import open_sqlite_check
 from campus_job_agent.workflows.role_profile.planner import DeterministicRoleQueryPlanner
 
 
-WORKFLOW_VERSION = "wp3.1.1"
+WORKFLOW_VERSION = "wp3.2"
 
 
 class RoleProfileWorkflowError(RuntimeError):
@@ -118,7 +124,16 @@ def create_role_profile_state(
         "community_current_candidate_ids": [], "community_current_detail_document_ids": [],
         "community_current_evidence_document_ids": [],
         "community_current_evidence_segment_ids": [],
+        "community_current_diagnostic_ids": [],
         "community_attempt_receipt_ids": [], "community_coverage_ids": [],
+        "community_content_cluster_ids": [],
+        "community_source_evaluation_ids": [],
+        "community_source_evaluation_by_lane": {},
+        "community_decision_receipt_ids": [],
+        "community_decision_by_purpose": {},
+        "community_source_allocations_by_purpose": {},
+        "community_proposed_keywords_by_purpose": {},
+        "community_search_diagnostic_ids": [],
         "community_accepted_document_ids_by_scope": {},
         "community_exhausted_source_ids_by_scope": {},
         "community_sufficient_scope_keys": [], "community_last_query_by_lane": {},
@@ -278,6 +293,24 @@ def _merge_independent_community_documents(
     return accepted
 
 
+def _has_valid_community_body(
+    source_document_id: str, *, role_repository: SQLiteRoleRepository,
+    evidence_repository: EvidenceRepository,
+) -> bool:
+    document = role_repository.get(source_document_id, SourceDocument)
+    if (
+        document is None or document.access_status != "success"
+        or not document.raw_artifact_id
+    ):
+        return False
+    return any(
+        item.metadata.get("parser_version") in {
+            "nowcoder_main_body_v1", "community_body_v1",
+        } and bool(item.text.strip())
+        for item in evidence_repository.list_fragments(document.raw_artifact_id)
+    )
+
+
 class _RoleNodes:
     def __init__(
         self, registry: ToolRegistry, evidence_repository: EvidenceRepository,
@@ -374,7 +407,10 @@ class _RoleNodes:
                         _tool_error("discover_recruitment_detail_candidates", extracted)
                     )
         result = self.registry.run(
-            "source.discover_job_detail_candidates", {"source_document_ids": search_ids}
+            "source.discover_job_detail_candidates", {
+                "source_document_ids": search_ids,
+                "search_scope": state["search_scope"],
+            }
         )
         counters = counters.model_copy(update={"tool_calls": counters.tool_calls + 1})
         results.append(_safe_tool_result(result))
@@ -561,12 +597,17 @@ class _RoleNodes:
                 ]
                 if not ordered:
                     ordered = fixture_sources[:budget.max_community_sources_per_purpose]
+                descriptors = []
                 for source_index, source_id in enumerate(
                     ordered[:budget.max_community_sources_per_purpose], start=1
                 ):
                     canonical = COMMUNITY_SOURCE_CASCADES[purpose]
                     priority = canonical.index(source_id) + 1 if source_id in canonical else source_index
-                    for round_index in range(1, budget.max_community_rounds_per_source + 1):
+                    descriptors.append((source_id, priority))
+                # Calibrate every available platform before spending the
+                # remaining rounds according to the evaluator's 70/30 policy.
+                for round_index in range(1, budget.max_community_rounds_per_source + 1):
+                    for source_id, priority in descriptors:
                         queue.append({
                             "company_role_group_id": group.group_id,
                             "evidence_purpose": purpose, "source_id": source_id,
@@ -586,6 +627,7 @@ class _RoleNodes:
             counters.community_searches >= budget.max_queries
             or counters.tool_calls >= budget.max_tool_calls
             or counters.documents >= budget.max_documents
+            or budget.max_community_detail_documents_per_query == 0
         ):
             return {
                 "pending_queries": [], "community_current_query": None,
@@ -631,8 +673,24 @@ class _RoleNodes:
             source_id=str(descriptor["source_id"]),
             round_index=int(descriptor["round_index"]),
             source_priority=int(descriptor["source_priority"]),
-            detail_budget=budget.max_community_detail_documents_per_query,
+            detail_budget=(
+                min(2, budget.max_community_detail_documents_per_query)
+                if int(descriptor["round_index"]) == 1
+                else max(1, round(
+                    budget.max_community_detail_documents_per_query
+                    * float(
+                        state.get("community_source_allocations_by_purpose", {})
+                        .get(str(descriptor["evidence_purpose"]), {})
+                        .get(str(descriptor["source_id"]), 1.0)
+                    )
+                ))
+            ),
             parent_query_id=last_by_lane.get(lane),
+            proposed_keyword=next(iter(
+                state.get("community_proposed_keywords_by_purpose", {}).get(
+                    str(descriptor["evidence_purpose"]), []
+                )
+            ), None) if int(descriptor["round_index"]) > 1 else None,
         )
         attempt_plan = CommunitySearchPlan(
             plan_id=f"community-attempt-plan:{planned.query_id}",
@@ -669,6 +727,7 @@ class _RoleNodes:
             "community_current_candidate_ids": [], "community_current_detail_document_ids": [],
             "community_current_evidence_document_ids": [],
             "community_current_evidence_segment_ids": [],
+            "community_current_diagnostic_ids": [],
             "community_query_group_map": query_group_map,
             "community_query_intended_types": intended,
             "community_last_query_by_lane": last_by_lane,
@@ -722,9 +781,14 @@ class _RoleNodes:
         })
         counters = counters.model_copy(update={"tool_calls": counters.tool_calls + 1})
         results.append(_safe_tool_result(discovered))
+        diagnostic_ids = [
+            str(value) for value in discovered.metadata.get("diagnostic_ids", [])
+        ] if discovered.status == "success" else []
         return {
             "community_post_candidate_ids": discovered.evidence_ids if discovered.status == "success" else [],
             "community_current_candidate_ids": discovered.evidence_ids if discovered.status == "success" else [],
+            "community_search_diagnostic_ids": diagnostic_ids,
+            "community_current_diagnostic_ids": diagnostic_ids,
             "community_detail_document_ids": details,
             "community_current_detail_document_ids": details,
             "fragment_ids": extracted_ids, "counters": counters.model_dump(),
@@ -735,32 +799,123 @@ class _RoleNodes:
 
     def fetch_community_details(self, state: RoleProfileGraphState) -> dict[str, Any]:
         budget = RoleSearchBudget.model_validate(state["budgets"])
-        update = self._fetch_details(
-            state, candidate_kind="community",
-            candidate_ids=state.get("community_current_candidate_ids", []),
-            limit=budget.max_community_detail_documents_per_query,
-            include_existing=False,
+        counters = RoleSearchCounter.model_validate(state["counters"])
+        remaining_documents = max(0, budget.max_documents - counters.documents)
+        requests: list[SourceDetailRequest] = []
+        for candidate_id in list(
+            state.get("community_current_candidate_ids", [])
+        )[:min(
+            budget.max_community_detail_documents_per_query,
+            remaining_documents,
+        )]:
+            candidate = self.role_repository.get(
+                str(candidate_id), CommunityPostCandidate
+            )
+            if candidate is None:
+                continue
+            requests.append(SourceDetailRequest(
+                source_id=candidate.source_id, channel="experience",
+                query_id=candidate.query_id, candidate_id=candidate.candidate_id,
+                parent_document_id=candidate.search_document_id,
+                detail_url=candidate.detail_url,
+                expected_document_kind="experience_post",
+                external_locator_ref=candidate.external_locator_ref,
+            ))
+        if not requests:
+            return {
+                "community_current_detail_document_ids": [],
+                "community_detail_document_ids": [],
+                "trace": [_trace(
+                    "fetch_community_details", counters, requests=0,
+                    documents=0,
+                )],
+            }
+        source_id = requests[0].source_id
+        result = self.registry.run("source.fetch_community_details", {
+            "requests": [item.model_dump(mode="json") for item in requests],
+            "run_id": state["run_id"],
+            "credential_ref": state.get("credential_refs", {}).get(source_id),
+            "max_concurrency": 2,
+        })
+        counters = counters.model_copy(update={
+            "tool_calls": counters.tool_calls + 1,
+            "community_details": counters.community_details + len(requests),
+        })
+        document_ids: list[str] = []
+        artifact_ids: list[str] = []
+        receipts: list[dict[str, Any]] = []
+        for record in result.records:
+            batch = SourceBatch.model_validate(record["batch"])
+            receipts.append(record["receipt"])
+            for document in batch.documents:
+                document_ids.append(document.source_document_id)
+                if document.raw_artifact_id:
+                    artifact_ids.append(str(document.raw_artifact_id))
+        counters = counters.model_copy(update={
+            "documents": counters.documents + len(document_ids),
+        })
+        pending_auth = (
+            source_id if result.metadata.get("needs_user_action") else None
         )
-        update["community_current_detail_document_ids"] = list(
-            update.get("community_detail_document_ids", [])
-        )
-        return update
+        return {
+            "community_detail_request_ids": [
+                item.detail_request_id for item in requests
+            ],
+            "community_detail_document_ids": document_ids,
+            "community_current_detail_document_ids": document_ids,
+            "raw_artifact_ids": artifact_ids,
+            "source_run_receipts": receipts,
+            "pending_auth_source_id": pending_auth,
+            "counters": counters.model_dump(),
+            "tool_results": [_safe_tool_result(result)],
+            "community_errors": [] if result.status == "success" else [
+                _tool_error("fetch_community_details", result)
+            ],
+            "trace": [_trace(
+                "fetch_community_details", counters, requests=len(requests),
+                documents=len(document_ids), batch_tool_calls=1,
+            )],
+        }
 
     def classify_community_details(self, state: RoleProfileGraphState) -> dict[str, Any]:
         counters = RoleSearchCounter.model_validate(state["counters"])
+        budget = RoleSearchBudget.model_validate(state["budgets"])
         results: list[dict[str, Any]] = []
         fragments: list[str] = []
         current_detail_ids = list(state.get("community_current_detail_document_ids", []))
-        for document_id in current_detail_ids:
+        processed_detail_ids: list[str] = []
+        extract_budget = max(0, budget.max_tool_calls - counters.tool_calls - 1)
+        for document_id in current_detail_ids[:extract_budget]:
             document = self.role_repository.get(document_id, SourceDocument)
             if document is None:
                 continue
             extracted = self.registry.run("source.extract_document", {"document": document.model_dump(mode="json")})
             counters = counters.model_copy(update={"tool_calls": counters.tool_calls + 1})
             results.append(_safe_tool_result(extracted)); fragments.extend(extracted.evidence_ids)
+            processed_detail_ids.append(document_id)
+        if counters.tool_calls >= budget.max_tool_calls:
+            return {
+                "fragment_ids": fragments, "counters": counters.model_dump(),
+                "tool_results": results,
+                "community_current_evidence_document_ids": [],
+                "community_current_evidence_segment_ids": [],
+                "community_errors": [{
+                    "node": "classify_community_details",
+                    "error_type": "budget_exhausted",
+                    "message": "budget_exhausted", "fatal": False,
+                    "retryable": False,
+                }],
+                "trace": [_trace(
+                    "classify_community_details", counters,
+                    reason="tool_budget_exhausted",
+                )],
+            }
         classified = self.registry.run("role.classify_community_documents", {
-            "source_document_ids": current_detail_ids,
+            "source_document_ids": processed_detail_ids,
             "group_by_query": state.get("community_query_group_map", {}),
+            "max_llm_calls": max(
+                0, budget.max_llm_calls - counters.llm_calls
+            ),
         })
         counters = counters.model_copy(update={"tool_calls": counters.tool_calls + 1})
         results.append(_safe_tool_result(classified))
@@ -769,8 +924,19 @@ class _RoleNodes:
             "tool_results": results,
             "trace": [_trace("classify_community_details", counters)],
         }
+        record = classified.records[0] if classified.records else {}
+        used_llm_calls = sum(
+            int(item.get("retry_count", 0)) + 1
+            for item in record.get("llm_calls", [])
+        )
+        counters = counters.model_copy(update={
+            "llm_calls": min(
+                budget.max_llm_calls,
+                counters.llm_calls + used_llm_calls,
+            ),
+        })
+        update["counters"] = counters.model_dump()
         if classified.status == "success" and classified.records:
-            record = classified.records[0]
             update.update({
                 "community_evidence_document_ids": [item["document_id"] for item in record["documents"]],
                 "community_evidence_segment_ids": [item["segment_id"] for item in record["segments"]],
@@ -829,7 +995,6 @@ class _RoleNodes:
         )
         accepted = accepted_map[scope_key]
         budget = RoleSearchBudget.model_validate(state["budgets"])
-        sufficient = len(accepted) >= budget.community_target_documents_per_purpose
         history = next((
             item for item in reversed(state.get("query_history", []))
             if str(item.get("query_id")) == query_id
@@ -844,6 +1009,12 @@ class _RoleNodes:
             else "empty" if not state.get("community_current_detail_document_ids")
             else "completed"
         )
+        diagnostic_id = next(iter(state.get("community_current_diagnostic_ids", [])), None)
+        diagnostic = (
+            self.role_repository.get(str(diagnostic_id), CommunitySearchDiagnostic)
+            if diagnostic_id else None
+        )
+        diagnostic_reasons = list(diagnostic.reason_codes) if diagnostic else []
         attempt = CommunitySearchAttemptReceipt(
             attempt_id=f"community-attempt:{query_id}", company_role_group_id=group_id,
             query_id=query_id, source_id=source_id, evidence_purpose=purpose,
@@ -853,11 +1024,200 @@ class _RoleNodes:
             discovered_candidate_ids=list(state.get("community_current_candidate_ids", [])),
             detail_document_ids=list(state.get("community_current_detail_document_ids", [])),
             accepted_document_ids=accepted_current,
-            reason_codes=[error_type] if error_type else ([] if accepted_current else ["no_accepted_detail"]),
+            diagnostic_id=diagnostic_id,
+            reason_codes=(
+                [error_type] if error_type else diagnostic_reasons
+                if diagnostic_reasons else [] if accepted_current else ["no_accepted_detail"]
+            ),
         )
         self.role_repository.save(
             "community_search_attempt_receipt", attempt,
             idempotency_key=f"community-search-attempt:{attempt.attempt_id}",
+        )
+
+        clusters = cluster_community_documents(
+            company_role_group_id=group_id, evidence_purpose=purpose,
+            document_ids=accepted,
+            role_repository=self.role_repository,
+            evidence_repository=self.evidence_repository,
+        )
+        clusters = [
+            self.role_repository.save(
+                "community_content_cluster", item,
+                idempotency_key=f"community-content-cluster:{item.cluster_id}",
+            )
+            for item in clusters
+        ]
+        current_detail_ids = list(
+            state.get("community_current_detail_document_ids", [])
+        )[:2]
+        valid_body_count = sum(
+            _has_valid_community_body(
+                value, role_repository=self.role_repository,
+                evidence_repository=self.evidence_repository,
+            )
+            for value in current_detail_ids
+        )
+        current_cluster_count = len({
+            item.cluster_id for item in clusters
+            if set(item.member_document_ids).intersection(accepted_current)
+        })
+        sampled_count = len(current_detail_ids)
+        failed_detail_count = sum(
+            bool(
+                (document := self.role_repository.get(value, SourceDocument))
+                is not None and document.access_status != "success"
+            )
+            for value in current_detail_ids
+        )
+        duplicate_count = max(
+            0, min(sampled_count, len(accepted_current) - current_cluster_count)
+        )
+        latency_intervals: dict[tuple[str, str], int] = {}
+        for raw_receipt in state.get("source_run_receipts", []):
+            receipt = SourceRunReceipt.model_validate(raw_receipt)
+            if (
+                receipt.source_id != source_id
+                or query_id not in receipt.query_ids
+            ):
+                continue
+            key = (
+                receipt.started_at.isoformat(), receipt.completed_at.isoformat()
+            )
+            latency_intervals[key] = max(
+                0, int(
+                    (receipt.completed_at - receipt.started_at).total_seconds()
+                    * 1000
+                ),
+            )
+        evaluation = CommunitySourceEvaluation(
+            evaluation_id=f"community-source-evaluation:{query_id}",
+            run_id=str(state["run_id"]), source_id=source_id,
+            evidence_purpose=purpose, sampled_detail_count=sampled_count,
+            relevant_detail_count=min(len(accepted_current), sampled_count),
+            valid_body_count=min(valid_body_count, sampled_count),
+            scope_hit_count=min(len(accepted_current), sampled_count),
+            accepted_segment_count=len(current_segment_ids),
+            duplicate_detail_count=duplicate_count,
+            failed_detail_count=failed_detail_count,
+            relevance_rate=(
+                min(len(accepted_current), sampled_count) / sampled_count
+                if sampled_count else 0.0
+            ),
+            valid_body_rate=(valid_body_count / sampled_count if sampled_count else 0.0),
+            scope_hit_rate=(
+                min(len(accepted_current), sampled_count) / sampled_count
+                if sampled_count else 0.0
+            ),
+            duplicate_rate=(duplicate_count / sampled_count if sampled_count else 0.0),
+            failure_rate=(
+                failed_detail_count / sampled_count if sampled_count
+                else 1.0 if error_type else 0.0
+            ),
+            latency_ms=sum(latency_intervals.values()),
+            search_cost_units=1.0 if source_id == "nowcoder_experience" else 0.0,
+            reason_codes=(
+                [error_type] if error_type else
+                ["calibration_sample_valid"] if accepted_current else
+                ["calibration_sample_empty"]
+            ),
+        )
+        evaluation = self.role_repository.save(
+            "community_source_evaluation", evaluation,
+            idempotency_key=f"community-source-evaluation:{evaluation.evaluation_id}",
+        )
+        evaluation_by_lane = dict(
+            state.get("community_source_evaluation_by_lane", {})
+        )
+        evaluation_by_lane[f"{purpose}|{source_id}"] = evaluation.evaluation_id
+        enabled_experience_sources = [
+            value for value in COMMUNITY_SOURCE_CASCADES[purpose]
+            if value in state.get("enabled_source_ids", [])
+            and value not in state.get("skipped_source_ids", [])
+        ]
+        if not enabled_experience_sources:
+            enabled_experience_sources = sorted(
+                value for value in state.get("enabled_source_ids", [])
+                if value not in state.get("skipped_source_ids", [])
+                and state.get("source_capabilities", {}).get(value, {}).get(
+                    "channel"
+                ) == "experience"
+            )[:2] or [source_id]
+        evaluation_ids = [
+            evaluation_by_lane.get(f"{purpose}|{value}")
+            for value in enabled_experience_sources[:2]
+        ]
+        calibration_ready = all(evaluation_ids)
+        decision: CommunitySearchDecisionReceipt | None = None
+        decision_result = None
+        remaining_llm_calls = max(0, budget.max_llm_calls - counters.llm_calls)
+        if (
+            calibration_ready and remaining_llm_calls > 0
+            and counters.tool_calls < budget.max_tool_calls
+        ):
+            group = self.role_repository.get(group_id, CompanyRoleGroup)
+            allowed_keywords = (
+                community_allowed_keywords(group, purpose) if group else []
+            )
+            decision_result = self.registry.run(
+                "role.evaluate_community_search", {
+                    "run_id": state["run_id"], "evidence_purpose": purpose,
+                    "source_evaluation_ids": [
+                        str(value) for value in evaluation_ids if value
+                    ],
+                    "cluster_ids": [item.cluster_id for item in clusters],
+                    "allowed_keywords": allowed_keywords,
+                    "max_llm_calls": remaining_llm_calls,
+                },
+            )
+            counters = counters.model_copy(update={
+                "tool_calls": counters.tool_calls + 1,
+            })
+            decision_record = (
+                decision_result.records[0]
+                if decision_result.records else {}
+            )
+            used_llm_calls = sum(
+                int(item.get("retry_count", 0)) + 1
+                for item in decision_record.get("llm_calls", [])
+            )
+            counters = counters.model_copy(update={
+                "llm_calls": min(
+                    budget.max_llm_calls,
+                    counters.llm_calls + used_llm_calls,
+                ),
+            })
+            if decision_result.status == "success" and decision_result.records:
+                record = decision_record
+                decision = CommunitySearchDecisionReceipt.model_validate(
+                    record["decision"]
+                )
+                if decision.semantic_duplicate_segment_groups:
+                    clusters = cluster_community_documents(
+                        company_role_group_id=group_id,
+                        evidence_purpose=purpose, document_ids=accepted,
+                        role_repository=self.role_repository,
+                        evidence_repository=self.evidence_repository,
+                        semantic_duplicate_segment_groups=(
+                            decision.semantic_duplicate_segment_groups
+                        ),
+                        semantic_decision_receipt_id=decision.decision_id,
+                    )
+                    clusters = [
+                        self.role_repository.save(
+                            "community_content_cluster", item,
+                            idempotency_key=(
+                                f"community-content-cluster-semantic:"
+                                f"{decision.decision_id}:{item.cluster_id}"
+                            ),
+                        ) for item in clusters
+                    ]
+        hard_floor_met = (
+            len(clusters) >= budget.community_target_clusters_per_purpose
+        )
+        sufficient = bool(
+            hard_floor_met and decision is not None
+            and decision.verdict == "sufficient"
         )
         exhausted = {
             key: list(value)
@@ -878,6 +1238,10 @@ class _RoleNodes:
             target_document_count=budget.community_target_documents_per_purpose,
             accepted_document_ids=accepted,
             independent_document_count=len(accepted),
+            target_cluster_count=budget.community_target_clusters_per_purpose,
+            accepted_cluster_ids=[item.cluster_id for item in clusters],
+            independent_cluster_count=len(clusters),
+            decision_receipt_id=decision.decision_id if decision else None,
             attempted_query_ids=[
                 item.query_id for item in self.role_repository.list(
                     "community_search_attempt_receipt", CommunitySearchAttemptReceipt
@@ -885,22 +1249,77 @@ class _RoleNodes:
             ],
             exhausted_source_ids=sorted(exhausted_scope), status=status,
             next_action=next_action,
-            reason_codes=[] if sufficient else ["community_sample_insufficient"],
+            reason_codes=[] if sufficient else (
+                ["community_cluster_floor_not_met"] if not hard_floor_met
+                else ["community_llm_assessment_insufficient"]
+            ),
         )
         self.role_repository.save(
             "community_evidence_coverage", coverage,
             idempotency_key=f"community-evidence-coverage:{coverage.coverage_id}",
         )
+        allocations = {
+            key: dict(value) for key, value in
+            state.get("community_source_allocations_by_purpose", {}).items()
+        }
+        proposed = {
+            key: list(value) for key, value in
+            state.get("community_proposed_keywords_by_purpose", {}).items()
+        }
+        decision_by_purpose = dict(state.get("community_decision_by_purpose", {}))
+        queue = list(state.get("community_attempt_queue", []))
+        if decision is not None:
+            allocations[purpose] = dict(decision.budget_allocation)
+            proposed[purpose] = list(decision.proposed_keywords)
+            decision_by_purpose[purpose] = decision.decision_id
+            index = int(state.get("community_attempt_index", 0))
+            remaining = queue[index:]
+            indexed = list(enumerate(remaining))
+            indexed.sort(key=lambda pair: (
+                0 if (
+                    str(pair[1].get("company_role_group_id")) == group_id
+                    and str(pair[1].get("evidence_purpose")) == purpose
+                ) else 1,
+                int(pair[1].get("round_index", 1)),
+                -float(decision.budget_allocation.get(
+                    str(pair[1].get("source_id")), 0.0
+                )),
+                pair[0],
+            ))
+            queue = [*queue[:index], *[item for _, item in indexed]]
+        errors = []
+        tool_results = []
+        if decision_result is not None:
+            tool_results.append(_safe_tool_result(decision_result))
+            if decision_result.status != "success":
+                errors.append(_tool_error(
+                    "evaluate_community_search", decision_result
+                ))
         return {
             "community_attempt_receipt_ids": [attempt.attempt_id],
             "community_coverage_ids": [coverage.coverage_id],
+            "community_content_cluster_ids": [
+                item.cluster_id for item in clusters
+            ],
+            "community_source_evaluation_ids": [evaluation.evaluation_id],
+            "community_source_evaluation_by_lane": evaluation_by_lane,
+            "community_decision_receipt_ids": (
+                [decision.decision_id] if decision else []
+            ),
+            "community_decision_by_purpose": decision_by_purpose,
+            "community_source_allocations_by_purpose": allocations,
+            "community_proposed_keywords_by_purpose": proposed,
+            "community_attempt_queue": queue,
             "community_accepted_document_ids_by_scope": accepted_map,
             "community_exhausted_source_ids_by_scope": exhausted,
             "community_sufficient_scope_keys": [scope_key] if sufficient else [],
             "community_route": "next", "community_skip_current_source": False,
+            "counters": counters.model_dump(), "tool_results": tool_results,
+            "community_errors": errors,
             "trace": [_trace(
                 "assess_community_coverage", counters, purpose=purpose,
                 independent_documents=len(accepted), sufficient=sufficient,
+                independent_clusters=len(clusters),
                 next_action=next_action,
             )],
         }
@@ -916,13 +1335,16 @@ class _RoleNodes:
                 document := self.role_repository.get(document_id, SourceDocument)
             ) is not None and document.raw_artifact_id
         })
+        representative_segment_ids = _representative_community_segment_ids(
+            state, self.role_repository
+        )
         result = self.registry.run("profile.project_role_intelligence", {
             "search_scope": state["search_scope"],
             "eligible_cluster_ids": state.get("eligible_job_cluster_ids", []),
             "claim_ids": state.get("claim_ids", []),
             "detail_receipt_ids": state.get("role_detail_evidence_receipt_ids", []),
             "official_escalation_receipt_ids": state.get("official_escalation_receipt_ids", []),
-            "segment_ids": state.get("community_evidence_segment_ids", []),
+            "segment_ids": representative_segment_ids,
             "raw_evidence_refs": detail_raw_refs,
             "source_receipt_ids": [item.get("source_run_id") for item in state.get("source_run_receipts", []) if item.get("source_run_id")],
         })
@@ -936,7 +1358,34 @@ class _RoleNodes:
         if result.status == "success" and result.records:
             record = result.records[0]
             update.update(record)
-            update["next_action"] = "complete" if not record.get("missing_sections") else "finalize_with_unknowns"
+            sufficient_scopes = set(
+                state.get("community_sufficient_scope_keys", [])
+            )
+            expected_scopes = {
+                _community_scope_key(str(group_id), purpose)
+                for group_id in state.get("company_role_group_ids", [])
+                for purpose in (
+                    "interview_experience", "employment_experience",
+                )
+            }
+            community_missing = []
+            if any(
+                value.endswith("|interview_experience")
+                for value in expected_scopes - sufficient_scopes
+            ):
+                community_missing.append("community_interview_insufficient")
+            if any(
+                value.endswith("|employment_experience")
+                for value in expected_scopes - sufficient_scopes
+            ):
+                community_missing.append("community_reputation_insufficient")
+            missing = list(dict.fromkeys([
+                *record.get("missing_sections", []), *community_missing,
+            ]))
+            update["missing_sections"] = missing
+            update["next_action"] = (
+                "complete" if not missing else "finalize_with_unknowns"
+            )
         else:
             update.update({"next_action": "fail", "errors": [_tool_error("project_role_intelligence", result)]})
         return update
@@ -955,11 +1404,14 @@ class _RoleNodes:
             "authorization_mode": capability.get("authorization_mode", "credential_ref"),
             "login_entry": (
                 "请在 MediaCrawler 使用的真实 Chrome/CDP 会话中正常登录小红书"
-                if external else "请在真实 Chrome 中正常登录该来源"
+                if external else "请配置 Brave Search API Key"
             ),
             "import_instruction": (
                 "保持 Sidecar 和 Chrome 会话可用后选择 authorized；不要提交 Cookie"
-                if external else "运行 campus-agent auth import-chrome --source nowcoder，只返回 credential_ref"
+                if external else (
+                    "运行 campus-agent auth import-api-key --source brave_search "
+                    "--api-key-stdin，只返回 credential_ref"
+                )
             ),
             "allowed_actions": ["authorized", "skip_source", "cancel"],
         }
@@ -1193,6 +1645,7 @@ def _safe_tool_result(result: Any) -> dict[str, Any]:
         "parser_name", "parser_version", "record_count", "verification_status",
         "mandatory_official_verification_count",
         "conditional_official_escalation_count", "official_verification_plan_ids",
+        "diagnostic_ids", "diagnostic_outcomes",
     }
     metadata = {
         key: value
@@ -1222,6 +1675,39 @@ def _tool_error(node: str, result: Any) -> dict[str, Any]:
         "fatal": error_type in {"storage_error", "checkpoint_error"},
         "retryable": bool(result.metadata.get("retryable")),
     }
+
+
+def _representative_community_segment_ids(
+    state: RoleProfileGraphState, repository: SQLiteRoleRepository,
+) -> list[str]:
+    """Project one post per authoritative content cluster, never raw duplicates."""
+
+    latest_coverage: dict[tuple[str, str], CommunityEvidenceCoverage] = {}
+    for coverage_id in state.get("community_coverage_ids", []):
+        coverage = repository.get(str(coverage_id), CommunityEvidenceCoverage)
+        if coverage is None:
+            continue
+        key = (coverage.company_role_group_id, coverage.evidence_purpose)
+        previous = latest_coverage.get(key)
+        if previous is None or coverage.assessed_at >= previous.assessed_at:
+            latest_coverage[key] = coverage
+    selected: list[str] = []
+    for coverage in latest_coverage.values():
+        for cluster_id in coverage.accepted_cluster_ids:
+            cluster = repository.get(str(cluster_id), CommunityContentCluster)
+            if cluster is None:
+                continue
+            for segment_id in cluster.member_segment_ids:
+                segment = repository.get(str(segment_id), CommunityEvidenceSegment)
+                if (
+                    segment is not None
+                    and segment.document_id == cluster.representative_document_id
+                    and segment.validation_status == "accepted"
+                ):
+                    selected.append(segment.segment_id)
+    return list(dict.fromkeys(selected)) or list(dict.fromkeys(
+        str(value) for value in state.get("community_evidence_segment_ids", [])
+    ))
 
 
 def _export_run(

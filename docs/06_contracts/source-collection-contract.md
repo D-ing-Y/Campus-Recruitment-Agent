@@ -1,7 +1,7 @@
 # Source Collection Contract
 
-状态：v0.5 Accepted / Amended for v0.7.1 WP3.1
-日期：2026-07-20（2026-08-06 修订）
+状态：v0.5 Accepted / Amended for v0.7.1 WP3.2
+日期：2026-07-20（2026-08-12 修订）
 
 本契约定义第三方招聘发现、企业官网核验与社区经验来源的查询、采集、原始归档、
 归一化、身份链接、字段消解、去重和运行记录。三类来源共享 transport/归档基础设施，
@@ -148,6 +148,19 @@ Graph 返回 Cookie。历史对象缺少该字段时由 `requires_auth` 推导�
 
 小红书来源成功响应仍必须先逐字节归档为 Raw Artifact，再生成 `experience_search` 或
 `experience_post`。搜索响应不得生成 Segment。
+
+真实 MediaCrawler HTTP adapter 必须使用固定版本实际提供的 `/api` 前缀和可下载文件格式。测试假
+Sidecar 必须复刻真实路径、查询参数和响应结构。REST Client 只读取任务开始后新增或发生版本变化的内容
+文件，并按本轮关键词/post ID 过滤，避免同日 append 文件把历史搜索结果混入当前 Raw。
+
+公司品牌别名只属于 query discovery metadata。`company_key` 仍取自已通过详情门禁的招聘证据；
+未经版本化 allowlist 核验的别名不得进入查询或详情 scope allowlist。
+
+招聘搜索候选可携带 `location_hint`，应用可依据当前 `SearchScope.locations` 对详情抓取顺序做稳定
+优先级调整。该提示只用于 discovery budget 排序，不能成为岗位事实或绕过详情证据门禁。
+
+Sidecar 任务回到 `idle` 却没有产生本轮文件时，Bridge 必须读取有界的任务诊断并区分真实空结果与
+子进程失败、登录要求、风控或网络超时；不得把浏览器启动/导航失败记为 `search_empty`。
 
 `change_reason`：
 
@@ -618,9 +631,9 @@ authority violation 的 Claim 必须拒绝写入并进入 Eval。
 
 ```json
 {
-  "credential_ref": "local-secret://nowcoder/default",
+  "credential_ref": "local-secret://nowcoder_experience/default",
   "source_id": "nowcoder_experience",
-  "credential_type": "imported_curl",
+  "credential_type": "api_key_ref",
   "validated_at": "2026-07-18T00:00:00+08:00"
 }
 ```

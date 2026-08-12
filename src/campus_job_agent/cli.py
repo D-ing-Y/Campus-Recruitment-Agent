@@ -184,10 +184,16 @@ def _build_parser() -> argparse.ArgumentParser:
     auth = commands.add_parser("auth", help="manage local source credentials")
     auth_commands = auth.add_subparsers(dest="auth_command", required=True)
     chrome = auth_commands.add_parser("import-chrome")
-    chrome.add_argument("--source", required=True, choices=("zhaopin", "zhaopin_jobs", "nowcoder", "nowcoder_experience"))
+    chrome.add_argument("--source", required=True, choices=("zhaopin", "zhaopin_jobs"))
     chrome.add_argument("--name", default="default")
     chrome.add_argument("--profile")
     chrome.add_argument("--credential-root", type=Path)
+    api_key = auth_commands.add_parser("import-api-key")
+    api_key.add_argument("--source", required=True, choices=("brave_search",))
+    api_key.add_argument("--name", default="default")
+    api_key.add_argument("--api-key-stdin", action="store_true")
+    api_key.add_argument("--api-key", help=argparse.SUPPRESS)
+    api_key.add_argument("--credential-root", type=Path)
     return parser
 
 
@@ -224,6 +230,10 @@ def _dispatch(args: argparse.Namespace) -> int:
             all(checks["writable"].values())
             and checks["sqlite_checkpointer"]["available"]
             and checks["llm"]["configuration_complete"]
+            and (
+                not checks["community_retrieval"]["required"]
+                or checks["community_retrieval"]["ready"]
+            )
         ) else "partial"
         return _emit({
             "schema_version": "v0.7.1", "command": "doctor", "status": status,
@@ -252,7 +262,7 @@ def _dispatch(args: argparse.Namespace) -> int:
     if args.command == "run":
         return _legacy_run(runtime, args)
     if args.command == "auth":
-        return _import_chrome(runtime, args)
+        return _source_auth(runtime, args)
     raise CLIArgumentError("unknown command")
 
 
@@ -892,15 +902,33 @@ def _legacy_run(runtime: Any, args: argparse.Namespace) -> int:
     return _emit(payload, json_mode=args.json_output, exit_code=exit_code)
 
 
-def _import_chrome(runtime: Any, args: argparse.Namespace) -> int:
-    source_id = {"zhaopin": "zhaopin_jobs", "nowcoder": "nowcoder_experience"}.get(args.source, args.source)
+def _source_auth(runtime: Any, args: argparse.Namespace) -> int:
     store = runtime.credential_resolver
     if args.credential_root:
         from campus_job_agent.sources import LocalCredentialStore
         store = LocalCredentialStore(args.credential_root)
-    ref = store.import_chrome(source_id=source_id, name=args.name, cookie_file=args.profile)
+    if args.auth_command == "import-api-key":
+        if args.api_key is not None:
+            raise CLIArgumentError(
+                "--api-key is forbidden; use --api-key-stdin"
+            )
+        if not args.api_key_stdin:
+            raise CLIArgumentError("source API key import requires --api-key-stdin")
+        value = sys.stdin.readline().rstrip("\r\n")
+        if not value:
+            raise CLIArgumentError("--api-key-stdin received an empty key")
+        ref = store.save_source_api_key(
+            source_id="nowcoder_experience", name=args.name, api_key=value,
+        )
+        command = "auth.import-api-key"
+    else:
+        source_id = {"zhaopin": "zhaopin_jobs"}.get(args.source, args.source)
+        ref = store.import_chrome(
+            source_id=source_id, name=args.name, cookie_file=args.profile
+        )
+        command = "auth.import-chrome"
     return _emit({
-        "schema_version": "v0.7.1", "command": "auth.import-chrome", "status": "completed",
+        "schema_version": "v0.7.1", "command": command, "status": "completed",
         "source_id": ref.source_id, "credential_ref": ref.credential_ref,
         "credential_root": str(store.root.resolve()), "next_action": None,
         "warnings": [], "errors": [],

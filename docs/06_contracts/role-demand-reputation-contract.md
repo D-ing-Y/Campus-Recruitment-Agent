@@ -1,7 +1,7 @@
 # Role Demand and Reputation Contract
 
-状态：WP3.1.1 Implemented / Offline Verified / Multi-platform Live Pending
-日期：2026-08-11
+状态：WP3.1.2 Implemented / Offline Passed / Multi-platform L2 Partial
+日期：2026-08-12
 
 ## 1. 适用范围
 
@@ -17,6 +17,9 @@ CompanyRoleGroup
   company_key
   company_display_name
   company_aliases[]
+  company_search_term
+  verified_company_aliases[]
+  company_alias_policy_version
   role_family_id
   job_instance_ids[]
   exact_role_terms[]
@@ -25,7 +28,8 @@ CompanyRoleGroup
 ```
 
 Invariant：`job_instance_ids` 中每个岗位必须已经通过同一 SearchScope 的 family membership；
-company identity 不足时不得生成 community query。
+company identity 不足时不得生成 community query。`company_search_term` 必须等于法定显示名或
+`verified_company_aliases` 成员；别名不得来自模型自由输出。
 
 ## 3. CommunitySearchPlan
 
@@ -325,3 +329,39 @@ Bundle 只是 typed references，不复制原文或合并成单一“总画像�
 6. unknown/ambiguous segment 的投影数为 0；
 7. 重复 detail、segment 或 response 不产生重复写入；
 8. 旧 Snapshot 只读，新对象不得回写旧 `hiring_signals`。
+
+## 14. CommunitySearchDiagnostic
+
+```text
+CommunitySearchDiagnostic
+  diagnostic_id
+  source_id
+  query_id
+  outcome: post_candidates_found | non_post_cards_only | search_empty |
+           parser_changed | authentication_required | risk_controlled | failed
+  raw_record_count
+  post_candidate_count
+  non_post_record_count
+  parser_signature
+  reason_codes[]
+```
+
+诊断由应用读取已归档 search Raw 后确定。`parser_changed` 必须有可识别的帖子结构证据；只有公司卡、
+职位卡或零记录时分别使用 `non_post_cards_only/search_empty`。
+
+## 15. MediaCrawler Bridge Protocol
+
+- Base URL 默认 `http://127.0.0.1:8080/api`；只允许 localhost。
+- 允许 `GET crawler/status`、`POST crawler/start`、`GET data/files`、
+  `GET data/files/{path}?preview=false`。
+- 请求只允许 `platform=xhs`、`crawler_type=search|detail`、关闭评论/子评论、空 creator IDs、
+  `max_notes_count<=10`。
+- Bridge 只处理本轮新增/变更、platform=xhs、item_type=contents 的 JSON 数据，并按关键词或目标 post ID
+  过滤。传出对象删除 Cookie、xsec_token、签名、作者身份和上游文件路径。
+- Graph 只接收 canonical URL 与 opaque candidate ref；详情 locator 仅存放于 Sidecar root 的 0600 cache。
+
+## 16. DeepSeek Community Extraction
+
+- `deepseek-v4-flash/pro` 使用标准 API、非思考模式 Tool Calling；不启用 beta strict endpoint。
+- Tool payload 必须符合 `CommunityExtractionBatch`，缺失值显式为空，不允许补全、改写引文或产生内部 ID。
+- 至多三次总尝试；所有尝试失败后才写最终模型失败回执。成功结果仍由应用执行 quote、scope 和 usage 校验。

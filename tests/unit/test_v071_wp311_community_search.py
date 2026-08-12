@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import json
-import asyncio
-import warnings
+import hashlib
 from pathlib import Path
 
 import httpx
@@ -13,16 +12,19 @@ from campus_job_agent.integrations.social_media import (
     MediaCrawlerSidecarConfig,
     SocialBridgeError,
 )
-from campus_job_agent.integrations.social_media_mcp_server import build_social_mcp_server
 from campus_job_agent.schemas import (
+    CommunitySearchDiagnostic,
     CommunityEvidenceCoverage,
     CompanyRoleGroup,
+    EvidenceFragment,
     SourceDetailRequest,
     SourceCapabilities,
+    SourceDocument,
     SourceQuery,
 )
 from campus_job_agent.sources import SQLiteRoleRepository, XiaohongshuExperienceAdapter
 from campus_job_agent.sources.processing import (
+    diagnose_community_search,
     discover_community_post_candidates,
     extract_archived_document,
 )
@@ -40,6 +42,12 @@ def _group() -> CompanyRoleGroup:
         company_display_name="甲公司", role_family_id="ai_agent_engineering",
         job_instance_ids=["job-1"], exact_role_terms=["大模型应用开发工程师"],
     )
+
+
+def _fake_sidecar_install(path: Path, commit: str = "1234567890abcdef") -> None:
+    path.mkdir()
+    (path / ".git").mkdir()
+    (path / ".git" / "HEAD").write_text(commit, encoding="utf-8")
 
 
 def test_three_round_queries_use_display_terms_and_stable_lineage() -> None:
@@ -68,6 +76,26 @@ def test_three_round_queries_use_display_terms_and_stable_lineage() -> None:
     assert role_family_display_name("ai_agent_engineering") == "AI Agent 开发"
 
 
+def test_three_round_queries_use_only_a_verified_company_alias() -> None:
+    group = CompanyRoleGroup(
+        group_id="brand-group", search_scope_id="scope-1",
+        company_key="北京三快在线科技有限公司",
+        company_display_name="北京三快在线科技有限公司",
+        company_search_term="美团", verified_company_aliases=["美团"],
+        role_family_id="ai_agent_engineering", job_instance_ids=["job-1"],
+        exact_role_terms=["大模型应用开发工程师"],
+    )
+    query = build_community_search_query(
+        group, evidence_purpose="interview_experience",
+        source_id="nowcoder_experience", round_index=1, source_priority=1,
+    )
+    assert query.query_text == "美团 大模型应用开发工程师 面经"
+    with pytest.raises(ValueError, match="verified alias"):
+        group.model_copy(update={"company_search_term": "自由生成别名"}).model_validate(
+            {**group.model_dump(), "company_search_term": "自由生成别名"}
+        )
+
+
 def test_query_rejects_wrong_source_priority() -> None:
     with pytest.raises(ValueError, match="cascade"):
         build_community_search_query(
@@ -76,18 +104,22 @@ def test_query_rejects_wrong_source_priority() -> None:
         )
 
 
-def test_coverage_requires_two_unique_documents() -> None:
+def test_coverage_requires_three_unique_clusters() -> None:
     value = CommunityEvidenceCoverage(
         coverage_id="coverage", company_role_group_id="group",
-        evidence_purpose="interview_experience", accepted_document_ids=["a", "b"],
-        independent_document_count=2, status="sufficient", next_action="next_purpose",
+        evidence_purpose="interview_experience",
+        accepted_document_ids=["a", "b", "c"], independent_document_count=3,
+        accepted_cluster_ids=["ca", "cb", "cc"], independent_cluster_count=3,
+        status="sufficient", next_action="next_purpose",
     )
-    assert value.target_document_count == 2
+    assert value.target_cluster_count == 3
     with pytest.raises(ValueError, match="target"):
         CommunityEvidenceCoverage(
             coverage_id="coverage", company_role_group_id="group",
             evidence_purpose="interview_experience", accepted_document_ids=["a"],
-            independent_document_count=1, status="sufficient", next_action="next_purpose",
+            independent_document_count=1, accepted_cluster_ids=["ca"],
+            independent_cluster_count=1, status="sufficient",
+            next_action="next_purpose",
         )
 
 
@@ -103,54 +135,65 @@ def test_authorization_mode_is_backward_compatible() -> None:
 
 def test_sidecar_search_and_detail_keep_sensitive_locator_local(tmp_path: Path) -> None:
     install = tmp_path / "MediaCrawler"
-    install.mkdir()
+    _fake_sidecar_install(install)
     cache = install / ".campus-agent-bridge-cache"
     state = {"task": "", "starts": 0}
 
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
-        if path == "/crawler/status":
+        if path == "/api/crawler/status":
             return httpx.Response(200, json={"status": "idle"})
-        if path == "/crawler/start":
+        if path == "/api/crawler/start":
             payload = json.loads(request.content)
             assert payload["platform"] == "xhs"
             assert payload["enable_comments"] is False
             assert payload["enable_sub_comments"] is False
             assert payload["creator_ids"] == ""
+            assert payload["save_option"] == "json"
             state["task"] = payload["crawler_type"]
             state["starts"] += 1
             return httpx.Response(200, json={"ok": True})
-        if path == "/data/files":
+        if path == "/api/data/files":
+            assert request.url.params["platform"] == "xhs"
+            assert request.url.params["file_type"] == "json"
             files = [{
-                "name": "xhs/old.jsonl", "path": "xhs/old.jsonl",
+                "name": "old_contents_2026.json", "path": "xhs/json/old_contents_2026.json",
                 "modified_at": "0", "size": 10,
             }]
             if state["starts"]:
                 files.append({
-                    "name": f"xhs/{state['task']}.jsonl",
-                    "path": f"xhs/{state['task']}.jsonl",
+                    "name": f"{state['task']}_contents_2026.json",
+                    "path": f"xhs/json/{state['task']}_contents_2026.json",
                     "modified_at": str(state["starts"]), "size": 10,
                 })
             return httpx.Response(200, json={"files": files})
-        if path.endswith("/xhs/old.jsonl"):
+        if path.endswith("/xhs/json/old_contents_2026.json"):
             raise AssertionError("old sidecar output must not be read")
-        if path.endswith("/xhs/search.jsonl"):
-            return httpx.Response(200, text=json.dumps({
+        if path.endswith("/xhs/json/search_contents_2026.json"):
+            assert request.url.params["preview"] == "false"
+            return httpx.Response(200, json=[{
+                "note_id": "stale-note", "title": "旧记录", "desc": "不应进入本轮",
+                "source_keyword": "上一轮关键词",
+            }, {
                 "note_id": "note-1", "title": "面试记录", "desc": "摘要",
                 "note_url": "https://www.xiaohongshu.com/explore/note-1?xsec_token=secret",
                 "xsec_token": "secret",
-            }, ensure_ascii=False))
-        if path.endswith("/xhs/detail.jsonl"):
-            return httpx.Response(200, text=json.dumps({
+                "source_keyword": "甲公司 AI Agent 开发 面经",
+            }])
+        if path.endswith("/xhs/json/detail_contents_2026.json"):
+            assert request.url.params["preview"] == "false"
+            return httpx.Response(200, json=[{
+                "note_id": "another-note", "title": "其他记录", "desc": "不应返回",
+            }, {
                 "note_id": "note-1", "title": "面试记录",
                 "desc": "甲公司 AI Agent 开发岗位面试询问了 RAG。",
                 "xsec_token": "secret",
-            }, ensure_ascii=False))
+            }])
         raise AssertionError(path)
 
     client = MediaCrawlerSidecarClient(
         MediaCrawlerSidecarConfig(
-            base_url="http://127.0.0.1:8000", installation_path=install,
+            base_url="http://127.0.0.1:8080/api", installation_path=install,
             pinned_commit="1234567890abcdef", license_accepted=True,
             candidate_cache_root=cache, poll_interval_seconds=0,
         ),
@@ -166,29 +209,71 @@ def test_sidecar_search_and_detail_keep_sensitive_locator_local(tmp_path: Path) 
     assert "secret" not in json.dumps(detail, ensure_ascii=False)
 
 
+def _community_document(source_id: str, text: str) -> tuple[SourceDocument, EvidenceFragment]:
+    digest = hashlib.sha256(text.encode()).hexdigest()
+    document = SourceDocument(
+        source_document_id=f"doc-{source_id}", source_id=source_id,
+        channel="experience", query_id=f"query-{source_id}",
+        source_url="https://api.search.brave.com/res/v1/web/search",
+        document_kind="experience_search", raw_artifact_id=f"artifact-{source_id}",
+        content_hash=digest,
+    )
+    fragment = EvidenceFragment(
+        fragment_id=f"fragment-{source_id}", artifact_id=f"artifact-{source_id}",
+        locator_type="css_selector_and_char_range", locator={"start": 0, "end": len(text)},
+        text=text, text_hash=digest,
+    )
+    return document, fragment
+
+
+def test_brave_diagnostic_distinguishes_non_detail_results_from_parser_change() -> None:
+    text = json.dumps({"web": {"results": [{
+        "url": "https://www.nowcoder.com/", "title": "牛客首页",
+    }]}})
+    document, fragment = _community_document("nowcoder_experience", text)
+    diagnostic = diagnose_community_search(document, [fragment], [])
+    assert isinstance(diagnostic, CommunitySearchDiagnostic)
+    assert diagnostic.outcome == "non_post_cards_only"
+    assert diagnostic.raw_record_count == 1
+    assert diagnostic.post_candidate_count == 0
+    assert diagnostic.non_post_record_count == 1
+
+    drift_text = '{"web":{"results":"changed"}}'
+    drift_document, drift_fragment = _community_document("nowcoder_experience", drift_text)
+    drift = diagnose_community_search(drift_document, [drift_fragment], [])
+    assert drift.outcome == "parser_changed"
+
+
+def test_xiaohongshu_diagnostic_reports_an_explicit_empty_candidate_list() -> None:
+    text = json.dumps({"platform": "xiaohongshu", "candidates": []})
+    document, fragment = _community_document("xiaohongshu_experience", text)
+    diagnostic = diagnose_community_search(document, [fragment], [])
+    assert diagnostic.outcome == "search_empty"
+
+
 def test_sidecar_task_timeout_is_bounded(tmp_path: Path) -> None:
     install = tmp_path / "MediaCrawler"
-    install.mkdir()
+    _fake_sidecar_install(install)
     started = {"value": False}
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/crawler/status":
+        if request.url.path == "/api/crawler/status":
             return httpx.Response(200, json={
                 "status": "running" if started["value"] else "idle"
             })
-        if request.url.path == "/data/files":
+        if request.url.path == "/api/data/files":
             return httpx.Response(200, json={"files": []})
-        if request.url.path == "/crawler/start":
+        if request.url.path == "/api/crawler/start":
             started["value"] = True
             return httpx.Response(200, json={"ok": True})
         raise AssertionError(request.url.path)
 
     client = MediaCrawlerSidecarClient(
         MediaCrawlerSidecarConfig(
-            base_url="http://localhost:8000", installation_path=install,
+            base_url="http://localhost:8080/api", installation_path=install,
             pinned_commit="1234567890abcdef", license_accepted=True,
             candidate_cache_root=install / ".campus-agent-bridge-cache",
-            poll_interval_seconds=0, max_poll_seconds=0,
+            poll_interval_seconds=0, max_poll_seconds=0.001,
         ),
         transport=httpx.MockTransport(handler),
     )
@@ -197,23 +282,39 @@ def test_sidecar_task_timeout_is_bounded(tmp_path: Path) -> None:
     assert raised.value.code == "network_timeout"
 
 
-def test_social_mcp_exposes_read_only_allowlist() -> None:
-    class FakeClient:
-        def health(self): return {"status": "idle"}
-        def auth_status(self): return {"status": "external_session_available"}
-        def search_posts(self, *, keywords, limit=3): return {"candidates": []}
-        def fetch_post_detail(self, *, candidate_ref): return {"candidate_ref": candidate_ref}
+def test_sidecar_failed_subprocess_is_not_reported_as_empty(tmp_path: Path) -> None:
+    install = tmp_path / "MediaCrawler"
+    _fake_sidecar_install(install)
 
-    with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore", message="Field 'lifespan' has an incomplete definition.*"
-        )
-        server = build_social_mcp_server(FakeClient())
-    tools = asyncio.run(server.list_tools())
-    assert {item.name for item in tools} == {
-        "social.health", "social.auth_status", "social.search_posts",
-        "social.fetch_post_detail",
-    }
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/crawler/status":
+            return httpx.Response(200, json={"status": "idle"})
+        if request.url.path == "/api/data/files":
+            return httpx.Response(200, json={"files": []})
+        if request.url.path == "/api/crawler/start":
+            return httpx.Response(200, json={"ok": True})
+        if request.url.path == "/api/crawler/logs":
+            assert request.url.params["limit"] == "50"
+            return httpx.Response(200, json={"logs": [{
+                "level": "warning",
+                "message": "Page.goto: net::ERR_TIMED_OUT at https://example.invalid",
+            }, {
+                "level": "warning", "message": "Crawler exited with code: 1",
+            }]})
+        raise AssertionError(request.url.path)
+
+    client = MediaCrawlerSidecarClient(
+        MediaCrawlerSidecarConfig(
+            base_url="http://localhost:8080/api", installation_path=install,
+            pinned_commit="1234567890abcdef", license_accepted=True,
+            candidate_cache_root=install / ".campus-agent-bridge-cache",
+            poll_interval_seconds=0,
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(SocialBridgeError) as raised:
+        client.search_posts(keywords="甲公司 面经")
+    assert raised.value.code == "network_timeout"
 
 
 def test_xiaohongshu_adapter_archives_search_before_candidate_and_detail(tmp_path: Path) -> None:
@@ -292,9 +393,9 @@ def test_xiaohongshu_adapter_archives_search_before_candidate_and_detail(tmp_pat
 )
 def test_sidecar_configuration_is_fail_closed(tmp_path: Path, update: dict, code: str) -> None:
     install = tmp_path / "MediaCrawler"
-    install.mkdir()
+    _fake_sidecar_install(install)
     values = {
-        "base_url": "http://localhost:8000", "installation_path": install,
+        "base_url": "http://localhost:8080/api", "installation_path": install,
         "pinned_commit": "1234567890abcdef", "license_accepted": True,
         "candidate_cache_root": install / ".campus-agent-bridge-cache",
         **update,

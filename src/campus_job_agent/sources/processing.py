@@ -15,6 +15,7 @@ from urllib.parse import urljoin, urlparse
 from uuid import NAMESPACE_URL, uuid5
 
 from campus_job_agent.schemas import (
+    CommunitySearchDiagnostic,
     CommunityPostCandidate,
     DocumentExtraction,
     EvidenceFragment,
@@ -31,6 +32,9 @@ from campus_job_agent.schemas import (
 )
 from campus_job_agent.schemas.intent import role_family_for_query
 from campus_job_agent.schemas.source import canonical_hash, normalize_text
+from campus_job_agent.integrations.community_retrieval import (
+    canonical_nowcoder_detail_url,
+)
 from campus_job_agent.storage.base import BlobStore, EvidenceRepository
 
 
@@ -40,6 +44,8 @@ WEB_PARSER_VERSION = "web_document_v1"
 def discover_job_detail_candidates(
     document: SourceDocument,
     fragments: list[EvidenceFragment],
+    *,
+    preferred_locations: list[str] | None = None,
 ) -> list[JobDetailCandidate]:
     """Discover detail URLs without treating search content as role evidence."""
 
@@ -75,9 +81,37 @@ def discover_job_detail_candidates(
             detail_url=url, platform_job_id=_optional_string(item.get("job_id")),
             company_hint=_optional_string(item.get("company")),
             role_title_hint=_optional_string(item.get("role_title") or item.get("title")),
+            location_hint=_optional_string(
+                item.get("city") or item.get("location") or item.get("work_location")
+            ),
         ))
-    unique = {item.detail_url: item for item in results}
-    return [unique[key] for key in sorted(unique)]
+    unique: dict[str, JobDetailCandidate] = {}
+    for item in results:
+        unique.setdefault(item.detail_url, item)
+    values = list(unique.values())
+    if preferred_locations:
+        indexed = list(enumerate(values))
+        indexed.sort(key=lambda pair: (
+            0 if _matches_preferred_location(
+                pair[1].location_hint, preferred_locations
+            ) else 1,
+            pair[0],
+        ))
+        values = [item for _, item in indexed]
+    return values
+
+
+def _matches_preferred_location(
+    location_hint: str | None, preferred_locations: list[str],
+) -> bool:
+    if not location_hint:
+        return False
+    candidate = normalize_text(location_hint)
+    return any(
+        bool(target := normalize_text(value))
+        and (target in candidate or candidate in target)
+        for value in preferred_locations
+    )
 
 
 def discover_community_post_candidates(
@@ -100,22 +134,27 @@ def discover_community_post_candidates(
         parsed = json.loads(raw)
     except json.JSONDecodeError:
         parsed = None
-    if isinstance(parsed, dict):
+    if (
+        document.source_id == "nowcoder_experience"
+        and isinstance(parsed, dict) and "web" in parsed
+    ):
+        web = parsed.get("web")
+        values = web.get("results") if isinstance(web, dict) else None
+        records = [item for item in values or [] if isinstance(item, dict)]
+    elif isinstance(parsed, dict):
         values = parsed.get("candidates") or parsed.get("experiences") or [parsed]
         records = [item for item in values if isinstance(item, dict)]
-    elif document.source_id == "nowcoder_experience":
-        records = _nowcoder_experiences_from_html(raw)
     results: list[CommunityPostCandidate] = []
     for item in records:
         url = str(
             item.get("detail_url") or item.get("canonical_url")
-            or item.get("source_url") or ""
+            or item.get("source_url") or item.get("url") or ""
         )
-        parsed_url = urlparse(url)
-        if document.source_id == "nowcoder_experience" and (
-            parsed_url.scheme != "https" or parsed_url.hostname != "www.nowcoder.com"
-        ):
-            continue
+        if document.source_id == "nowcoder_experience":
+            canonical = canonical_nowcoder_detail_url(url)
+            if canonical is None:
+                continue
+            url = canonical
         if not url:
             continue
         payload = [document.source_id, document.query_id, document.source_document_id, url]
@@ -127,14 +166,124 @@ def discover_community_post_candidates(
             supporting_fragment_id=fragments[0].fragment_id,
             detail_url=url,
             external_locator_ref=_optional_string(item.get("candidate_ref")),
-            platform_post_id=_optional_string(item.get("platform_post_id")),
+            platform_post_id=(
+                _optional_string(item.get("platform_post_id"))
+                or (urlparse(url).path.rsplit("/", 1)[-1]
+                    if document.source_id == "nowcoder_experience" else None)
+            ),
             title_hint=_optional_string(item.get("title")),
             company_hint=_optional_string(item.get("company")) or company_hint,
             role_family_hint=_optional_string(item.get("role_family")) or role_family_hint,
             intended_document_types=list(intended_document_types or []),
         ))
-    unique = {item.detail_url: item for item in results}
-    return [unique[key] for key in sorted(unique)]
+    unique: dict[str, CommunityPostCandidate] = {}
+    for item in results:
+        unique.setdefault(item.detail_url, item)
+    return list(unique.values())
+
+
+def diagnose_community_search(
+    document: SourceDocument,
+    fragments: list[EvidenceFragment],
+    candidates: list[CommunityPostCandidate],
+) -> CommunitySearchDiagnostic:
+    """Distinguish an empty search from non-post cards and parser drift."""
+
+    outcome = "failed"
+    raw_count = 0
+    post_count = len(candidates)
+    non_post_count = 0
+    signature = "unsupported_community_search_v1"
+    reasons: list[str] = []
+    if document.access_status in {"authentication_required", "risk_controlled"}:
+        outcome = document.access_status
+        reasons = [document.access_status]
+    elif document.access_status != "success" or not fragments:
+        reasons = [f"search_access_{document.access_status}"]
+    elif (
+        isinstance(envelope := _community_candidate_envelope(fragments[0].text), list)
+    ):
+        signature = "archived_candidate_envelope_v1"
+        raw_count = len(envelope)
+        post_count = len(candidates)
+        non_post_count = max(raw_count - post_count, 0)
+        if post_count:
+            outcome, reasons = "post_candidates_found", ["archived_post_candidates_found"]
+        elif raw_count:
+            outcome, reasons = "non_post_cards_only", ["archived_non_post_records_only"]
+        else:
+            outcome, reasons = "search_empty", ["archived_candidate_list_empty"]
+    elif document.source_id == "nowcoder_experience":
+        signature = "brave_web_search_v1"
+        try:
+            parsed_value = json.loads(fragments[0].text)
+        except json.JSONDecodeError:
+            parsed_value = None
+        web = parsed_value.get("web") if isinstance(parsed_value, dict) else None
+        records = web.get("results") if isinstance(web, dict) else None
+        if not isinstance(records, list):
+            recognizable = '"web"' in fragments[0].text or '"results"' in fragments[0].text
+            outcome = "parser_changed" if recognizable else "failed"
+            reasons = [
+                "brave_result_shape_unparsed" if recognizable
+                else "brave_search_payload_invalid"
+            ]
+        else:
+            raw_count = len(records)
+            post_count = len(candidates)
+            non_post_count = max(raw_count - post_count, 0)
+            if post_count:
+                outcome, reasons = "post_candidates_found", ["brave_nowcoder_details_found"]
+            elif raw_count:
+                outcome, reasons = "non_post_cards_only", ["brave_non_detail_results_only"]
+            else:
+                outcome, reasons = "search_empty", ["brave_web_results_empty"]
+    elif document.source_id == "xiaohongshu_experience":
+        signature = "mediacrawler_xhs_candidates_v1"
+        raw = fragments[0].text
+        try:
+            parsed_value = json.loads(raw)
+        except json.JSONDecodeError:
+            parsed_value = None
+        records = (
+            parsed_value.get("candidates", [])
+            if isinstance(parsed_value, dict) else []
+        )
+        if not isinstance(records, list):
+            records = []
+        raw_count = len(records)
+        post_count = len(candidates)
+        non_post_count = max(raw_count - post_count, 0)
+        if post_count:
+            outcome, reasons = "post_candidates_found", ["xiaohongshu_post_candidates_found"]
+        elif isinstance(parsed_value, dict) and "candidates" in parsed_value:
+            outcome, reasons = "search_empty", ["xiaohongshu_search_candidates_empty"]
+        else:
+            recognizable = '"candidate_ref"' in raw or '"platform_post_id"' in raw
+            outcome = "parser_changed" if recognizable else "failed"
+            reasons = [
+                "xiaohongshu_candidate_shape_unparsed"
+                if recognizable else "xiaohongshu_search_payload_invalid"
+            ]
+    elif post_count:
+        outcome, raw_count = "post_candidates_found", post_count
+        reasons = ["community_post_candidates_found"]
+    else:
+        reasons = ["unsupported_community_search_source"]
+    diagnostic_id = (
+        "community-search-diagnostic:"
+        + canonical_hash("community-search-diagnostic", [
+            document.source_document_id, document.query_id, signature, outcome,
+            raw_count, post_count, non_post_count,
+        ])[:24]
+    )
+    return CommunitySearchDiagnostic(
+        diagnostic_id=diagnostic_id, source_id=document.source_id,
+        query_id=document.query_id, outcome=outcome,
+        raw_record_count=raw_count, post_candidate_count=post_count,
+        non_post_record_count=non_post_count, parser_signature=signature,
+        reason_codes=reasons,
+    )
 
 
 def extract_archived_document(
@@ -234,12 +383,7 @@ def normalize_experience_document(
     fragments: list[EvidenceFragment],
     role_family: str,
 ) -> list[ExperienceEvidenceRecord]:
-    try:
-        payload = _json_from_fragments(fragments)
-    except ValueError:
-        if document.source_id != "nowcoder_experience":
-            raise
-        payload = {"experiences": _nowcoder_experiences_from_html(fragments[0].text)}
+    payload = _json_from_fragments(fragments)
     records = payload.get("experiences") if isinstance(payload, dict) else None
     if records is None:
         records = [payload]
@@ -776,63 +920,17 @@ def _zhaopin_salary(value: Any) -> tuple[float | None, float | None, str | None]
     return None, None, None
 
 
-def _nowcoder_experiences_from_html(text: str) -> list[dict[str, Any]]:
-    marker = "window.__INITIAL_STATE__="
-    start = text.find(marker)
-    if start < 0:
-        return []
+def _community_candidate_envelope(text: str) -> list[dict[str, Any]] | None:
     try:
-        state, _ = json.JSONDecoder().raw_decode(text[start + len(marker):])
+        value = json.loads(text)
     except json.JSONDecodeError:
-        return []
-    app = state.get("app", {}) if isinstance(state, dict) else {}
-    search = app.get("180", {}) if isinstance(app, dict) else {}
-    records = search.get("records", []) if isinstance(search, dict) else []
-    results: list[dict[str, Any]] = []
-    for record in records[:50] if isinstance(records, list) else []:
-        if not isinstance(record, dict):
-            continue
-        data = record.get("data", {})
-        moment = data.get("momentData", {}) if isinstance(data, dict) else {}
-        if not isinstance(moment, dict):
-            continue
-        identifier = moment.get("uuid") or moment.get("id") or data.get("contentId")
-        title = _clean_html_text(
-            moment.get("newTitle") or moment.get("title") or record.get("title") or "unknown",
-            limit=300,
-        )
-        content = _clean_html_text(
-            moment.get("newContent") or moment.get("content") or moment.get("desc") or "",
-            limit=4000,
-        )
-        if not identifier or (title == "unknown" and not content):
-            continue
-        combined = f"{title}\n{content}"
-        company = next((name for name in ("京东", "腾讯", "阿里", "字节跳动", "美团", "百度", "华为") if name in combined), None)
-        tech_stack = [
-            value for value in ("Python", "Java", "C++", "MySQL", "Redis", "Kafka", "RAG", "Agent", "LangGraph")
-            if value.casefold() in combined.casefold()
-        ]
-        interview = [content[:1200]] if content and any(value in combined for value in ("面经", "面试", "一面", "二面", "三面")) else []
-        project = [content[:1200]] if content and "项目" in content else []
-        stage = next((value for value in ("一面", "二面", "三面", "HR面", "笔试") if value.casefold() in combined.casefold()), None)
-        results.append({
-            "platform": "nowcoder",
-            "content_type": "discussion_post",
-            "source_url": f"https://www.nowcoder.com/feed/main/detail/{identifier}",
-            "title": title,
-            "author_ref": "anonymous",
-            "company": company,
-            "role_title": title if "agent" in title.casefold() else None,
-            "stage": stage,
-            "scope_level": "company_role" if company and "agent" in combined.casefold() else "unknown",
-            "signals": {"interview": interview, "tech_stack": tech_stack, "project_preference": project},
-            "summary": content[:600],
-            "confidence": 0.75 if content else 0.5,
-            "tags": tech_stack,
-            "notes": ["deterministic_nowcoder_embedded_state_v1", "author_minimized"],
-        })
-    return results
+        return None
+    if not isinstance(value, dict) or "candidates" not in value:
+        return None
+    records = value.get("candidates")
+    if not isinstance(records, list):
+        return None
+    return [item for item in records if isinstance(item, dict)]
 
 
 def _clean_html_text(value: Any, *, limit: int) -> str:

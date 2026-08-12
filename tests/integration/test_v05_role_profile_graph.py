@@ -180,14 +180,17 @@ def test_detail_first_graph_builds_separated_profiles_and_bundle(tmp_path):
     runtime, evidence, role, _registry, adapters = _build(tmp_path, InMemorySaver())
     result = runtime.invoke(_state(adapters))
 
-    assert result["status"] == "completed"
+    assert result["status"] == "completed_with_unknowns"
     assert len(result["recruitment_detail_candidate_ids"]) == 1
     assert len(result["recruitment_detail_document_ids"]) == 1
     assert len(result["job_demand_profile_ids"]) == 1
     assert len(result["job_reputation_profile_ids"]) == 1
     assert len(result["company_reputation_profile_ids"]) == 1
     assert len(result["community_evidence_segment_ids"]) == 3
-    assert result["missing_sections"] == []
+    assert set(result["missing_sections"]) == {
+        "community_interview_insufficient",
+        "community_reputation_insufficient",
+    }
 
     demand = role.get(result["job_demand_profile_ids"][0], JobDemandProfile)
     family = role.get(result["role_family_demand_profile_id"], RoleFamilyDemandProfile)
@@ -249,7 +252,7 @@ def test_detail_first_graph_builds_separated_profiles_and_bundle(tmp_path):
     }
 
 
-def test_community_loop_stops_each_purpose_after_two_independent_details(tmp_path):
+def test_two_independent_details_do_not_satisfy_three_cluster_floor(tmp_path):
     interview_2_url = "fixture://community/interview-2"
     employment_2_url = "fixture://community/employment-2"
     interview_2 = {
@@ -305,10 +308,70 @@ def test_community_loop_stops_each_purpose_after_two_independent_details(tmp_pat
         "community_search_attempt_receipt", CommunitySearchAttemptReceipt
     )
     coverages = role.list("community_evidence_coverage", CommunityEvidenceCoverage)
+    assert result["counters"]["community_searches"] == 6
+    assert len(attempts) == 6
+    assert {item.round_index for item in attempts} == {1, 2, 3}
+    assert not [item for item in coverages if item.status == "sufficient"]
+
+
+def test_three_independent_clusters_per_purpose_complete_in_two_searches(tmp_path):
+    candidates = []
+    details = {}
+    for index in range(3):
+        interview_url = f"fixture://community/interview-{index + 10}"
+        employment_url = f"fixture://community/employment-{index + 10}"
+        candidates.extend([
+            {"detail_url": interview_url, "title": f"甲科技面经 {index}"},
+            {"detail_url": employment_url, "title": f"甲科技工作体验 {index}"},
+        ])
+        interview_quote = f"第 {index + 1} 轮面试询问了 Agent 评测主题 {index}。"
+        employment_quote = f"团队在主题 {index} 上的工作节奏与协作体验。"
+        details[interview_url] = {
+            "source_url": interview_url,
+            "body_text": f"甲科技 AI Agent工程师{interview_quote}",
+            "community_extraction": {
+                "document_type": "interview_experience",
+                "segments": [{
+                    "quote": interview_quote,
+                    "segment_type": "interview_question",
+                    "scope_level": "company_role", "company": "甲科技",
+                    "role_title": "AI Agent工程师", "confidence": 0.9,
+                }],
+            },
+        }
+        details[employment_url] = {
+            "source_url": employment_url,
+            "body_text": f"甲科技 AI Agent工程师{employment_quote}",
+            "community_extraction": {
+                "document_type": "employment_experience",
+                "segments": [{
+                    "quote": employment_quote,
+                    "segment_type": "team_atmosphere",
+                    "scope_level": "company_role", "company": "甲科技",
+                    "role_title": "AI Agent工程师",
+                    "polarity": "mixed", "confidence": 0.9,
+                }],
+            },
+        }
+    search = [{
+        **COMMUNITY_SEARCH[0], "candidates": candidates,
+    }]
+    runtime, _evidence, role, _registry, adapters = _build(
+        tmp_path, InMemorySaver(), community_search=search,
+        community_details=details,
+    )
+    result = runtime.invoke(_state(
+        adapters, "three-cluster-thread",
+        budgets={"max_community_detail_documents_per_query": 6},
+    ))
+    coverages = role.list(
+        "community_evidence_coverage", CommunityEvidenceCoverage
+    )
+    sufficient = [item for item in coverages if item.status == "sufficient"]
+    assert result["status"] == "completed"
     assert result["counters"]["community_searches"] == 2
-    assert len(attempts) == 2
-    assert {item.round_index for item in attempts} == {1}
-    assert len([item for item in coverages if item.status == "sufficient"]) == 2
+    assert len(sufficient) == 2
+    assert all(item.independent_cluster_count == 3 for item in sufficient)
 
 
 def test_skipping_blocked_primary_source_switches_to_backup(tmp_path):
@@ -344,6 +407,49 @@ def test_skipping_blocked_primary_source_switches_to_backup(tmp_path):
     assert "fixture_experience" in result["skipped_source_ids"]
 
 
+def test_calibration_maps_ranked_sources_to_seventy_thirty_detail_budget(tmp_path):
+    runtime, _evidence, role, _registry, adapters = _build(
+        tmp_path, InMemorySaver(),
+    )
+    primary = adapters.get("fixture_experience")
+    backup = FixtureExperienceAdapter(
+        source_id="fixture_experience_backup",
+        fixture_pages={"first": COMMUNITY_SEARCH},
+        detail_pages={
+            INTERVIEW_URL: INTERVIEW_DETAIL,
+            EMPLOYMENT_URL: EMPLOYMENT_DETAIL,
+        },
+        blob_store=primary.blob_store,
+        evidence_repository=primary.evidence_repository,
+        role_repository=primary.role_repository, owner_id="owner",
+    )
+    adapters.register(backup)
+    state = _state(adapters, "allocation-thread")
+    state["enabled_source_ids"] = [
+        "fixture_jobs", "fixture_experience", "fixture_experience_backup",
+    ]
+    state["source_capabilities"] = adapters.capabilities()
+    result = runtime.invoke(state)
+
+    allocations = result["community_source_allocations_by_purpose"]
+    assert allocations
+    assert all(
+        sorted(value.values()) == [0.3, 0.7]
+        for value in allocations.values()
+    )
+    attempts = {
+        item.query_id: item for item in role.list(
+            "community_search_attempt_receipt", CommunitySearchAttemptReceipt
+        )
+    }
+    for query in result["query_history"]:
+        attempt = attempts.get(query.get("query_id"))
+        if attempt is None or attempt.round_index == 1:
+            continue
+        expected = max(1, round(
+            3 * allocations[attempt.evidence_purpose][attempt.source_id]
+        ))
+        assert query["page_size"] == expected
 def test_duplicate_graph_invoke_reuses_detail_and_profile_records(tmp_path):
     runtime, _evidence, role, _registry, adapters = _build(tmp_path, InMemorySaver())
     first = runtime.invoke(_state(adapters, "first-thread"))
@@ -370,7 +476,7 @@ def test_auth_interrupt_authorized_resume_redacts_credential(tmp_path):
 
     credential_file = tmp_path / "nowcoder.curl.txt"
     credential_file.write_text(
-        "curl 'https://www.nowcoder.com/search' -H 'Cookie: session=very-secret-cookie'",
+        "curl 'https://fixture.invalid/authorize' -H 'Cookie: session=very-secret-cookie'",
         encoding="utf-8",
     )
     imported = registry.run("source.import_credential", {
@@ -384,7 +490,7 @@ def test_auth_interrupt_authorized_resume_redacts_credential(tmp_path):
         "action": "authorized", "credential_ref": credential_ref,
     })
 
-    assert completed["status"] == "completed"
+    assert completed["status"] == "completed_with_unknowns"
     serialized = str({
         "state": completed,
         "artifacts": [
@@ -413,6 +519,7 @@ def test_auth_skip_publishes_demand_and_marks_reputation_missing(tmp_path):
     assert len(completed["job_demand_profile_ids"]) == 1
     assert set(completed["missing_sections"]) == {
         "interview_assessment", "job_reputation", "company_reputation",
+        "community_interview_insufficient", "community_reputation_insufficient",
     }
     assert "fixture_experience" in completed["skipped_source_ids"]
 
@@ -443,7 +550,7 @@ def test_sqlite_checkpoint_resumes_in_new_process_boundary(tmp_path):
             "user_id": "owner", "source_id": "fixture_experience",
             "action": "authorized", "credential_ref": credential_ref,
         })
-    assert completed["status"] == "completed"
+    assert completed["status"] == "completed_with_unknowns"
 
 
 def test_search_page_without_detail_never_projects_demand(tmp_path):
@@ -481,7 +588,7 @@ def test_run_exports_only_safe_wp31_summary(tmp_path):
     result = runtime.invoke(state)
 
     report = tmp_path / "run-output" / "role_intelligence_report.json"
-    assert result["status"] == "completed"
+    assert result["status"] == "completed_with_unknowns"
     assert report.is_file()
     text = report.read_text(encoding="utf-8")
     assert "role_intelligence_bundle_id" in text
@@ -502,7 +609,7 @@ def test_llm_planner_failure_uses_deterministic_fallback(tmp_path):
     )
     result = runtime.invoke(_state(adapters, "llm-fallback-thread"))
 
-    assert result["status"] == "completed"
+    assert result["status"] == "completed_with_unknowns"
     assert any(
         item.get("fallback") == "deterministic"
         and item.get("error_type") == "llm_output_error"

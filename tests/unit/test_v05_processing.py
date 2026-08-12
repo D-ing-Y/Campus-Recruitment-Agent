@@ -185,7 +185,7 @@ def test_zhaopin_embedded_state_precedes_partial_search_card():
     assert "不应进入规范化数据的人名" not in jobs[0].model_dump_json()
 
 
-def test_nowcoder_html_embedded_state_normalizes_without_user_profile():
+def test_nowcoder_internal_search_html_is_not_parsed_as_experience_evidence():
     state = {"app": {"180": {"records": [{"title": "<em>京东</em> AI Agent 一面面经", "data": {
         "userBrief": {"nickname": "private-name"},
         "momentData": {"uuid": "post-1", "newTitle": "京东 AI Agent 一面面经", "newContent": "项目中追问 Redis 和 Agent 评测"},
@@ -194,11 +194,13 @@ def test_nowcoder_html_embedded_state_normalizes_without_user_profile():
     fragment = EvidenceFragment(artifact_id="a", locator_type="selector", locator={"selector":"body"}, text=text,
                                 text_hash=__import__("hashlib").sha256(text.encode()).hexdigest())
     document = SourceDocument(source_id="nowcoder_experience", channel="experience", query_id="q",
-                              source_url="https://www.nowcoder.com/search/all", document_kind="experience_search",
+                              source_url="https://api.search.brave.com/res/v1/web/search",
+                              document_kind="experience_search",
                               raw_artifact_id="a", content_hash="0"*64)
-    records = normalize_experience_document(document, [fragment], "ai_agent_engineering")
-    assert len(records) == 1 and records[0].company == "京东" and "Redis" in records[0].signals.tech_stack
-    assert "private-name" not in records[0].model_dump_json()
+    with pytest.raises(ValueError, match="strict JSON"):
+        normalize_experience_document(
+            document, [fragment], "ai_agent_engineering"
+        )
 
 
 def test_community_cannot_create_hard_qualification(tmp_path):

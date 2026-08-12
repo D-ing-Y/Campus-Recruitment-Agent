@@ -38,7 +38,29 @@ def test_default_guide_doctor_and_json_are_cwd_independent(tmp_path: Path) -> No
     payload = json.loads(doctor.stdout)
     assert payload["status"] in {"completed", "partial"}
     assert Path(payload["checks"]["paths"]["data_root"]) == (tmp_path / "shared-data").resolve()
+    community = payload["checks"]["community_retrieval"]
+    assert community["crawl4ai"]["required_version"] == "0.9.2"
+    assert community["brave_search"]["payload_visible"] is False
+    assert "health_status" in community["mediacrawler"]
     assert not (tmp_path / "data").exists()
+
+
+def test_brave_api_key_stdin_is_redacted_and_visible_to_doctor(tmp_path: Path) -> None:
+    imported = _run(
+        tmp_path, "--json", "auth", "import-api-key",
+        "--source", "brave_search", "--api-key-stdin",
+        input_text="brave-blackbox-secret\n",
+    )
+    assert imported.returncode == 0, imported.stderr
+    assert "brave-blackbox-secret" not in imported.stdout + imported.stderr
+    payload = json.loads(imported.stdout)
+    assert payload["credential_ref"] == (
+        "local-secret://nowcoder_experience/default"
+    )
+    doctor = _run(tmp_path, "--json", "doctor")
+    checks = json.loads(doctor.stdout)["checks"]
+    assert checks["community_retrieval"]["brave_search"]["credential_present"] is True
+    assert "brave-blackbox-secret" not in doctor.stdout
 
 
 def test_doctor_reports_incomplete_llm_without_exposing_or_crashing(tmp_path: Path) -> None:

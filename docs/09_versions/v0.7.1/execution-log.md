@@ -1,6 +1,6 @@
 # v0.7.1 执行日志
 
-状态：WP1/WP2 Revalidation Passed；WP3.1.1 Offline Verified；Multi-platform L2 Pending
+状态：WP1/WP2 Revalidation Passed；WP3.1.2 Implemented / Offline Passed；Multi-platform L2 Partial
 创建日期：2026-07-28
 
 本文件只记录实际执行事实，不记录计划性成功。每个工作包追加一节，保留失败、修复、命令、结果、
@@ -582,3 +582,53 @@ Next action:
   假 Sidecar/MCP allowlist 均通过；安装态 Role/Model CLI、compileall 和 `git diff --check` 通过。
   全量结果为 `498 passed, 1 skipped`（live 默认跳过）；本轮没有真实 MediaCrawler/小红书会话，
   因此多平台 L2 保持 pending，旧牛客 L2 仍为 partial。
+
+## WP3.1.2 Real Community Compatibility / 2026-08-12 / working tree（未提交）
+
+- Problem fixed：假 Sidecar wire shape 与固定 MediaCrawler 不一致；牛客 `0 candidate` 不能区分非帖子
+  卡、真实空结果和 parser drift；法定公司名降低社区召回；详情预算按 URL 顺序会先抓取目标城市外岗位。
+- Contract/code：Bridge 对齐真实 `/api/crawler/*`、`/api/data/*` 与 JSON 下载，限制读取本轮变化文件并
+  按关键词/post ID 过滤；公司别名使用版本化 allowlist；新增 CommunitySearchDiagnostic；Sidecar
+  子进程失败不再误记为空搜索；JobDetailCandidate 的 location hint 只用于详情预算稳定排序，不能投影。
+- Scope correction：RoleFamilyMembership 和 CompanyRoleGroup 都排除 `excluded_hard_scope` 岗位，
+  防止成都 SearchScope 的外地详情生成公司组和社区查询。
+- Sidecar：MediaCrawler 安装在仓库外，固定 commit
+  `0625e01a6bc717a3fc9c96d3dac7fb8957043838`，许可证已确认；真实 stdio MCP 四个只读 Tool smoke 通过。
+- Live L1：当前成都 Scope 生成 SourceDocument `71a35815-a06b-5344-9a09-1626ea26a6a4`、Raw Artifact
+  `d6c34389-b526-5900-9728-a6712b3def45`、JobDemand `job-demand:c29ab904839d3f097212a7fe`、
+  FamilyDemand `family-demand:4676936cc22871b39ef015af` 与 Bundle
+  `role-intelligence-bundle:e482a1ea6e908e1a5cdb5f40`；detail trace=1.0，search projection=0。
+- Nowcoder L2：4 个成功 Diagnostic 的 Raw 记录数为 1/1/2/1，全部为非帖子卡，post candidate=0；
+  随后的查询返回 `authentication_required`。这是低召回加登录失效，不是 parser failure。
+- Xiaohongshu L2：Sidecar/MCP 传输通过；可见 Chrome/CDP 访问页面超时，受控浏览器安全策略拒绝通过
+  其他浏览器/CDP 绕行。结果记录为 blocked，0 search/detail Raw，不声称已登录或内容通过。
+- Model：5 项 gateway 测试确认 DeepSeek Tool Calling 和 `thinking=disabled`；因没有合格社区详情，
+  本轮真实分类调用为 0，没有用搜索摘要、Fixture 或模型常识替代。
+- Verification：WP3.1.2 聚焦 `44 passed, 2 live skipped`；真实 MCP `1 passed`；真实 Role run 按门禁
+  `1 xfailed`（L2 partial）；安装态 CLI 回归 `17 passed`。最终全量、compileall 和 diff check 见本节收口。
+- Gate decision：WP3.1.2 implemented/offline passed，招聘 L1 accepted，社区 L2 partial/blocked；
+  刷新牛客 credential 并在允许访问小红书的环境完成每用途 2 篇详情前，WP3 不标记完整 live accepted。
+
+## WP3.2 Brave Search + Crawl4AI Adaptive Community Retrieval / 2026-08-12 / working tree（未提交）
+
+- 文档：新增 WP3.2 Requirements、RFC-0016、ADR-0018、Community Retrieval Contract、任务清单、
+  Eval Plan/Report；现行契约以每用途 3 个独立内容簇作为充分性门槛。
+- Source/Tool：`nowcoder_experience` 改为 Brave Web Search；production 不再请求牛客 `/search`。
+  新增 `source.fetch_community_details`，Nowcoder 每批一次 Crawl4AI `arun_many`、并发上限 2；
+  MediaCrawler 保留 localhost REST Client，删除专用 MCP Server/console script/链路测试。
+- Evidence：Brave JSON、Crawl4AI rendered payload、MediaCrawler JSON 都先 Raw 后解析；Nowcoder 仅接受
+  allowlisted request/final URL 和唯一主帖 selector/XPath，搜索 snippet 不生成 Segment。
+- Decision：新增 SourceEvaluation、SearchDecisionReceipt、ContentCluster；exact/post ID/body hash、
+  5-char shingle Jaccard 与带 segment citation 的 semantic merge；代码映射 70/30 或 100/0；逐帖抽取
+  与聚合评估共享全局 LLM 上限，失败调用也计数。最终投影每个簇只消费代表帖，避免重复放大。
+- CLI/doctor：新增 `auth import-api-key --source brave_search --api-key-stdin`；牛客 Chrome Cookie 导入被
+  拒绝。doctor 检查 Crawl4AI 0.9.2、Chromium、Brave credential ref 和 MediaCrawler health，且不启动
+  Playwright driver，避免污染 JSON stderr。
+- Offline verification：full `532 passed, 4 skipped in 149.10s`；安装态 CLI `7 passed`；
+  `compileall`、`git diff --check` 通过。duplicate-heavy Eval 在保持 3 簇/5 segments 时将详情 6→4、
+  duplicate 3→1。
+- Live：Crawl4AI 0.9.2 与 Chromium 安装/doctor ready；Brave real smoke 返回
+  `authentication_required`；显式公开牛客详情也返回 `authentication_required` 登录墙；MediaCrawler
+  health=`adapter_required`。`2 xfailed`，没有绕过或用 fixture/snippet 替代。
+- Gate decision：WP3.2 Implemented / Offline Passed / Live Partial。刷新 Brave Key、启动 MediaCrawler
+  REST 并取得面经/风评各 3 个独立内容簇前，WP3 社区 L2 不标记 accepted。

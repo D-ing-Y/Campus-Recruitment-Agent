@@ -143,6 +143,19 @@ def test_role_family_membership_rejects_cross_family_job() -> None:
     assert membership.primary_role_family == "frontend_engineering"
 
 
+def test_role_family_membership_rejects_a_family_match_outside_hard_scope() -> None:
+    job = _job("backend-outside-scope").model_copy(update={
+        "status": "excluded_hard_scope",
+        "exclusion_code": "location_mismatch",
+        "exclusion_evidence_fragment_ids": ["fragment-backend-outside-scope"],
+    })
+
+    membership = classify_role_family(job, _scope())
+
+    assert membership.status == "rejected"
+    assert membership.reason_codes == ["job_scope_status_excluded_hard_scope"]
+
+
 def test_role_target_binding_contract_rejects_duplicate_primary_mapping() -> None:
     bindings = role_target_bindings_for_roles(["后端开发"])
     with pytest.raises(ValidationError, match="multiple primary family"):

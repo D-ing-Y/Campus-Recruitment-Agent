@@ -1,16 +1,21 @@
-"""Opt-in WP3.1.1 L1/L2 acceptance against Zhaopin, Nowcoder and Xiaohongshu."""
+"""Opt-in WP3.1.2 L1/L2 acceptance against Zhaopin, Nowcoder and Xiaohongshu."""
 
 from __future__ import annotations
 
+import json
 import os
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
-
+from campus_job_agent.integrations.social_media import (
+    MediaCrawlerSidecarClient, MediaCrawlerSidecarConfig,
+)
 from campus_job_agent.runtime import RuntimeFactory
 from campus_job_agent.schemas import (
     CommunityEvidenceCoverage,
     CommunityEvidenceSegment,
+    CommunitySearchDiagnostic,
     JobDemandProfile,
     SearchScope,
     SourceDocument,
@@ -43,7 +48,16 @@ def _enabled() -> bool:
 
 
 @pytest.mark.skipif(not _enabled(), reason="WP3.1 live sources are opt-in")
-def test_wp311_live_zhaopin_and_bounded_multi_platform_community() -> None:
+def test_wp32_live_mediacrawler_rest_health() -> None:
+    health = MediaCrawlerSidecarClient(
+        MediaCrawlerSidecarConfig.from_env()
+    ).health()
+    assert health["status"] in {"idle", "running"}
+    assert health["sidecar_commit"] == os.environ["CAMPUS_AGENT_MEDIACRAWLER_COMMIT"]
+
+
+@pytest.mark.skipif(not _enabled(), reason="WP3.1 live sources are opt-in")
+def test_wp312_live_zhaopin_and_bounded_multi_platform_community() -> None:
     bootstrap = RuntimeFactory().build(owner_id="local-user")
     session_id = os.environ["CAMPUS_AGENT_LIVE_SESSION_ID"]
     handoff_id = os.environ["CAMPUS_AGENT_LIVE_HANDOFF_ID"]
@@ -69,12 +83,21 @@ def test_wp311_live_zhaopin_and_bounded_multi_platform_community() -> None:
         except ValueError:
             continue
         credentials[source_id] = ref
+    community_source_ids = [
+        item.strip()
+        for item in os.getenv(
+            "CAMPUS_AGENT_LIVE_COMMUNITY_SOURCES",
+            "nowcoder_experience,xiaohongshu_experience",
+        ).split(",")
+        if item.strip()
+    ]
+    assert set(community_source_ids).issubset({
+        "nowcoder_experience", "xiaohongshu_experience",
+    })
     thread_id = f"live-wp31-{uuid4()}"
     state = create_role_profile_state(
         thread_id=thread_id, user_id=session.user_id, search_scope=scope,
-        enabled_source_ids=[
-            "zhaopin_jobs", "nowcoder_experience", "xiaohongshu_experience",
-        ],
+        enabled_source_ids=["zhaopin_jobs", *community_source_ids],
         source_capabilities=runtime.source_adapter_registry.capabilities(),
         credential_refs=credentials,
         budgets={
@@ -85,6 +108,7 @@ def test_wp311_live_zhaopin_and_bounded_multi_platform_community() -> None:
             "max_community_rounds_per_source": 3,
             "max_community_sources_per_purpose": 2,
             "community_target_documents_per_purpose": 2,
+            "community_target_clusters_per_purpose": 3,
             "max_community_detail_documents_per_query": 3,
         },
     )
@@ -150,6 +174,15 @@ def test_wp311_live_zhaopin_and_bounded_multi_platform_community() -> None:
         and item.raw_artifact_id
     }
     assert search_artifact_ids.isdisjoint(bundle.raw_evidence_refs)
+    diagnostics = runtime.role_repository.list(
+        "community_search_diagnostic", CommunitySearchDiagnostic
+    )
+    if not diagnostics:
+        pytest.xfail(
+            "L2 blocked before a community search Raw Artifact was archived; "
+            "inspect authorization and risk-control receipts"
+        )
+    assert all(item.query_id and item.reason_codes for item in diagnostics)
 
     segments = [
         item
@@ -170,12 +203,12 @@ def test_wp311_live_zhaopin_and_bounded_multi_platform_community() -> None:
         not interview or not reputation
         or any(
             latest.get(purpose) is None
-            or latest[purpose].independent_document_count < 2
+            or latest[purpose].independent_cluster_count < 3
             for purpose in ("interview_experience", "employment_experience")
         )
     ):
         pytest.xfail(
-            "L2 partial: each purpose did not reach two independent accepted details; "
+            "L2 partial: each purpose did not reach three independent content clusters; "
             "fixture/search snippets/model knowledge were not substituted"
         )
     for item in segments:

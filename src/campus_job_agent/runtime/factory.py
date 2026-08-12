@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import importlib.util
+import importlib.metadata
 import sqlite3
 import sys
 from contextlib import contextmanager
@@ -23,7 +25,9 @@ from campus_job_agent.integrations import (
     SocialBridgeError,
 )
 from campus_job_agent.sources import (
-    CommunityEvidenceExtractor, LocalCredentialStore, MeituanOfficialCareersAdapter, NowcoderExperienceAdapter,
+    BraveNowcoderExperienceAdapter, CommunityEvidenceExtractor,
+    CommunitySearchEvaluator, LocalCredentialStore,
+    MeituanOfficialCareersAdapter,
     OfficialCareersAdapter, SourceAdapterRegistry, SQLiteRoleRepository,
     XiaohongshuExperienceAdapter, ZhaopinJobsAdapter,
 )
@@ -218,6 +222,36 @@ class Runtime:
             self.llm_config.base_url and self.llm_config.api_key and self.llm_config.model
             )
         )
+        brave_ref = "local-secret://nowcoder_experience/default"
+        xhs_adapter = self.source_adapter_registry.get("xiaohongshu_experience")
+        media_status = "adapter_required"
+        if xhs_adapter is not None and getattr(xhs_adapter, "bridge_client", None) is not None:
+            try:
+                media_status = str(xhs_adapter.bridge_client.health().get("status") or "unknown")
+            except SocialBridgeError as exc:
+                media_status = exc.code
+        crawl4ai_installed = importlib.util.find_spec("crawl4ai") is not None
+        crawl4ai_version = None
+        chromium_available = False
+        chromium_error = None
+        if crawl4ai_installed:
+            try:
+                crawl4ai_version = importlib.metadata.version("crawl4ai")
+                chromium_available = _playwright_chromium_available()
+            except Exception as exc:
+                chromium_error = type(exc).__name__
+        capabilities = self.source_adapter_registry.capabilities()
+        community_required = any(
+            bool(capabilities.get(source_id, {}).get("live_enabled"))
+            for source_id in (
+                "nowcoder_experience", "xiaohongshu_experience",
+            )
+        )
+        brave_present = self.credential_resolver.secret_exists(brave_ref)
+        community_ready = (
+            crawl4ai_version == "0.9.2" and chromium_available
+            and brave_present and media_status in {"idle", "running"}
+        )
         return {
             "python": sys.version.split()[0],
             "package_version": "0.7.0",
@@ -237,11 +271,70 @@ class Runtime:
                 "error_type": "config_error" if self.llm_config_error else None,
             },
             "credential_store": {"exists": self.paths.credential_root.is_dir(), "payload_visible": False},
-            "source_adapters": self.source_adapter_registry.capabilities(),
+            "community_retrieval": {
+                "required": community_required,
+                "ready": community_ready,
+                "crawl4ai": {
+                    "installed": crawl4ai_installed,
+                    "installed_version": crawl4ai_version,
+                    "required_version": "0.9.2",
+                    "version_matches": crawl4ai_version == "0.9.2",
+                    "chromium_available": chromium_available,
+                    "chromium_error_type": chromium_error,
+                },
+                "brave_search": {
+                    "credential_ref": brave_ref,
+                    "credential_present": brave_present,
+                    "payload_visible": False,
+                },
+                "mediacrawler": {"health_status": media_status},
+            },
+            "source_adapters": capabilities,
             "console_script": str(Path(sys.argv[0]).resolve()),
             "legacy_cli": "legacy-mini-runtime",
             "feature_stage": "v0.7.1-wp1.3.1",
         }
+
+
+def _playwright_chromium_available() -> bool:
+    """Check installed browser files without starting Playwright's driver."""
+
+    configured = os.getenv("PLAYWRIGHT_BROWSERS_PATH")
+    roots: list[Path] = []
+    if configured and configured != "0":
+        roots.append(Path(configured).expanduser())
+    elif configured == "0":
+        spec = importlib.util.find_spec("playwright")
+        if spec is not None and spec.origin:
+            roots.append(
+                Path(spec.origin).resolve().parent
+                / "driver" / "package" / ".local-browsers"
+            )
+    elif sys.platform == "darwin":
+        roots.append(Path.home() / "Library" / "Caches" / "ms-playwright")
+    elif sys.platform.startswith("win"):
+        local_app_data = os.getenv("LOCALAPPDATA")
+        if local_app_data:
+            roots.append(Path(local_app_data) / "ms-playwright")
+    else:
+        roots.append(Path.home() / ".cache" / "ms-playwright")
+
+    executable_names = {
+        "Google Chrome for Testing", "chrome", "chrome.exe",
+        "chrome-headless-shell", "headless_shell",
+    }
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for browser_root in root.glob("chromium*"):
+            if any(
+                candidate.is_file()
+                and candidate.name in executable_names
+                and os.access(candidate, os.X_OK)
+                for candidate in browser_root.rglob("*")
+            ):
+                return True
+    return False
 
 
 class RuntimeFactory:
@@ -325,7 +418,7 @@ class RuntimeFactory:
                 social_bridge = None
         for adapter in (
             ZhaopinJobsAdapter(**adapter_kwargs),
-            NowcoderExperienceAdapter(**adapter_kwargs),
+            BraveNowcoderExperienceAdapter(**adapter_kwargs),
             XiaohongshuExperienceAdapter(
                 bridge_client=social_bridge, **adapter_kwargs,
             ),
@@ -342,6 +435,7 @@ class RuntimeFactory:
             blob_store=blob, evidence_repository=evidence, profile_repository=evidence,
             role_repository=role, adapters=adapters, credential_store=credential_store,
             community_extractor=CommunityEvidenceExtractor(llm_config, provider, llm_cache),
+            community_evaluator=CommunitySearchEvaluator(llm_config, provider, llm_cache),
         )
         tools = ToolRegistry()
         for registry in (candidate_tools, role_tools):

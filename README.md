@@ -28,7 +28,9 @@ v0.7 准备计划与反馈闭环已于 2026-07-27 完成实现与验收，当前
 Claim/Impact/Directive，并以本地 saga 验证 feedback→snapshot→rematch→replan 版本链。
 
 v0.7.1“子 Workflow 纵向闭环与 CLI 加固”正在分工作包实施，WP0、WP1、WP1.1、WP1.3.2 与
-WP2 重验已通过；WP3.1 已完成岗位需求/评价画像分流的文档设计，代码和 live source 尚未开始。
+WP2 重验已通过；WP3.2 已将社区链路改为 Brave Search 发现牛客公开详情、Crawl4AI 批量抓取和
+MediaCrawler localhost REST。代码与离线门禁已通过；Brave 当前凭据被拒绝、牛客公开详情返回登录墙，
+MediaCrawler 本机服务未启动，因此社区真实 L2 仍为 partial。
 代码版本仍为 `0.7.0`，只在全部
 WP0-WP7 验收后升级。正式 CLI、RunSession、Candidate 和 CareerIntent 纵向闭环及相邻 typed
 handoff 已接入。版本入口见 `docs/09_versions/v0.7.1/README.md`。v0.7.1 不实现 v1.0 Parent Graph。
@@ -92,7 +94,8 @@ v0.5 已按最新来源验证架构完成离线实现与验收：
 
 v0.7.1 WP3.1 将上述 v0.5 来源路径作为历史兼容：招聘平台具体 job detail 默认支撑 Demand，官网
 改为冲突/过期/缺字段/用户指定时的可选升级；社区详情拆为面经 assessment signals 和在职体验
-Reputation，避免 Matching 与 Preparation 消费主观风评。新设计见 RFC/ADR-0015。
+Reputation，避免 Matching 与 Preparation 消费主观风评。WP3.2 不再访问牛客 `/search`，搜索摘要
+不得作为画像证据；Crawl4AI 仅在进程内执行无 LLM 的公开详情渲染。新设计见 RFC-0016、ADR-0018。
 
 v0.6 已实现：
 
@@ -141,23 +144,24 @@ v0.7.1 将增加 opt-in DeepSeek 与真实招聘来源验收；离线 CI、真�
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e ".[dev,community]"
+playwright install chromium
 ```
 
 如果本机没有 `python` 命令，可使用 `python3` 创建虚拟环境。
 
-### 本地 Chrome 登录态装配
+### 来源凭据装配
 
 先在真实 Chrome 中正常登录，然后在项目根目录显式执行：
 
 ```bash
 .venv/bin/campus-agent auth import-chrome --source zhaopin
-.venv/bin/campus-agent auth import-chrome --source nowcoder
+.venv/bin/campus-agent auth import-api-key --source brave_search --api-key-stdin
 ```
 
-命令只读取 `.zhaopin.com` 或 `.nowcoder.com` 的 Cookie，并将对应的
-`local-secret://<source>/default` 安全覆盖写入 `data/cache/credentials/`。该目录权限为
-`700`，凭据文件权限为 `600`，且已被 Git 忽略。终端不会输出 Cookie 值。
+第一条命令只读取 `.zhaopin.com` Cookie；第二条从 stdin 读取 Brave API Key。两者均只把
+`local-secret://<source>/default` 引用交给 Graph，秘密保存在 Git 忽略的本地密钥库，终端、
+checkpoint、Raw Artifact 和报告均不输出秘密值。牛客不再导入 Chrome Cookie。
 
 ## 运行 v0.2 CLI
 

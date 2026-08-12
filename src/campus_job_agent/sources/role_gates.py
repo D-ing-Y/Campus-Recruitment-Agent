@@ -31,14 +31,20 @@ def classify_role_family(
     if not inferred or inferred == "unknown" or inferred.startswith("role_family_"):
         inferred = role_family_for_query(job.role_title)
     target = scope.target_role_family
-    if inferred == target:
+    if job.status != "included":
+        status, confidence, reasons = "rejected", 1.0, [
+            f"job_scope_status_{job.status}"
+        ]
+    elif inferred == target:
         status, confidence, reasons = "accepted", 0.95, ["primary_family_matches_scope"]
     elif inferred.startswith("role_family_"):
         status, confidence, reasons = "ambiguous", 0.4, ["primary_family_unknown"]
     else:
         status, confidence, reasons = "rejected", 0.95, ["role_family_mismatch"]
     secondary = sorted(_secondary_role_tags(job.role_title, primary=inferred))
-    payload = [scope.scope_id, job.job_posting_id, target, inferred, status]
+    payload = [
+        scope.scope_id, job.job_posting_id, target, inferred, job.status, status,
+    ]
     return RoleFamilyMembership(
         membership_id=f"role-membership:{canonical_hash('membership', payload)[7:31]}",
         scope_id=scope.scope_id,

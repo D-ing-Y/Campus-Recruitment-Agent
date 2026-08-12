@@ -48,10 +48,10 @@ raw-before-interpret，再分离 observation、diagnosis 和 impact。无解释�
 单次反馈不改岗位族；跨域变化通过 typed directive 和后继 snapshot refs 恢复。实现任务与实际
 指标见 `docs/03_requirements/v0.7-implementation-tasks.md` 和 `docs/07_evaluation/v0.7-eval-report.md`。
 
-v0.7.1 正在实施。WP1/WP2 已通过；WP3.1 已完成文档修订，将 Role 情报分为 Demand 和
-Job/Company Reputation，以招聘平台详情作为默认 Demand 证据、官网作为可选升级，并把面经与
-在职体验按 typed segment 分流。代码、真实 detail smoke 和 Eval 尚未开始。版本入口见
-`docs/09_versions/v0.7.1/README.md`；未完成对应实现与真实验收前不得标记 Implemented。
+v0.7.1 正在实施。WP1/WP2 已通过；WP3.2 已实现 Demand 与 Job/Company Reputation 分流、招聘
+detail 门禁、Brave 受控发现、Crawl4AI 批量详情、三层内容聚类和 MediaCrawler REST。招聘 L1
+accepted；社区内容 L2 因 Brave 凭据被拒绝、牛客登录墙和 MediaCrawler 服务未启动保持 partial。
+版本入口见 `docs/09_versions/v0.7.1/README.md`；不得把离线门禁表述为社区内容级 L2 accepted。
 
 ## Codex 协作边界
 

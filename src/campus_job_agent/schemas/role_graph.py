@@ -36,7 +36,8 @@ class RoleSearchBudget(BaseModel):
     max_community_queries_per_group: int = Field(default=12, ge=0, le=12)
     max_community_rounds_per_source: int = Field(default=3, ge=1, le=3)
     max_community_sources_per_purpose: int = Field(default=2, ge=1, le=2)
-    community_target_documents_per_purpose: int = Field(default=2, ge=1, le=5)
+    community_target_documents_per_purpose: int = Field(default=3, ge=1, le=5)
+    community_target_clusters_per_purpose: int = Field(default=3, ge=3, le=5)
     max_community_detail_documents_per_query: int = Field(default=3, ge=0, le=10)
 
 
@@ -149,8 +150,17 @@ class RoleProfileGraphState(TypedDict, total=False):
     community_current_detail_document_ids: list[str]
     community_current_evidence_document_ids: list[str]
     community_current_evidence_segment_ids: list[str]
+    community_current_diagnostic_ids: list[str]
     community_attempt_receipt_ids: Annotated[list[str], stable_union]
+    community_search_diagnostic_ids: Annotated[list[str], stable_union]
     community_coverage_ids: Annotated[list[str], stable_union]
+    community_content_cluster_ids: Annotated[list[str], stable_union]
+    community_source_evaluation_ids: Annotated[list[str], stable_union]
+    community_source_evaluation_by_lane: dict[str, str]
+    community_decision_receipt_ids: Annotated[list[str], stable_union]
+    community_decision_by_purpose: dict[str, str]
+    community_source_allocations_by_purpose: dict[str, dict[str, float]]
+    community_proposed_keywords_by_purpose: dict[str, list[str]]
     community_accepted_document_ids_by_scope: dict[str, list[str]]
     community_exhausted_source_ids_by_scope: dict[str, list[str]]
     community_sufficient_scope_keys: Annotated[list[str], stable_union]
