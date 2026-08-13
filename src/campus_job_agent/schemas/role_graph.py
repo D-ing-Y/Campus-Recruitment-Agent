@@ -121,7 +121,9 @@ class RoleProfileGraphState(TypedDict, total=False):
     user_requested_official_job_ids: list[str]
     next_cursors: dict[str, str]
     pending_auth_source_id: str | None
+    pending_auth_requirement: dict[str, Any] | None
     credential_refs: dict[str, str]
+    browser_profile_refs: dict[str, str]
     source_batch_ids: Annotated[list[str], stable_union]
     recruitment_search_document_ids: Annotated[list[str], stable_union]
     recruitment_detail_candidate_ids: Annotated[list[str], stable_union]

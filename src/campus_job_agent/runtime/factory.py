@@ -20,6 +20,7 @@ from campus_job_agent.llm import (
 )
 from campus_job_agent.schemas import LLMConfig
 from campus_job_agent.integrations import (
+    BrowserProfileManager,
     MediaCrawlerSidecarClient,
     MediaCrawlerSidecarConfig,
     SocialBridgeError,
@@ -76,6 +77,7 @@ class RuntimePaths:
     database_root: Path
     checkpoint_root: Path
     credential_root: Path
+    browser_profile_root: Path
 
     @classmethod
     def resolve(cls, data_root: str | Path | None = None) -> "RuntimePaths":
@@ -93,12 +95,14 @@ class RuntimePaths:
             database_root=root / "db",
             checkpoint_root=root / "checkpoints",
             credential_root=root / "cache" / "credentials",
+            browser_profile_root=root / "cache" / "browser_profiles",
         )
 
     def ensure(self) -> None:
         for path in (
             self.data_root, self.run_root, self.blob_root, self.cache_root,
             self.database_root, self.checkpoint_root, self.credential_root,
+            self.browser_profile_root,
         ):
             path.mkdir(parents=True, exist_ok=True)
 
@@ -125,6 +129,7 @@ class Runtime:
     tool_registry: ToolRegistry
     source_adapter_registry: SourceAdapterRegistry
     credential_resolver: LocalCredentialStore
+    browser_profile_manager: BrowserProfileManager
     model_profile_repository: SQLiteModelProfileRepository
     model_profile_service: ModelProfileService
     event_sink: RunArtifactWriter
@@ -223,6 +228,14 @@ class Runtime:
             )
         )
         brave_ref = "local-secret://nowcoder_experience/default"
+        profile_statuses = {
+            source_id: self.browser_profile_manager.status(
+                f"local-browser-profile://{source_id}/default"
+            ).model_dump(mode="json")
+            for source_id in (
+                "nowcoder_experience", "xiaohongshu_experience",
+            )
+        }
         xhs_adapter = self.source_adapter_registry.get("xiaohongshu_experience")
         media_status = "adapter_required"
         if xhs_adapter is not None and getattr(xhs_adapter, "bridge_client", None) is not None:
@@ -250,7 +263,12 @@ class Runtime:
         brave_present = self.credential_resolver.secret_exists(brave_ref)
         community_ready = (
             crawl4ai_version == "0.9.2" and chromium_available
-            and brave_present and media_status in {"idle", "running"}
+            and brave_present and media_status == "idle"
+            and all(
+                item["configured"] and item["chrome_running"]
+                and item["cdp_reachable"] and item["authenticated_verified"]
+                for item in profile_statuses.values()
+            )
         )
         return {
             "python": sys.version.split()[0],
@@ -288,6 +306,7 @@ class Runtime:
                     "payload_visible": False,
                 },
                 "mediacrawler": {"health_status": media_status},
+                "browser_profiles": profile_statuses,
             },
             "source_adapters": capabilities,
             "console_script": str(Path(sys.argv[0]).resolve()),
@@ -352,6 +371,7 @@ class RuntimeFactory:
         sessions = SQLiteSessionRepository(self.paths.database_root / "sessions.sqlite3")
         blob = LocalBlobStore(self.paths.blob_root)
         credential_store = LocalCredentialStore(self.paths.credential_root)
+        browser_profiles = BrowserProfileManager(self.paths.browser_profile_root)
         model_profiles = SQLiteModelProfileRepository(
             self.paths.database_root / "model_profiles.sqlite3"
         )
@@ -418,9 +438,13 @@ class RuntimeFactory:
                 social_bridge = None
         for adapter in (
             ZhaopinJobsAdapter(**adapter_kwargs),
-            BraveNowcoderExperienceAdapter(**adapter_kwargs),
+            BraveNowcoderExperienceAdapter(
+                browser_profile_manager=browser_profiles, **adapter_kwargs
+            ),
             XiaohongshuExperienceAdapter(
-                bridge_client=social_bridge, **adapter_kwargs,
+                bridge_client=social_bridge,
+                browser_profile_manager=browser_profiles,
+                **adapter_kwargs,
             ),
             OfficialCareersAdapter(**adapter_kwargs),
             MeituanOfficialCareersAdapter(**adapter_kwargs),
@@ -436,6 +460,7 @@ class RuntimeFactory:
             role_repository=role, adapters=adapters, credential_store=credential_store,
             community_extractor=CommunityEvidenceExtractor(llm_config, provider, llm_cache),
             community_evaluator=CommunitySearchEvaluator(llm_config, provider, llm_cache),
+            browser_profile_manager=browser_profiles,
         )
         tools = ToolRegistry()
         for registry in (candidate_tools, role_tools):
@@ -477,6 +502,7 @@ class RuntimeFactory:
             llm_provider=provider, llm_cache=llm_cache,
             structured_output=extractor, tool_registry=tools,
             source_adapter_registry=adapters, credential_resolver=credential_store,
+            browser_profile_manager=browser_profiles,
             model_profile_repository=model_profiles,
             model_profile_service=model_profile_service,
             event_sink=writer, artifact_writer=writer, application_services=services,

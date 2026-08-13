@@ -84,6 +84,7 @@ class RoleApplicationService:
             enabled_source_ids=enabled,
             source_capabilities=self.runtime.source_adapter_registry.capabilities(),
             credential_refs=self._default_credential_refs(enabled),
+            browser_profile_refs=self._default_browser_profile_refs(enabled),
         )
         try:
             with self.runtime.open_workflow("role") as workflow:
@@ -107,6 +108,7 @@ class RoleApplicationService:
         action: str,
         response_id: str,
         credential_ref: str | None = None,
+        browser_profile_ref: str | None = None,
     ) -> dict[str, Any]:
         session = self.runtime.session_service.status(session_id)
         normalized_action = action.replace("-", "_")
@@ -118,6 +120,7 @@ class RoleApplicationService:
         payload_hash = _hash({
             "action": normalized_action,
             "credential_ref": credential_ref,
+            "browser_profile_ref": browser_profile_ref,
         })
         if receipt is not None:
             if receipt.user_id != session.user_id or receipt.payload_hash != payload_hash:
@@ -159,6 +162,10 @@ class RoleApplicationService:
                     "thread_id": parent.thread_id,
                     "user_id": session.user_id,
                     "source_id": pending["source_id"],
+                    "operation": pending.get("operation", "collect"),
+                    "authorization_mode": pending.get(
+                        "authorization_mode", "credential_ref"
+                    ),
                     "action": normalized_action,
                 }
                 if normalized_action == "authorized":
@@ -166,16 +173,24 @@ class RoleApplicationService:
                     capability = self.runtime.source_adapter_registry.capabilities().get(
                         source_id, {}
                     )
-                    requires_ref = capability.get("authorization_mode") == "credential_ref"
+                    mode = str(response["authorization_mode"])
+                    requires_ref = mode == "credential_ref"
+                    requires_profile = mode == "browser_profile_ref"
                     if requires_ref and not credential_ref:
                         raise RoleApplicationError(
                             "authorized action requires --credential-ref"
                         )
                     if credential_ref:
                         response["credential_ref"] = credential_ref
-                elif credential_ref is not None:
+                    if requires_profile and not browser_profile_ref:
+                        raise RoleApplicationError(
+                            "authorized action requires --browser-profile-ref"
+                        )
+                    if browser_profile_ref:
+                        response["browser_profile_ref"] = browser_profile_ref
+                elif credential_ref is not None or browser_profile_ref is not None:
                     raise RoleApplicationError(
-                        "--credential-ref is only valid with authorized"
+                        "authorization refs are only valid with authorized"
                     )
                 result = workflow.resume(
                     thread_id=parent.thread_id, response=response
@@ -289,6 +304,22 @@ class RoleApplicationService:
             except ValueError:
                 continue
             refs[source_id] = ref
+        return refs
+
+    def _default_browser_profile_refs(self, enabled: list[str]) -> dict[str, str]:
+        refs: dict[str, str] = {}
+        for source_id in enabled:
+            if source_id not in {
+                "nowcoder_experience", "xiaohongshu_experience",
+            }:
+                continue
+            ref = f"local-browser-profile://{source_id}/default"
+            try:
+                status = self.runtime.browser_profile_manager.status(ref)
+            except Exception:
+                continue
+            if status.configured:
+                refs[source_id] = ref
         return refs
 
     def _finish(

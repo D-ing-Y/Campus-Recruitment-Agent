@@ -397,7 +397,10 @@ def test_skipping_blocked_primary_source_switches_to_backup(tmp_path):
     result = runtime.resume(thread_id="source-switch-thread", response={
         "response_id": "skip-primary", "request_id": request["request_id"],
         "thread_id": request["thread_id"], "user_id": request["user_id"],
-        "source_id": request["source_id"], "action": "skip_source",
+        "source_id": request["source_id"],
+        "operation": request["operation"],
+        "authorization_mode": request["authorization_mode"],
+        "action": "skip_source",
     })
     attempts = role.list(
         "community_search_attempt_receipt", CommunitySearchAttemptReceipt
@@ -487,6 +490,8 @@ def test_auth_interrupt_authorized_resume_redacts_credential(tmp_path):
     completed = runtime.resume(thread_id="auth-thread", response={
         "request_id": request["request_id"], "thread_id": "auth-thread",
         "user_id": "owner", "source_id": "fixture_experience",
+        "operation": request["operation"],
+        "authorization_mode": request["authorization_mode"],
         "action": "authorized", "credential_ref": credential_ref,
     })
 
@@ -512,6 +517,8 @@ def test_auth_skip_publishes_demand_and_marks_reputation_missing(tmp_path):
     completed = runtime.resume(thread_id="skip-thread", response={
         "request_id": request["request_id"], "thread_id": "skip-thread",
         "user_id": "owner", "source_id": "fixture_experience",
+        "operation": request["operation"],
+        "authorization_mode": request["authorization_mode"],
         "action": "skip_source",
     })
 
@@ -548,6 +555,8 @@ def test_sqlite_checkpoint_resumes_in_new_process_boundary(tmp_path):
         completed = runtime.resume(thread_id="restart-thread", response={
             "request_id": request["request_id"], "thread_id": "restart-thread",
             "user_id": "owner", "source_id": "fixture_experience",
+            "operation": request["operation"],
+            "authorization_mode": request["authorization_mode"],
             "action": "authorized", "credential_ref": credential_ref,
         })
     assert completed["status"] == "completed_with_unknowns"

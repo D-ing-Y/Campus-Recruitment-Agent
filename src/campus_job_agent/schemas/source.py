@@ -92,7 +92,17 @@ class SourceCapabilities(BaseModel):
     supports_pagination: bool = False
     supports_detail_fetch: bool = False
     requires_auth: bool = False
-    authorization_mode: Literal["credential_ref", "external_session", "none"] | None = None
+    authorization_mode: Literal[
+        "credential_ref", "external_session", "browser_profile_ref",
+        "external_sidecar", "none",
+    ] | None = None
+    operation_authorization: dict[
+        str,
+        list[Literal[
+            "credential_ref", "external_session", "browser_profile_ref",
+            "external_sidecar", "none",
+        ]],
+    ] = Field(default_factory=dict)
     live_enabled: bool = False
     rate_limit_per_minute: int = Field(default=6, ge=1)
 
@@ -102,7 +112,23 @@ class SourceCapabilities(BaseModel):
             self.authorization_mode = "credential_ref" if self.requires_auth else "none"
         if self.authorization_mode != "none":
             self.requires_auth = True
+        allowed_operations = {"collect", "fetch_detail"}
+        if set(self.operation_authorization) - allowed_operations:
+            raise ValueError("operation authorization contains an unknown operation")
+        for operation, modes in self.operation_authorization.items():
+            if not modes or len(modes) != len(set(modes)):
+                raise ValueError(
+                    f"operation authorization for {operation} must be non-empty and unique"
+                )
+            if "none" in modes and len(modes) != 1:
+                raise ValueError("none cannot be combined with another authorization mode")
         return self
+
+    def authorization_for(self, operation: str) -> list[str]:
+        configured = self.operation_authorization.get(operation)
+        if configured is not None:
+            return list(configured)
+        return [str(self.authorization_mode or "none")]
 
 
 class SourceQuery(BaseModel):
@@ -493,6 +519,80 @@ class CredentialRef(BaseModel):
         if not value.startswith("local-secret://"):
             raise ValueError("credential_ref must use local-secret://")
         return value
+
+
+class BrowserProfileRef(BaseModel):
+    """Opaque reference to a project-owned local browser profile."""
+
+    model_config = ConfigDict(extra="forbid")
+    schema_version: Literal["v0.7.1"] = "v0.7.1"
+    browser_profile_ref: str
+    source_id: Literal["nowcoder_experience", "xiaohongshu_experience"]
+    name: str = "default"
+
+    @model_validator(mode="after")
+    def validate_reference(self) -> "BrowserProfileRef":
+        if not self.name or any(
+            not (character.isalnum() or character in {"-", "_"})
+            for character in self.name
+        ):
+            raise ValueError("browser profile name contains unsafe characters")
+        expected = f"local-browser-profile://{self.source_id}/{self.name}"
+        if self.browser_profile_ref != expected:
+            raise ValueError("browser_profile_ref does not match source and name")
+        return self
+
+
+class BrowserProfileStatus(BaseModel):
+    """Safe status projection; local paths and process details are excluded."""
+
+    model_config = ConfigDict(extra="forbid")
+    schema_version: Literal["v0.7.1"] = "v0.7.1"
+    browser_profile_ref: str
+    source_id: Literal["nowcoder_experience", "xiaohongshu_experience"]
+    name: str
+    configured: bool
+    chrome_running: bool
+    cdp_reachable: bool
+    authenticated_verified: bool = False
+    last_verified_at: str | None = None
+    lifecycle_status: Literal[
+        "not_initialized", "stopped", "starting", "ready", "port_conflict",
+        "process_ownership_mismatch", "cdp_unreachable",
+    ]
+    reason_codes: list[str] = Field(default_factory=list)
+
+
+class SourceAuthRequirement(BaseModel):
+    """Operation-bound authorization request safe for Graph checkpoints."""
+
+    model_config = ConfigDict(extra="forbid")
+    schema_version: Literal["v0.7.1"] = "v0.7.1"
+    source_id: str
+    operation: Literal["collect", "fetch_detail"]
+    mode: Literal[
+        "credential_ref", "external_session", "browser_profile_ref",
+        "external_sidecar", "none",
+    ]
+    credential_ref: str | None = None
+    browser_profile_ref: str | None = None
+
+    @model_validator(mode="after")
+    def validate_bound_reference(self) -> "SourceAuthRequirement":
+        if self.mode == "credential_ref" and self.credential_ref is not None:
+            CredentialRef(
+                credential_ref=self.credential_ref,
+                source_id=self.source_id,
+                credential_type="api_key_ref",
+            )
+        if self.mode == "browser_profile_ref":
+            if self.browser_profile_ref is not None:
+                BrowserProfileRef(
+                    browser_profile_ref=self.browser_profile_ref,
+                    source_id=self.source_id,
+                    name=self.browser_profile_ref.rsplit("/", 1)[-1],
+                )
+        return self
 
 
 def normalize_text(value: str | None) -> str:

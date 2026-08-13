@@ -100,6 +100,10 @@ def test_wp312_live_zhaopin_and_bounded_multi_platform_community() -> None:
         enabled_source_ids=["zhaopin_jobs", *community_source_ids],
         source_capabilities=runtime.source_adapter_registry.capabilities(),
         credential_refs=credentials,
+        browser_profile_refs={
+            source_id: f"local-browser-profile://{source_id}/default"
+            for source_id in community_source_ids
+        },
         budgets={
             "max_queries": 12,
             "max_recruitment_detail_documents": 3,
@@ -125,6 +129,8 @@ def test_wp312_live_zhaopin_and_bounded_multi_platform_community() -> None:
                 "thread_id": thread_id,
                 "user_id": session.user_id,
                 "source_id": request["source_id"],
+                "operation": request["operation"],
+                "authorization_mode": request["authorization_mode"],
                 "action": "skip_source",
             })
 

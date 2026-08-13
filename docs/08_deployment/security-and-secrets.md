@@ -36,3 +36,11 @@
 - 不自动加载项目 `.env`；显式环境变量仅作为自动化/兼容覆盖，不是普通用户配置事实源。
 - `doctor/model list/show/test`、异常、Run artifacts、LLM receipts 和缓存不得包含 key。
 - Model 健康检查不得携带 Candidate/Role/Feedback 等业务材料。
+
+## WP3.2.1 Authenticated Browser Profiles
+
+- 牛客和小红书 Profile 必须位于 Git 忽略的受管目录，根目录权限为 `0700`，且不得是符号链接。
+- 每个平台使用独立 Profile、Chrome 进程和固定 loopback CDP 端口；不得复用日常 Chrome Profile。
+- 只有 BrowserProfileManager 能把 BrowserProfileRef 解析为路径/端口；Graph、Raw、trace 和报告不得解析。
+- CLI 不自动登录、填写账号、处理短信/扫码/验证码，也不启用远程 CDP、stealth 或代理绕过。
+- stop 只能终止项目记录且命令身份完全匹配的 Chrome PID；端口被未知进程占用时必须拒绝。

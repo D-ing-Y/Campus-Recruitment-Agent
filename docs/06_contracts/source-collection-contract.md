@@ -118,6 +118,19 @@ capability 由 adapter 声明，QueryPlanner 不得生成 source 不支持的过
 Graph 保存本地凭据引用；`external_session` 来源通过 health/auth status 验证外部浏览器会话，不向
 Graph 返回 Cookie。历史对象缺少该字段时由 `requires_auth` 推导：true 为 credential_ref，false 为 none。
 
+WP3.2.1 新 run 还应使用 additive `operation_authorization`：
+
+```json
+{
+  "collect": ["credential_ref"],
+  "fetch_detail": ["browser_profile_ref"]
+}
+```
+
+允许的 mode 为 `credential_ref | browser_profile_ref | external_sidecar | none`。旧
+`authorization_mode` 继续作为没有 operation map 时的兼容默认值。牛客使用 collect=credential_ref、
+fetch_detail=browser_profile_ref；小红书两个操作均要求 browser_profile_ref 和 external_sidecar。
+
 ## 4. SourceQuery 与 RoleQueryPlan
 
 ```json
@@ -639,6 +652,19 @@ authority violation 的 Claim 必须拒绝写入并进入 Eval。
 ```
 
 这只是引用契约。CredentialRef 不能被 EvidenceArtifact 保存，真实秘密值只能由本地 credential service 在 Tool 调用边界解析。
+
+## 16.1 BrowserProfileRef
+
+```json
+{
+  "profile_ref": "local-browser-profile://nowcoder_experience/default",
+  "source_id": "nowcoder_experience",
+  "name": "default"
+}
+```
+
+BrowserProfileRef 不是 CredentialRef，也不包含 Profile 路径或 CDP endpoint。真实 Profile 目录、浏览器
+进程、Cookie 和 Storage State 只能由本地 BrowserProfileManager 解析。Graph State 只保存 ref。
 
 ## 17. 归档与版本
 

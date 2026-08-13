@@ -16,8 +16,10 @@ from campus_job_agent.schemas import (
     JobPostingCluster, NormalizedJobPosting, OfficialVerificationPlan,
     OfficialEscalationReceipt, RoleDetailEvidenceReceipt, RoleFamilyDemandProfile,
     RoleFamilyMembership, RoleIntelligenceBundle, SearchScope, SourceDetailRequest,
-    SourceDocument, SourceQuery, SourceRunReceipt, ToolResult,
+    SourceAuthRequirement, SourceDocument, SourceQuery, SourceRunReceipt,
+    ToolResult,
 )
+from campus_job_agent.integrations import BrowserProfileError
 from campus_job_agent.schemas.evidence import utc_now
 from campus_job_agent.sources.adapters import SourceAdapterRegistry
 from campus_job_agent.sources.credential_store import LocalCredentialStore
@@ -71,11 +73,20 @@ class CollectSourceTool:
             if adapter is None:
                 return _fail(self.name, f"source adapter not registered: {query.source_id}", "source_changed")
             started_at = utc_now()
-            batch = adapter.collect(query, args.get("credential_ref"))
+            if "browser_profile_ref" in adapter.capabilities.authorization_for(
+                "collect"
+            ):
+                batch = adapter.collect(
+                    query, args.get("credential_ref"),
+                    browser_profile_ref=args.get("browser_profile_ref"),
+                )
+            else:
+                batch = adapter.collect(query, args.get("credential_ref"))
             completed_at = utc_now()
             receipt = _save_receipt(
                 self.role_repository, str(args["run_id"]), adapter, batch,
-                bool(args.get("credential_ref")), started_at=started_at,
+                bool(args.get("credential_ref") or args.get("browser_profile_ref")),
+                started_at=started_at,
                 completed_at=completed_at,
             )
             if batch.status not in {"success", "empty"}:
@@ -181,11 +192,21 @@ class FetchCommunityDetailsTool:
             if callable(fetch_many):
                 batches = fetch_many(
                     requests, credential_ref=args.get("credential_ref"),
+                    browser_profile_ref=args.get("browser_profile_ref"),
                     max_concurrency=min(int(args.get("max_concurrency", 2)), 2),
                 )
             else:
+                detail_uses_profile = "browser_profile_ref" in (
+                    adapter.capabilities.authorization_for("fetch_detail")
+                )
                 batches = [
-                    adapter.fetch_detail(request, args.get("credential_ref"))
+                    adapter.fetch_detail(
+                        request, args.get("credential_ref"),
+                        **(
+                            {"browser_profile_ref": args.get("browser_profile_ref")}
+                            if detail_uses_profile else {}
+                        ),
+                    )
                     for request in requests
                 ]
             completed_at = utc_now()
@@ -200,7 +221,7 @@ class FetchCommunityDetailsTool:
             for request, batch in zip(requests, batches, strict=True):
                 receipt = _save_receipt(
                     self.role_repository, str(args["run_id"]), adapter, batch,
-                    bool(args.get("credential_ref")),
+                    bool(args.get("credential_ref") or args.get("browser_profile_ref")),
                     started_at=started_at, completed_at=completed_at,
                 )
                 for document in batch.documents:
@@ -261,6 +282,67 @@ class ValidateExternalSessionTool:
             self.name, status, status,
             needs_user_action=status in {"authentication_required", "risk_controlled"},
         )
+
+
+class ValidateBrowserProfileTool:
+    name = "source.validate_browser_profile"
+
+    def __init__(
+        self, adapters: SourceAdapterRegistry,
+        browser_profile_manager: Any | None,
+    ) -> None:
+        self.adapters = adapters
+        self.browser_profile_manager = browser_profile_manager
+
+    def run(self, args: dict[str, Any]) -> ToolResult:
+        try:
+            requirement = SourceAuthRequirement(
+                source_id=str(args.get("source_id") or ""),
+                operation=str(args.get("operation") or ""),
+                mode="browser_profile_ref",
+                browser_profile_ref=str(args.get("browser_profile_ref") or "") or None,
+            )
+            adapter = self.adapters.get(requirement.source_id)
+            if adapter is None or "browser_profile_ref" not in (
+                adapter.capabilities.authorization_for(requirement.operation)
+            ):
+                return _fail(
+                    self.name, "browser profile is not valid for this operation",
+                    "unsupported_input",
+                )
+            if (
+                self.browser_profile_manager is None
+                or requirement.browser_profile_ref is None
+            ):
+                return _fail(
+                    self.name, "browser profile is not configured",
+                    "authentication_required", needs_user_action=True,
+                )
+            self.browser_profile_manager.resolve_cdp(
+                requirement.browser_profile_ref,
+                source_id=requirement.source_id,
+            )
+            status = self.browser_profile_manager.status(
+                requirement.browser_profile_ref
+            )
+            return _ok(
+                self.name, [], [],
+                authorization_status="browser_profile_available",
+                profile_status=status.model_dump(mode="json"),
+                source_id=requirement.source_id,
+                operation=requirement.operation,
+                browser_profile_ref=requirement.browser_profile_ref,
+            )
+        except BrowserProfileError as exc:
+            return _fail(
+                self.name, str(exc), exc.code,
+                needs_user_action=exc.code in {
+                    "authentication_required", "profile_not_initialized",
+                    "port_conflict", "process_ownership_mismatch",
+                },
+            )
+        except ValueError as exc:
+            return _fail(self.name, str(exc), "unsupported_input")
 
 
 class DiscoverJobDetailCandidatesTool:
@@ -1300,13 +1382,15 @@ def build_role_profile_registry(*, blob_store: BlobStore, evidence_repository: E
                                 profile_repository: ProfileRepository, role_repository: SQLiteRoleRepository,
                                 adapters: SourceAdapterRegistry, credential_store: LocalCredentialStore,
                                 community_extractor: CommunityEvidenceExtractor | None = None,
-                                community_evaluator: CommunitySearchEvaluator | None = None) -> ToolRegistry:
+                                community_evaluator: CommunitySearchEvaluator | None = None,
+                                browser_profile_manager: Any | None = None) -> ToolRegistry:
     registry = ToolRegistry()
     for tool in [
         CollectSourceTool("source.discover_jobs", adapters, role_repository), CollectSourceTool("source.collect_experience", adapters, role_repository),
         FetchSourceDetailTool(adapters, role_repository),
         FetchCommunityDetailsTool(adapters, role_repository),
         ValidateExternalSessionTool(adapters),
+        ValidateBrowserProfileTool(adapters, browser_profile_manager),
         DiscoverJobDetailCandidatesTool(evidence_repository, role_repository),
         DiscoverCommunityPostCandidatesTool(evidence_repository, role_repository),
         VerifyOfficialTool(adapters, role_repository), ExtractSourceDocumentTool(blob_store, evidence_repository),

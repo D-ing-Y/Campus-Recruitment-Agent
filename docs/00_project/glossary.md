@@ -62,6 +62,9 @@
 - Interrupt：Graph 主动暂停并等待用户输入、确认、登录或判断的机制。
 - Resume：使用相同 `thread_id` 和匹配的交互 request 恢复已中断 Graph；重复提交必须幂等。
 - Credential Ref：指向本地秘密存储中登录材料的非敏感引用；Cookie、Authorization 和 cURL 原文不得进入 Graph State。
+- Authenticated Browser Profile：由项目专用真实 Chrome 保存的单平台登录态；必须与日常浏览器和其他平台物理隔离。
+- BrowserProfileRef：指向本地 Authenticated Browser Profile 的非敏感引用；不得解析为 Graph、日志或证据中的真实路径、Cookie、Storage State 或 CDP endpoint。
+- Source Auth Requirement：某个来源操作对授权材料的结构化要求，至少区分 collect 与 fetch_detail，避免用一个 source-level auth 状态覆盖不同传输阶段。
 - Sub-Agent：由主 Agent 动态委派、具有隔离上下文和终止条件的工作单元。
 - Distributed Storage：由元数据数据库、对象存储、向量存储等组成并支持多 worker 的持久层；不是单机 SQLite 的别名。
 - Eval：评估 schema、证据追溯、检索、路由、匹配、恢复、成本和最终任务质量的体系。

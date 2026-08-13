@@ -225,6 +225,8 @@ from campus_job_agent.schemas.resume import (
     canonical_hash, resume_response_hash,
 )
 from campus_job_agent.schemas.source import (
+    BrowserProfileRef,
+    BrowserProfileStatus,
     CredentialRef,
     ExperienceEvidenceRecord,
     ExperienceScopeLink,
@@ -238,6 +240,7 @@ from campus_job_agent.schemas.source import (
     SearchScope,
     SourceBatch,
     SourceCapabilities,
+    SourceAuthRequirement,
     SourceDocument,
     SourceQuery,
     SourceDetailRequest,
@@ -375,6 +378,9 @@ __all__ = [
     "FieldResolution",
     "OfficialSiteAdapterSpec",
     "CredentialRef",
+    "BrowserProfileRef",
+    "BrowserProfileStatus",
+    "SourceAuthRequirement",
     "RoleCoverageGap",
     "RoleCoverageAssessment",
     "RoleSearchBudget",

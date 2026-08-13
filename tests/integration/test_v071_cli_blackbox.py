@@ -63,6 +63,40 @@ def test_brave_api_key_stdin_is_redacted_and_visible_to_doctor(tmp_path: Path) -
     assert "brave-blackbox-secret" not in doctor.stdout
 
 
+def test_browser_profile_cli_init_status_and_doctor_are_safe(tmp_path: Path) -> None:
+    initialized = _run(
+        tmp_path, "--json", "auth", "browser-profile", "init",
+        "--source", "nowcoder_experience",
+    )
+    assert initialized.returncode == 0, initialized.stderr
+    payload = json.loads(initialized.stdout)
+    assert payload["command"] == "auth.browser-profile.init"
+    assert payload["browser_profile_ref"] == (
+        "local-browser-profile://nowcoder_experience/default"
+    )
+    assert "browser_profiles" not in initialized.stdout
+    assert "cookie" not in initialized.stdout.casefold()
+
+    status = _run(
+        tmp_path, "--json", "auth", "browser-profile", "status",
+        "--source", "nowcoder_experience",
+    )
+    assert status.returncode == 0, status.stderr
+    status_payload = json.loads(status.stdout)
+    assert status_payload["profile_status"]["configured"] is True
+    assert status_payload["profile_status"]["chrome_running"] is False
+    assert "pid" not in status.stdout.casefold()
+    assert str(tmp_path) not in status.stdout
+
+    doctor = _run(tmp_path, "--json", "doctor")
+    checks = json.loads(doctor.stdout)["checks"]["community_retrieval"]
+    profiles = checks["browser_profiles"]
+    assert profiles["nowcoder_experience"]["configured"] is True
+    assert profiles["xiaohongshu_experience"]["configured"] is False
+    assert "cookie" not in doctor.stdout.casefold()
+    assert "websocket" not in doctor.stdout.casefold()
+
+
 def test_doctor_reports_incomplete_llm_without_exposing_or_crashing(tmp_path: Path) -> None:
     env = dict(os.environ)
     env["CAMPUS_AGENT_DATA_ROOT"] = str(tmp_path / "shared-data")

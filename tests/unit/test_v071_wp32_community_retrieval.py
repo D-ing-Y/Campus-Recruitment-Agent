@@ -64,6 +64,16 @@ def _query() -> SourceQuery:
     )
 
 
+class _ReadyNowcoderProfile:
+    def resolve_cdp(self, value, *, source_id):
+        assert value == "local-browser-profile://nowcoder_experience/default"
+        assert source_id == "nowcoder_experience"
+        return "http://127.0.0.1:9223"
+
+    def mark_authenticated_verified(self, value, *, verified_at):
+        return None
+
+
 def test_brave_query_is_domain_constrained_and_rejects_operator_injection() -> None:
     assert build_brave_nowcoder_query(["甲公司", "AI Agent", "面经"]) == (
         "甲公司 AI Agent 面经 site:nowcoder.com"
@@ -191,6 +201,7 @@ def test_nowcoder_profile_requires_one_unique_main_post() -> None:
     (CommunityFetchResult("u", "u", False, None, error_message="Blocked by robots.txt"), "robots_disallowed"),
     (CommunityFetchResult("u", "u", True, 200, html="请完成验证码"), "risk_controlled"),
     (CommunityFetchResult("u", "u", True, 200, html="登录后查看"), "authentication_required"),
+    (CommunityFetchResult("u", "u", True, 200, html='<script>const loginMode = true</script><div class="nc-post-content">' + "有效正文" * 30 + "</div>"), "success"),
 ])
 def test_crawl4ai_failure_classification(
     result: CommunityFetchResult, expected: str,
@@ -208,7 +219,8 @@ def test_adapter_batches_two_details_and_archives_before_body_parse(
     ]
     calls = []
 
-    def runner(values, concurrency):
+    def runner(values, concurrency, cdp_url):
+        assert cdp_url == "http://127.0.0.1:9223"
         calls.append((values, concurrency))
         return [
             CommunityFetchResult(
@@ -224,6 +236,7 @@ def test_adapter_batches_two_details_and_archives_before_body_parse(
         blob_store=blob, evidence_repository=evidence, role_repository=role,
         owner_id="owner", live_enabled=True,
         detail_fetcher=Crawl4AICommunityFetcher(runner=runner),
+        browser_profile_manager=_ReadyNowcoderProfile(),
     )
     requests = [
         SourceDetailRequest(
@@ -233,7 +246,12 @@ def test_adapter_batches_two_details_and_archives_before_body_parse(
             expected_document_kind="experience_post",
         ) for index, value in enumerate(urls)
     ]
-    batches = adapter.fetch_details(requests, max_concurrency=2)
+    batches = adapter.fetch_details(
+        requests, max_concurrency=2,
+        browser_profile_ref=(
+            "local-browser-profile://nowcoder_experience/default"
+        ),
+    )
     assert calls == [(urls, 2)]
     assert [item.status for item in batches] == ["success", "success"]
     for batch in batches:
@@ -249,7 +267,8 @@ def test_adapter_batches_two_details_and_archives_before_body_parse(
 def test_rejected_redirect_is_still_archived(tmp_path: Path) -> None:
     requested = "https://www.nowcoder.com/discuss/12345"
 
-    def runner(values, concurrency):
+    def runner(values, concurrency, cdp_url):
+        assert cdp_url == "http://127.0.0.1:9223"
         return [CommunityFetchResult(
             requested_url=requested, final_url="https://evil.example/post/1",
             success=True, status_code=200, html="private redirect",
@@ -260,11 +279,14 @@ def test_rejected_redirect_is_still_archived(tmp_path: Path) -> None:
         blob_store=blob, evidence_repository=evidence, role_repository=role,
         owner_id="owner", live_enabled=True,
         detail_fetcher=Crawl4AICommunityFetcher(runner=runner),
+        browser_profile_manager=_ReadyNowcoderProfile(),
     )
     batch = adapter.fetch_detail(SourceDetailRequest(
         source_id="nowcoder_experience", channel="experience", query_id="q",
         candidate_id="c", parent_document_id="search", detail_url=requested,
         expected_document_kind="experience_post",
+    ), browser_profile_ref=(
+        "local-browser-profile://nowcoder_experience/default"
     ))
     assert batch.status == "policy_blocked"
     assert batch.documents and batch.documents[0].raw_artifact_id
@@ -559,9 +581,11 @@ def test_community_detail_tool_calls_batch_adapter_once(tmp_path: Path) -> None:
 
         def __init__(self) -> None:
             self.calls = 0
+            self.kwargs = {}
 
         def fetch_details(self, requests, **kwargs):
             self.calls += 1
+            self.kwargs = kwargs
             return [
                 SourceBatch(
                     source_id=self.source_id, channel="experience",
@@ -590,7 +614,13 @@ def test_community_detail_tool_calls_batch_adapter_once(tmp_path: Path) -> None:
         "run_id": "run", "requests": [
             item.model_dump(mode="json") for item in requests
         ],
+        "browser_profile_ref": (
+            "local-browser-profile://nowcoder_experience/default"
+        ),
     })
     assert result.status == "success"
     assert adapter.calls == 1
+    assert adapter.kwargs["browser_profile_ref"] == (
+        "local-browser-profile://nowcoder_experience/default"
+    )
     assert len(result.records) == 2

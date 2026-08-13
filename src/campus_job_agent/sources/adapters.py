@@ -22,6 +22,7 @@ from campus_job_agent.integrations.community_retrieval import (
     extract_nowcoder_main_body,
 )
 from campus_job_agent.integrations.social_media import SocialBridgeError
+from campus_job_agent.integrations.browser_profiles import BrowserProfileError
 from campus_job_agent.schemas import (
     EvidenceArtifact,
     EvidenceFragment,
@@ -499,7 +500,8 @@ class BraveNowcoderExperienceAdapter:
         role_repository: SQLiteRoleRepository, owner_id: str,
         live_enabled: bool = False, credential_resolver: Any | None = None,
         search_client: BraveSearchClient | None = None,
-        detail_fetcher: Crawl4AICommunityFetcher | None = None, **_: Any,
+        detail_fetcher: Crawl4AICommunityFetcher | None = None,
+        browser_profile_manager: Any | None = None, **_: Any,
     ) -> None:
         self.blob_store = blob_store
         self.evidence_repository = evidence_repository
@@ -508,6 +510,7 @@ class BraveNowcoderExperienceAdapter:
         self.credential_resolver = credential_resolver
         self.search_client = search_client or BraveSearchClient()
         self.detail_fetcher = detail_fetcher or Crawl4AICommunityFetcher()
+        self.browser_profile_manager = browser_profile_manager
         self.capabilities = SourceCapabilities(
             source_id=self.source_id, channel="experience",
             source_type="community_experience",
@@ -515,6 +518,10 @@ class BraveNowcoderExperienceAdapter:
             supports_keyword=True, supports_company=True,
             supports_pagination=False, supports_detail_fetch=True,
             requires_auth=True, authorization_mode="credential_ref",
+            operation_authorization={
+                "collect": ["credential_ref"],
+                "fetch_detail": ["browser_profile_ref"],
+            },
             live_enabled=live_enabled, rate_limit_per_minute=6,
         )
 
@@ -587,14 +594,18 @@ class BraveNowcoderExperienceAdapter:
 
     def fetch_detail(
         self, request: SourceDetailRequest, credential_ref: str | None = None,
+        *, browser_profile_ref: str | None = None,
     ) -> SourceBatch:
         return self.fetch_details(
-            [request], credential_ref=credential_ref, max_concurrency=1
+            [request], credential_ref=credential_ref,
+            browser_profile_ref=browser_profile_ref, max_concurrency=1,
         )[0]
 
     def fetch_details(
         self, requests: list[SourceDetailRequest], *,
-        credential_ref: str | None = None, max_concurrency: int = 2,
+        credential_ref: str | None = None,
+        browser_profile_ref: str | None = None,
+        max_concurrency: int = 2,
     ) -> list[SourceBatch]:
         validated = [SourceDetailRequest.model_validate(item) for item in requests]
         if any(
@@ -612,7 +623,8 @@ class BraveNowcoderExperienceAdapter:
             keys[request.detail_request_id] = key
             existing = self.role_repository.get_batch(key)
             if existing is not None and existing.status not in {
-                "rate_limited", "adapter_required", "failed",
+                "authentication_required", "risk_controlled", "rate_limited",
+                "adapter_required", "failed",
             }:
                 batches[request.detail_request_id] = existing
             else:
@@ -621,6 +633,33 @@ class BraveNowcoderExperienceAdapter:
             for item in pending:
                 batches[item.detail_request_id] = self._detail_error(
                     item, keys[item.detail_request_id], "policy_blocked"
+                )
+            return [batches[item.detail_request_id] for item in validated]
+        cdp_url: str | None = None
+        if not browser_profile_ref or self.browser_profile_manager is None:
+            for item in pending:
+                batches[item.detail_request_id] = self._detail_error(
+                    item, keys[item.detail_request_id], "authentication_required",
+                    needs_user_action=True,
+                )
+            return [batches[item.detail_request_id] for item in validated]
+        try:
+            cdp_url = self.browser_profile_manager.resolve_cdp(
+                browser_profile_ref, source_id=self.source_id
+            )
+        except BrowserProfileError as exc:
+            status = (
+                "authentication_required"
+                if exc.code in {
+                    "authentication_required", "profile_not_initialized",
+                    "process_ownership_mismatch", "port_conflict",
+                }
+                else "policy_blocked"
+            )
+            for item in pending:
+                batches[item.detail_request_id] = self._detail_error(
+                    item, keys[item.detail_request_id], status,
+                    needs_user_action=status == "authentication_required",
                 )
             return [batches[item.detail_request_id] for item in validated]
         canonical_urls: list[str] = []
@@ -638,7 +677,8 @@ class BraveNowcoderExperienceAdapter:
         if fetchable:
             try:
                 fetched = self.detail_fetcher.fetch_many(
-                    canonical_urls, max_concurrency=max_concurrency
+                    canonical_urls, max_concurrency=max_concurrency,
+                    cdp_url=cdp_url,
                 )
             except CommunityRetrievalError as exc:
                 for item in fetchable:
@@ -736,6 +776,13 @@ class BraveNowcoderExperienceAdapter:
                                 idempotency_key=keys[item.detail_request_id],
                             )
                         )
+                if any(
+                    batches[item.detail_request_id].status == "success"
+                    for item in fetchable
+                ):
+                    self.browser_profile_manager.mark_authenticated_verified(
+                        browser_profile_ref, verified_at=utc_now().isoformat()
+                    )
         return [batches[item.detail_request_id] for item in validated]
 
     def _error(
@@ -783,23 +830,32 @@ class XiaohongshuExperienceAdapter:
     def __init__(
         self, *, bridge_client: Any | None, blob_store: BlobStore,
         evidence_repository: EvidenceRepository, role_repository: SQLiteRoleRepository,
-        owner_id: str, live_enabled: bool = False, **_: Any,
+        owner_id: str, live_enabled: bool = False,
+        browser_profile_manager: Any | None = None, **_: Any,
     ) -> None:
         self.bridge_client = bridge_client
         self.blob_store = blob_store
         self.evidence_repository = evidence_repository
         self.role_repository = role_repository
         self.owner_id = owner_id
+        self.browser_profile_manager = browser_profile_manager
         self.capabilities = SourceCapabilities(
             source_id=self.source_id, channel="experience",
             source_type="community_experience", adapter_version="xiaohongshu_sidecar_v2",
             supports_keyword=True, supports_company=True, supports_pagination=False,
             supports_detail_fetch=True, requires_auth=True,
             authorization_mode="external_session", live_enabled=live_enabled,
+            operation_authorization={
+                "collect": ["browser_profile_ref", "external_sidecar"],
+                "fetch_detail": ["browser_profile_ref", "external_sidecar"],
+            },
             rate_limit_per_minute=3,
         )
 
-    def collect(self, query: SourceQuery, credential_ref: str | None = None) -> SourceBatch:
+    def collect(
+        self, query: SourceQuery, credential_ref: str | None = None, *,
+        browser_profile_ref: str | None = None,
+    ) -> SourceBatch:
         key = _batch_key(self.source_id, query.fingerprint, query.cursor, self.capabilities.adapter_version)
         existing = self.role_repository.get_batch(key)
         if existing is not None and existing.status not in {
@@ -808,9 +864,20 @@ class XiaohongshuExperienceAdapter:
             return existing
         if not self.capabilities.live_enabled:
             return self._error(query.query_id, key, "policy_blocked")
+        profile_error = self._validate_profile(browser_profile_ref)
+        if profile_error is not None:
+            return self._error(
+                query.query_id, key, profile_error,
+                needs_user_action=profile_error == "authentication_required",
+            )
         if self.bridge_client is None:
             return self._error(query.query_id, key, "adapter_required")
         try:
+            if str(self.bridge_client.health().get("status")) != "idle":
+                return self._error(
+                    query.query_id, key, "adapter_required",
+                    error_type="sidecar_busy",
+                )
             payload = self.bridge_client.search_posts(
                 keywords=" ".join(query.keywords), limit=query.page_size,
             )
@@ -823,12 +890,16 @@ class XiaohongshuExperienceAdapter:
                 adapter_version=self.capabilities.adapter_version, blob_store=self.blob_store,
                 evidence_repository=self.evidence_repository,
             )
-            return self.role_repository.save_batch(SourceBatch(
+            batch = self.role_repository.save_batch(SourceBatch(
                 batch_id=str(uuid5(NAMESPACE_URL, key)), source_id=self.source_id,
                 channel="experience", query_id=query.query_id, documents=[document],
                 status="success" if payload.get("candidates") else "empty",
                 idempotency_key=key,
             ))
+            self.browser_profile_manager.mark_authenticated_verified(
+                str(browser_profile_ref), verified_at=utc_now().isoformat()
+            )
+            return batch
         except SocialBridgeError as exc:
             return self._error(
                 query.query_id, key, exc.code,
@@ -837,6 +908,7 @@ class XiaohongshuExperienceAdapter:
 
     def fetch_detail(
         self, request: SourceDetailRequest, credential_ref: str | None = None,
+        *, browser_profile_ref: str | None = None,
     ) -> SourceBatch:
         if request.source_id != self.source_id or request.channel != "experience":
             raise ValueError("detail request does not match xiaohongshu adapter")
@@ -850,11 +922,22 @@ class XiaohongshuExperienceAdapter:
             return existing
         if not self.capabilities.live_enabled:
             return self._error(request.query_id, key, "policy_blocked")
+        profile_error = self._validate_profile(browser_profile_ref)
+        if profile_error is not None:
+            return self._error(
+                request.query_id, key, profile_error,
+                needs_user_action=profile_error == "authentication_required",
+            )
         if self.bridge_client is None:
             return self._error(request.query_id, key, "adapter_required")
         if not request.external_locator_ref:
             return self._error(request.query_id, key, "unsupported_input")
         try:
+            if str(self.bridge_client.health().get("status")) != "idle":
+                return self._error(
+                    request.query_id, key, "adapter_required",
+                    error_type="sidecar_busy",
+                )
             payload = self.bridge_client.fetch_post_detail(
                 candidate_ref=request.external_locator_ref
             )
@@ -866,18 +949,25 @@ class XiaohongshuExperienceAdapter:
                 content_type="application/json", adapter_version=self.capabilities.adapter_version,
                 blob_store=self.blob_store, evidence_repository=self.evidence_repository,
             )
-            return self.role_repository.save_batch(SourceBatch(
+            batch = self.role_repository.save_batch(SourceBatch(
                 batch_id=str(uuid5(NAMESPACE_URL, key)), source_id=self.source_id,
                 channel="experience", query_id=request.query_id, documents=[document],
                 status="success", idempotency_key=key,
             ))
+            self.browser_profile_manager.mark_authenticated_verified(
+                str(browser_profile_ref), verified_at=utc_now().isoformat()
+            )
+            return batch
         except SocialBridgeError as exc:
             return self._error(
                 request.query_id, key, exc.code,
                 needs_user_action=exc.code in {"authentication_required", "risk_controlled"},
             )
 
-    def authorization_status(self) -> str:
+    def authorization_status(self, browser_profile_ref: str | None = None) -> str:
+        profile_error = self._validate_profile(browser_profile_ref)
+        if profile_error is not None:
+            return profile_error
         if not self.capabilities.live_enabled or self.bridge_client is None:
             return "adapter_required"
         try:
@@ -885,8 +975,27 @@ class XiaohongshuExperienceAdapter:
         except SocialBridgeError as exc:
             return exc.code
 
+    def _validate_profile(self, browser_profile_ref: str | None) -> str | None:
+        if not browser_profile_ref or self.browser_profile_manager is None:
+            return "authentication_required"
+        try:
+            self.browser_profile_manager.resolve_cdp(
+                browser_profile_ref, source_id=self.source_id
+            )
+        except BrowserProfileError as exc:
+            return (
+                "authentication_required"
+                if exc.code in {
+                    "authentication_required", "profile_not_initialized",
+                    "process_ownership_mismatch", "port_conflict",
+                }
+                else "policy_blocked"
+            )
+        return None
+
     def _error(
-        self, query_id: str, key: str, status: str, *, needs_user_action: bool = False,
+        self, query_id: str, key: str, status: str, *,
+        needs_user_action: bool = False, error_type: str | None = None,
     ) -> SourceBatch:
         allowed = {
             "empty", "authentication_required", "risk_controlled", "adapter_required",
@@ -896,7 +1005,7 @@ class XiaohongshuExperienceAdapter:
         return self.role_repository.save_batch(SourceBatch(
             batch_id=str(uuid5(NAMESPACE_URL, key)), source_id=self.source_id,
             channel="experience", query_id=query_id, status=value,
-            error_type=status, needs_user_action=needs_user_action,
+            error_type=error_type or status, needs_user_action=needs_user_action,
             retryable=status in {"rate_limited", "network_timeout"}, idempotency_key=key,
         ))
 

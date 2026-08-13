@@ -1,6 +1,10 @@
 """External integration adapters."""
 
 from campus_job_agent.integrations.mcp import MCPToolCatalog
+from campus_job_agent.integrations.browser_profiles import (
+    BrowserProfileError,
+    BrowserProfileManager,
+)
 from campus_job_agent.integrations.community_retrieval import (
     BraveSearchClient,
     CommunityFetchResult,
@@ -14,7 +18,8 @@ from campus_job_agent.integrations.social_media import (
 )
 
 __all__ = [
-    "BraveSearchClient", "CommunityFetchResult", "CommunityRetrievalError",
+    "BraveSearchClient", "BrowserProfileError", "BrowserProfileManager",
+    "CommunityFetchResult", "CommunityRetrievalError",
     "Crawl4AICommunityFetcher", "MCPToolCatalog", "MediaCrawlerSidecarClient", "MediaCrawlerSidecarConfig",
     "SocialBridgeError",
 ]

@@ -169,12 +169,13 @@ class Crawl4AICommunityFetcher:
     def __init__(
         self,
         *,
-        runner: Callable[[list[str], int], list[CommunityFetchResult]] | None = None,
+        runner: Callable[..., list[CommunityFetchResult]] | None = None,
     ) -> None:
         self._runner = runner
 
     def fetch_many(
-        self, urls: list[str], *, max_concurrency: int = 2
+        self, urls: list[str], *, max_concurrency: int = 2,
+        cdp_url: str | None = None,
     ) -> list[CommunityFetchResult]:
         canonical = [canonical_nowcoder_detail_url(value) for value in urls]
         if any(value is None for value in canonical):
@@ -186,9 +187,13 @@ class Crawl4AICommunityFetcher:
             return []
         concurrency = max(1, min(int(max_concurrency), 2))
         if self._runner is not None:
-            return self._runner(unique, concurrency)
+            return (
+                self._runner(unique, concurrency, cdp_url)
+                if cdp_url is not None
+                else self._runner(unique, concurrency)
+            )
         try:
-            return _run_async(_crawl4ai_fetch(unique, concurrency))
+            return _run_async(_crawl4ai_fetch(unique, concurrency, cdp_url))
         except ModuleNotFoundError as exc:
             raise CommunityRetrievalError(
                 "adapter_required",
@@ -197,14 +202,19 @@ class Crawl4AICommunityFetcher:
 
 
 async def _crawl4ai_fetch(
-    urls: list[str], max_concurrency: int
+    urls: list[str], max_concurrency: int, cdp_url: str | None = None,
 ) -> list[CommunityFetchResult]:
     from crawl4ai import AsyncWebCrawler, BrowserConfig, CacheMode, CrawlerRunConfig
     from crawl4ai.async_dispatcher import SemaphoreDispatcher
 
-    browser = BrowserConfig(headless=True, verbose=False)
+    browser = _authenticated_browser_config(cdp_url) if cdp_url is not None else (
+        BrowserConfig(headless=True, verbose=False)
+    )
     run = CrawlerRunConfig(
-        cache_mode=CacheMode.ENABLED,
+        # Authenticated pages are session-dependent. Replaying a cache entry
+        # created by an anonymous context can silently reintroduce a login
+        # wall even while the connected Chrome profile is authenticated.
+        cache_mode=(CacheMode.BYPASS if cdp_url is not None else CacheMode.ENABLED),
         check_robots_txt=True,
         stream=False,
         page_timeout=30_000,
@@ -245,6 +255,28 @@ async def _crawl4ai_fetch(
             error_message=str(getattr(item, "error_message", "") or ""),
         ))
     return results
+
+
+def _authenticated_browser_config(cdp_url: str) -> Any:
+    """Build a non-owning Crawl4AI connection to an existing Chrome context."""
+
+    from crawl4ai import BrowserConfig
+
+    return BrowserConfig(
+        headless=False,
+        verbose=False,
+        # Crawl4AI 0.9.2's cdp mode connects to the existing default context,
+        # but creates a page for each crawl instead of reusing and later
+        # closing the user's login page.
+        browser_mode="cdp",
+        cdp_url=cdp_url,
+        cdp_cleanup_on_close=False,
+        create_isolated_context=False,
+        use_persistent_context=False,
+        proxy=None,
+        proxy_config=None,
+        enable_stealth=False,
+    )
 
 
 def _run_async(awaitable: Awaitable[list[CommunityFetchResult]]) -> list[CommunityFetchResult]:
@@ -358,7 +390,8 @@ def classify_crawl4ai_result(result: CommunityFetchResult) -> str:
     )):
         return "risk_controlled"
     if any(marker in text for marker in (
-        "login", "登录后查看", "账号登录", "password",
+        "登录后查看", "账号登录", "请先登录", "登录后可查看",
+        "sign in to continue", "log in to continue",
     )):
         return "authentication_required"
     if result.status_code == 404:

@@ -23,6 +23,11 @@
 9. 进程失败时仍应尽力写入 manifest 和安全 ErrorEvent；写入失败必须改变最终状态。
 10. 任何 handoff 在 successor refs 校验成功前不得标 resolved。
 
+WP3.2.1 增加 `auth browser-profile init|open|status|stop`。这些命令的 JSON 输出只允许包含
+`profile_ref/source_id/name/configured/browser_running/cdp_reachable/status/reason_codes`；不得包含真实
+Profile 路径、PID、浏览器命令行、Cookie、Storage State 或 CDP WebSocket。`open` 返回后由用户在
+可见 Chrome 中人工登录，不能把窗口成功打开表述为 authenticated。
+
 ## 3. RunSession
 
 ```json

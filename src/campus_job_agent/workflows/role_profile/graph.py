@@ -23,7 +23,7 @@ from campus_job_agent.schemas import (
     OfficialEscalationReceipt, RoleDetailEvidenceReceipt, RoleFamilyMembership,
     RoleProfileGraphState, RoleSearchBudget, RoleSearchCounter, SearchScope,
     SourceBatch, SourceDetailRequest, SourceDocument, SourceQuery,
-    SourceRunReceipt,
+    SourceAuthRequirement, SourceCapabilities, SourceRunReceipt,
 )
 from campus_job_agent.sources.role_intelligence import (
     COMMUNITY_SOURCE_CASCADES,
@@ -94,6 +94,7 @@ def create_role_profile_state(
     official_domains: dict[str, list[str]] | None = None,
     output_dir: str | None = None,
     credential_refs: dict[str, str] | None = None,
+    browser_profile_refs: dict[str, str] | None = None,
     user_requested_official_job_ids: list[str] | None = None,
 ) -> RoleProfileGraphState:
     scope = search_scope if isinstance(search_scope, SearchScope) else SearchScope.model_validate(search_scope)
@@ -108,7 +109,9 @@ def create_role_profile_state(
         "enabled_source_ids": list(enabled_source_ids), "skipped_source_ids": [],
         "source_capabilities": source_capabilities, "official_domains": official_domains or {},
         "next_cursors": {}, "pending_auth_source_id": None,
+        "pending_auth_requirement": None,
         "credential_refs": dict(credential_refs or {}), "source_batch_ids": [],
+        "browser_profile_refs": dict(browser_profile_refs or {}),
         "source_run_receipts": [], "raw_artifact_ids": [], "extraction_ids": [],
         "fragment_ids": [], "recruitment_search_document_ids": [],
         "recruitment_detail_candidate_ids": [], "recruitment_detail_request_ids": [],
@@ -222,6 +225,8 @@ def build_role_profile_graph(
         "validate_source_authorization", lambda state: state.get("last_auth_action", "retry"),
         {
             "retry": "collect_community_searches",
+            "retry_search": "collect_community_searches",
+            "retry_detail": "fetch_community_details",
             "continue": "assess_community_coverage",
             "cancel": "cancel_role_research",
         },
@@ -232,7 +237,32 @@ def build_role_profile_graph(
 
 
 def _auth_route(state: RoleProfileGraphState) -> str:
-    return "auth" if state.get("pending_auth_source_id") else "continue"
+    return "auth" if (
+        state.get("pending_auth_requirement")
+        or state.get("pending_auth_source_id")
+    ) else "continue"
+
+
+def _source_auth_requirement(
+    state: RoleProfileGraphState, *, source_id: str, operation: str,
+) -> dict[str, Any]:
+    raw = state.get("source_capabilities", {}).get(source_id, {})
+    capability = SourceCapabilities.model_validate(raw)
+    modes = capability.authorization_for(operation)
+    mode = (
+        "browser_profile_ref" if "browser_profile_ref" in modes
+        else "credential_ref" if "credential_ref" in modes
+        else "external_session" if "external_session" in modes
+        else "external_sidecar" if "external_sidecar" in modes
+        else "none"
+    )
+    return SourceAuthRequirement(
+        source_id=source_id,
+        operation=operation,
+        mode=mode,
+        credential_ref=state.get("credential_refs", {}).get(source_id),
+        browser_profile_ref=state.get("browser_profile_refs", {}).get(source_id),
+    ).model_dump(mode="json")
 
 
 def _community_plan_route(state: RoleProfileGraphState) -> str:
@@ -835,6 +865,9 @@ class _RoleNodes:
             "requests": [item.model_dump(mode="json") for item in requests],
             "run_id": state["run_id"],
             "credential_ref": state.get("credential_refs", {}).get(source_id),
+            "browser_profile_ref": state.get("browser_profile_refs", {}).get(
+                source_id
+            ),
             "max_concurrency": 2,
         })
         counters = counters.model_copy(update={
@@ -857,6 +890,12 @@ class _RoleNodes:
         pending_auth = (
             source_id if result.metadata.get("needs_user_action") else None
         )
+        pending_requirement = (
+            _source_auth_requirement(
+                state, source_id=source_id, operation="fetch_detail"
+            )
+            if pending_auth else None
+        )
         return {
             "community_detail_request_ids": [
                 item.detail_request_id for item in requests
@@ -866,6 +905,7 @@ class _RoleNodes:
             "raw_artifact_ids": artifact_ids,
             "source_run_receipts": receipts,
             "pending_auth_source_id": pending_auth,
+            "pending_auth_requirement": pending_requirement,
             "counters": counters.model_dump(),
             "tool_results": [_safe_tool_result(result)],
             "community_errors": [] if result.status == "success" else [
@@ -1391,26 +1431,45 @@ class _RoleNodes:
         return update
 
     def plan_source_auth(self, state: RoleProfileGraphState) -> dict[str, Any]:
+        raw_requirement = state.get("pending_auth_requirement")
         source_id = state.get("pending_auth_source_id")
         if not source_id:
             raise RoleProfileWorkflowError("await_user_auth requires pending source")
-        capability = state.get("source_capabilities", {}).get(source_id, {})
-        external = capability.get("authorization_mode") == "external_session"
+        requirement = SourceAuthRequirement.model_validate(
+            raw_requirement or _source_auth_requirement(
+                state, source_id=source_id, operation="collect"
+            )
+        )
+        mode = requirement.mode
+        browser_profile = mode == "browser_profile_ref"
+        external = mode in {"external_session", "external_sidecar"}
         request = {
-            "request_id": f"request-role-auth-{state['thread_id']}-{source_id}",
+            "request_id": (
+                f"request-role-auth-{state['thread_id']}-{source_id}-"
+                f"{requirement.operation}"
+            ),
             "thread_id": state["thread_id"], "run_id": state["run_id"],
             "user_id": state["user_id"], "interaction_type": "authorize_source",
             "source_id": source_id,
-            "authorization_mode": capability.get("authorization_mode", "credential_ref"),
+            "operation": requirement.operation,
+            "authorization_mode": mode,
+            "browser_profile_ref": requirement.browser_profile_ref,
             "login_entry": (
-                "请在 MediaCrawler 使用的真实 Chrome/CDP 会话中正常登录小红书"
-                if external else "请配置 Brave Search API Key"
+                f"请运行 campus-agent auth browser-profile open --source {source_id}，"
+                "并在真实 Chrome 官方页面中手动完成登录"
+                if browser_profile else (
+                    "请在 MediaCrawler 使用的真实 Chrome/CDP 会话中正常登录小红书"
+                    if external else "请配置 Brave Search API Key"
+                )
             ),
             "import_instruction": (
-                "保持 Sidecar 和 Chrome 会话可用后选择 authorized；不要提交 Cookie"
-                if external else (
-                    "运行 campus-agent auth import-api-key --source brave_search "
-                    "--api-key-stdin，只返回 credential_ref"
+                "完成登录后保持该 Profile 运行，再选择 authorized；不要提交 Cookie"
+                if browser_profile else (
+                    "保持 Sidecar 和 Chrome 会话可用后选择 authorized；不要提交 Cookie"
+                    if external else (
+                        "运行 campus-agent auth import-api-key --source brave_search "
+                        "--api-key-stdin，只返回 credential_ref"
+                    )
                 )
             ),
             "allowed_actions": ["authorized", "skip_source", "cancel"],
@@ -1422,7 +1481,10 @@ class _RoleNodes:
 
     def validate_source_authorization(self, state: RoleProfileGraphState) -> dict[str, Any]:
         request, response = state.get("pending_interaction") or {}, state.get("resume_input") or {}
-        for key in ("request_id", "thread_id", "user_id", "source_id"):
+        for key in (
+            "request_id", "thread_id", "user_id", "source_id", "operation",
+            "authorization_mode",
+        ):
             if str(response.get(key, "")) != str(request.get(key, "")):
                 raise RoleProfileWorkflowError(f"authorization {key} mismatch")
         action = response.get("action")
@@ -1430,33 +1492,53 @@ class _RoleNodes:
             raise RoleProfileWorkflowError("authorization action is not allowed")
         source_id = str(request["source_id"])
         refs = dict(state.get("credential_refs", {}))
+        browser_refs = dict(state.get("browser_profile_refs", {}))
         skipped: list[str] = []
         pending_queries: list[dict[str, Any]] = []
         skip_current = False
         if action == "authorized":
-            capability = state.get("source_capabilities", {}).get(source_id, {})
-            external = capability.get("authorization_mode") == "external_session"
+            mode = str(request.get("authorization_mode") or "credential_ref")
+            operation = str(request.get("operation") or "collect")
+            external = mode in {"external_session", "external_sidecar"}
             ref = str(response.get("credential_ref", ""))
+            browser_ref = str(response.get("browser_profile_ref", ""))
             result = self.registry.run(
-                "source.validate_external_session" if external else "source.validate_credential_ref",
-                {"source_id": source_id, "credential_ref": ref},
+                "source.validate_browser_profile"
+                if mode == "browser_profile_ref"
+                else "source.validate_external_session"
+                if external else "source.validate_credential_ref",
+                {
+                    "source_id": source_id,
+                    "operation": operation,
+                    "credential_ref": ref,
+                    "browser_profile_ref": browser_ref,
+                },
             )
             if result.status != "success":
                 raise RoleProfileWorkflowError(
-                    "external_session_invalid" if external else "credential_invalid"
+                    "browser_profile_invalid"
+                    if mode == "browser_profile_ref"
+                    else "external_session_invalid" if external else "credential_invalid"
                 )
             if ref:
                 refs[source_id] = ref
+            if browser_ref:
+                browser_refs[source_id] = browser_ref
             if state.get("community_current_query"):
                 pending_queries = [dict(state["community_current_query"])]
-            route = "retry"
+            route = (
+                "retry_detail" if operation == "fetch_detail"
+                else "retry_search"
+            )
         elif action == "skip_source":
             skipped = [source_id]; route = "continue"; skip_current = True
         else:
             route = "cancel"
         return {
-            "credential_refs": refs, "skipped_source_ids": skipped,
+            "credential_refs": refs, "browser_profile_refs": browser_refs,
+            "skipped_source_ids": skipped,
             "pending_auth_source_id": None, "pending_interaction": None,
+            "pending_auth_requirement": None,
             "resume_input": None, "status": "running", "last_auth_action": route,
             "pending_queries": pending_queries,
             "community_skip_current_source": skip_current,
@@ -1523,6 +1605,9 @@ class _RoleNodes:
             result = self.registry.run(tool_name, {
                 "query": raw, "run_id": state["run_id"],
                 "credential_ref": state.get("credential_refs", {}).get(query.source_id),
+                "browser_profile_ref": state.get("browser_profile_refs", {}).get(
+                    query.source_id
+                ),
             })
             updates = {"queries": counters.queries + 1, "tool_calls": counters.tool_calls + 1}
             updates["recruitment_searches" if phase == "recruitment_search" else "community_searches"] = (
@@ -1552,6 +1637,11 @@ class _RoleNodes:
         counters = counters.model_copy(update={"documents": counters.documents + len(documents)})
         return {
             key: documents, "pending_queries": [], "pending_auth_source_id": pending_auth,
+            "pending_auth_requirement": (
+                _source_auth_requirement(
+                    state, source_id=pending_auth, operation="collect"
+                ) if pending_auth else None
+            ),
             "raw_artifact_ids": artifacts, "source_batch_ids": batches,
             "source_run_receipts": receipts, "query_history": history,
             "counters": counters.model_dump(), "tool_results": results,
@@ -1589,6 +1679,9 @@ class _RoleNodes:
             result = self.registry.run("source.fetch_detail", {
                 "request": request.model_dump(mode="json"), "run_id": state["run_id"],
                 "credential_ref": state.get("credential_refs", {}).get(candidate.source_id),
+                "browser_profile_ref": state.get("browser_profile_refs", {}).get(
+                    candidate.source_id
+                ),
             })
             field = "recruitment_details" if candidate_kind == "job" else "community_details"
             counters = counters.model_copy(update={
@@ -1614,6 +1707,11 @@ class _RoleNodes:
             f"{prefix}_detail_document_ids": documents,
             "raw_artifact_ids": artifacts, "source_run_receipts": receipts,
             "pending_auth_source_id": pending_auth, "counters": counters.model_dump(),
+            "pending_auth_requirement": (
+                _source_auth_requirement(
+                    state, source_id=pending_auth, operation="fetch_detail"
+                ) if pending_auth else None
+            ),
             "tool_results": results, f"{prefix}_errors": errors,
             "trace": [_trace(f"fetch_{prefix}_details", counters, documents=len(documents))],
         }

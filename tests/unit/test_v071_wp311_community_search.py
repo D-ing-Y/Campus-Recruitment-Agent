@@ -319,6 +319,9 @@ def test_sidecar_failed_subprocess_is_not_reported_as_empty(tmp_path: Path) -> N
 
 def test_xiaohongshu_adapter_archives_search_before_candidate_and_detail(tmp_path: Path) -> None:
     class FakeBridge:
+        def health(self):
+            return {"status": "idle"}
+
         def search_posts(self, *, keywords, limit):
             return {
                 "platform": "xiaohongshu", "candidates": [{
@@ -342,6 +345,17 @@ def test_xiaohongshu_adapter_archives_search_before_candidate_and_detail(tmp_pat
         def auth_status(self):
             return {"status": "external_session_available"}
 
+    class FakeProfileManager:
+        def resolve_cdp(self, value, *, source_id):
+            assert value == (
+                "local-browser-profile://xiaohongshu_experience/default"
+            )
+            assert source_id == "xiaohongshu_experience"
+            return "http://127.0.0.1:9222"
+
+        def mark_authenticated_verified(self, value, *, verified_at):
+            return None
+
     evidence = SQLiteRepository(tmp_path / "evidence.sqlite3")
     role = SQLiteRoleRepository(tmp_path / "role.sqlite3")
     blob = LocalBlobStore(tmp_path / "blobs")
@@ -349,6 +363,7 @@ def test_xiaohongshu_adapter_archives_search_before_candidate_and_detail(tmp_pat
         bridge_client=FakeBridge(), blob_store=blob,
         evidence_repository=evidence, role_repository=role,
         owner_id="owner", live_enabled=True,
+        browser_profile_manager=FakeProfileManager(),
     )
     query = SourceQuery(
         query_id="query-xhs", channel="experience",
@@ -356,7 +371,12 @@ def test_xiaohongshu_adapter_archives_search_before_candidate_and_detail(tmp_pat
         company="甲公司", role_family="ai_agent_engineering",
         graduation_year="2027", recruitment_type="autumn_campus", page_size=2,
     )
-    search_batch = adapter.collect(query)
+    profile_ref = (
+        "local-browser-profile://xiaohongshu_experience/default"
+    )
+    search_batch = adapter.collect(
+        query, browser_profile_ref=profile_ref
+    )
     assert search_batch.status == "success"
     search_document = search_batch.documents[0]
     assert search_document.document_kind == "experience_search"
@@ -377,7 +397,7 @@ def test_xiaohongshu_adapter_archives_search_before_candidate_and_detail(tmp_pat
         detail_url=candidates[0].detail_url,
         external_locator_ref=candidates[0].external_locator_ref,
         expected_document_kind="experience_post",
-    ))
+    ), browser_profile_ref=profile_ref)
     assert detail_batch.status == "success"
     assert detail_batch.documents[0].document_kind == "experience_post"
     assert evidence.get_artifact(str(detail_batch.documents[0].raw_artifact_id)) is not None

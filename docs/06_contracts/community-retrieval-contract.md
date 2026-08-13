@@ -14,7 +14,8 @@ source.collect_experience
   output: ToolResult[SourceBatch + SourceRunReceipt]
 
 source.fetch_community_details
-  input: run_id, requests: SourceDetailRequest[1..10], max_concurrency=2, credential_ref?
+  input: run_id, requests: SourceDetailRequest[1..10], max_concurrency=2,
+         credential_ref?, browser_profile_ref?
   output: ToolResult[SourceBatch + SourceRunReceipt]*
 ```
 
@@ -82,3 +83,24 @@ no valid result -> empty
 逐帖正文单独分类，最大输入沿用现有 extractor 限制。聚合 decision payload 最多包含当前用途 12 个簇、
 24 个 segment；每段 quote 最多 400 字符、limited summary 最多 200 字符。每次 provider attempt 按
 `1 + retry_count` 计入 `RoleSearchCounter.llm_calls`，调用前必须验证 `max_llm_calls`。
+
+## 7. WP3.2.1 Browser Profile amendment
+
+```text
+BrowserProfileRef
+  profile_ref: local-browser-profile://<source_id>/<name>
+  source_id: nowcoder_experience | xiaohongshu_experience
+
+SourceAuthRequirement
+  source_id
+  operation: collect | fetch_detail
+  mode: credential_ref | browser_profile_ref | external_sidecar | none
+```
+
+- 牛客 collect 解析现有 Brave CredentialRef；牛客 fetch_detail 必须另外收到牛客 BrowserProfileRef。
+- 小红书 collect/fetch_detail 必须收到小红书 BrowserProfileRef，并验证 CDP 与 MediaCrawler health。
+- `browser_profile_ref` 只能传递 opaque ref；ToolResult、Raw metadata、receipt、checkpoint 和 trace 不得
+  保存其本地路径、端口、PID、Cookie、Storage State 或 CDP WebSocket。
+- Crawl4AI 使用 Profile Manager 返回的 loopback CDP 连接。关闭 crawler 时只断开 Playwright/CDP，
+  不关闭真实 Chrome。
+- Profile/CDP 可达不等于认证成功；只有实际详情/search 成功才更新本地最近认证验证时间。

@@ -133,6 +133,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     role_resume.add_argument("--response-id", required=True)
     role_resume.add_argument("--credential-ref")
+    role_resume.add_argument("--browser-profile-ref")
     role_show = role_commands.add_parser("show")
     role_show.add_argument("bundle_id")
 
@@ -194,6 +195,19 @@ def _build_parser() -> argparse.ArgumentParser:
     api_key.add_argument("--api-key-stdin", action="store_true")
     api_key.add_argument("--api-key", help=argparse.SUPPRESS)
     api_key.add_argument("--credential-root", type=Path)
+    browser_profile = auth_commands.add_parser(
+        "browser-profile", help="manage isolated authenticated Chrome profiles"
+    )
+    browser_profile_commands = browser_profile.add_subparsers(
+        dest="browser_profile_command", required=True
+    )
+    for action in ("init", "open", "status", "stop"):
+        operation = browser_profile_commands.add_parser(action)
+        operation.add_argument(
+            "--source", required=True,
+            choices=("nowcoder_experience", "xiaohongshu_experience"),
+        )
+        operation.add_argument("--name", default="default")
     return parser
 
 
@@ -764,6 +778,7 @@ def _role(runtime: Any, args: argparse.Namespace) -> int:
             action=args.action,
             response_id=args.response_id,
             credential_ref=args.credential_ref,
+            browser_profile_ref=args.browser_profile_ref,
         )
         return _emit(payload, json_mode=args.json_output)
     result = service.show(args.bundle_id)
@@ -903,6 +918,39 @@ def _legacy_run(runtime: Any, args: argparse.Namespace) -> int:
 
 
 def _source_auth(runtime: Any, args: argparse.Namespace) -> int:
+    if args.auth_command == "browser-profile":
+        manager = runtime.browser_profile_manager
+        profile_ref = (
+            f"local-browser-profile://{args.source}/{args.name}"
+        )
+        if args.browser_profile_command == "init":
+            ref = manager.init(source_id=args.source, name=args.name)
+            status = manager.status(ref.browser_profile_ref)
+        elif args.browser_profile_command == "open":
+            status = manager.open(profile_ref)
+            ref = manager._parse_ref(profile_ref)
+        elif args.browser_profile_command == "status":
+            status = manager.status(profile_ref)
+            ref = manager._parse_ref(profile_ref)
+        else:
+            status = manager.stop(profile_ref)
+            ref = manager._parse_ref(profile_ref)
+        next_action = None
+        if args.browser_profile_command == "open":
+            next_action = "complete_manual_login"
+        elif not status.configured:
+            next_action = "auth.browser-profile.init"
+        return _emit({
+            "schema_version": "v0.7.1",
+            "command": f"auth.browser-profile.{args.browser_profile_command}",
+            "status": "completed",
+            "source_id": ref.source_id,
+            "browser_profile_ref": ref.browser_profile_ref,
+            "profile_status": status.model_dump(mode="json"),
+            "next_action": next_action,
+            "warnings": [],
+            "errors": [],
+        }, json_mode=args.json_output)
     store = runtime.credential_resolver
     if args.credential_root:
         from campus_job_agent.sources import LocalCredentialStore
@@ -1046,6 +1094,7 @@ def _emit_error(error_type: str, message: str, exit_code: int, *, json_mode: boo
 
 
 def _handle_error(exc: Exception, *, json_mode: bool) -> int:
+    from campus_job_agent.integrations import BrowserProfileError
     from campus_job_agent.llm import LLMConfigError, LLMProviderError, StructuredOutputError
     from campus_job_agent.runtime import (
         ArtifactWriteError, CandidateApplicationError, IntentApplicationError,
@@ -1058,6 +1107,11 @@ def _handle_error(exc: Exception, *, json_mode: bool) -> int:
 
     if isinstance(exc, CLIArgumentError):
         return _emit_error("invalid_input", str(exc), 2, json_mode=json_mode, recovery_hint="check command arguments")
+    if isinstance(exc, BrowserProfileError):
+        return _emit_error(
+            exc.code, str(exc), 3, json_mode=json_mode,
+            recovery_hint="inspect auth browser-profile status and retry safely",
+        )
     if isinstance(exc, SessionError):
         return _emit_error(exc.error_type, str(exc), 3, json_mode=json_mode, recovery_hint="inspect session refs and retry with the current version")
     if isinstance(exc, CandidateApplicationError):
