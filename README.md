@@ -35,6 +35,11 @@ MediaCrawler 本机服务未启动，因此社区真实 L2 仍为 partial。
 WP0-WP7 验收后升级。正式 CLI、RunSession、Candidate 和 CareerIntent 纵向闭环及相邻 typed
 handoff 已接入。版本入口见 `docs/09_versions/v0.7.1/README.md`。v0.7.1 不实现 v1.0 Parent Graph。
 
+v0.7.2 已新增本地单用户 Web Candidate 纵向切片：白底橙色工作台可完成 PDF 上传、八区块
+ResumeEvidence 确认、Candidate 构建、定向追问/补充材料和画像版本展示。Web 只作为现有
+Application Service 的适配器，没有修改 Candidate/Resume 业务实现。离线 HTTP 闭环、前端构建和
+全量回归已通过；授权真实简历 + 真实模型 + 人工体验仍待验收。入口见 `apps/web/README.md`。
+
 v0.1/v0.2 保留为 Runtime 与 LLM 基座，v0.3 提供统一证据层、领域契约、版本化画像快照和证据质量评估；v0.4 已将这些能力接入第一个可循环、可中断、可恢复的候选人画像 LangGraph subgraph。
 
 项目从 v0.3 起定位为“证据驱动的双画像求职 Agent”：原始材料进入统一证据层，系统构建候选人画像、求职意图和岗位需求画像，通过 LangGraph 完成画像充分性评价、岗位检索、差距分析、人工决策、准备计划和反馈更新。
@@ -149,6 +154,16 @@ playwright install chromium
 ```
 
 如果本机没有 `python` 命令，可使用 `python3` 创建虚拟环境。
+
+### 运行本地 Web Candidate 工作台
+
+```bash
+cd apps/web
+npm ci
+```
+
+随后分别运行 `npm run api` 与 `npm run dev`，访问 `http://localhost:3000`。Web 默认复用
+项目根目录的 `data/` 和当前模型配置；详细边界与隔离数据目录方法见 `apps/web/README.md`。
 
 ### 来源凭据装配
 
