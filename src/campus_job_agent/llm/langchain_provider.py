@@ -174,9 +174,12 @@ class LangChainChatProvider:
             ]
         first_error: LLMProviderError | None = None
         fallback_reason: str | None = None
+        validated: BaseModel | None = None
+        invalid_text: str | None = None
+        raw: Any = None
         for effective in candidates:
             try:
-                validated, raw = self._invoke_structured(
+                validated, raw, invalid_text = self._invoke_structured(
                     request, output_model, effective
                 )
                 break
@@ -189,13 +192,19 @@ class LangChainChatProvider:
                 )
         else:  # pragma: no cover - candidates are non-empty after resolution
             raise first_error or LLMProviderError("structured output failed")
-        parsed_json = validated.model_dump(mode="json")
+        parsed_json = (
+            validated.model_dump(mode="json") if validated is not None else None
+        )
         metadata = _safe_metadata(raw)
         tool_call_ids = _tool_call_ids(raw)
         if tool_call_ids:
             metadata["tool_call_ids"] = tool_call_ids
         return LLMResponse(
-            text=json.dumps(parsed_json, ensure_ascii=False),
+            text=(
+                json.dumps(parsed_json, ensure_ascii=False)
+                if parsed_json is not None
+                else str(invalid_text or "")
+            ),
             provider=self.name,
             model=self.model,
             usage=_usage(raw),
@@ -211,7 +220,7 @@ class LangChainChatProvider:
         request: LLMRequest,
         output_model: type[BaseModel],
         effective: str,
-    ) -> tuple[BaseModel, Any]:
+    ) -> tuple[BaseModel | None, Any, str | None]:
         method = {
             "provider_native_json_schema": "json_schema",
             "tool_calling": "function_calling",
@@ -228,6 +237,8 @@ class LangChainChatProvider:
                 existing = dict(getattr(chat_model, "extra_body", None) or {})
                 existing["thinking"] = {"type": "disabled"}
                 chat_model = model_copy(update={"extra_body": existing})
+        raw: Any = None
+        parsed: Any = None
         try:
             runnable = chat_model.with_structured_output(
                 output_model, method=method, include_raw=True, strict=strict
@@ -237,6 +248,12 @@ class LangChainChatProvider:
             parsing_error = result.get("parsing_error") if isinstance(result, dict) else None
             raw = result.get("raw") if isinstance(result, dict) else None
             if parsing_error is not None:
+                invalid_text = _structured_raw_text(raw, parsed)
+                if invalid_text:
+                    # Preserve the provider's invalid payload so the shared
+                    # structured-output boundary can apply its one bounded
+                    # schema retry with the workflow-specific retry prompt.
+                    return None, raw, invalid_text
                 raise LLMProviderError(
                     f"schema_validation_error: {parsing_error}",
                     error_type="schema_validation_error",
@@ -246,10 +263,13 @@ class LangChainChatProvider:
                 parsed if isinstance(parsed, output_model)
                 else output_model.model_validate(parsed)
             )
-            return validated, raw
+            return validated, raw, None
         except LLMProviderError:
             raise
         except ValidationError as exc:
+            invalid_text = _structured_raw_text(raw, parsed)
+            if invalid_text:
+                return None, raw, invalid_text
             raise LLMProviderError(
                 f"schema_validation_error: {exc.errors()}",
                 error_type="schema_validation_error",
@@ -344,6 +364,25 @@ def _tool_call_ids(message: Any) -> list[str]:
         for call in calls
         if isinstance(call, dict) and call.get("id")
     ]
+
+
+def _structured_raw_text(raw: Any, parsed: Any = None) -> str | None:
+    calls = getattr(raw, "tool_calls", None)
+    if isinstance(calls, list):
+        for call in calls:
+            if not isinstance(call, dict):
+                continue
+            args = call.get("args")
+            if isinstance(args, (dict, list)):
+                return json.dumps(args, ensure_ascii=False)
+            if isinstance(args, str) and args.strip():
+                return args
+    content = _message_text(raw).strip() if raw is not None else ""
+    if content:
+        return content
+    if isinstance(parsed, (dict, list)):
+        return json.dumps(parsed, ensure_ascii=False)
+    return None
 
 
 def _provider_error(exc: Exception) -> LLMProviderError:

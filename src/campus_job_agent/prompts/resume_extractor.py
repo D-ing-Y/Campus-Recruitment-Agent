@@ -8,7 +8,7 @@ from campus_job_agent.schemas import EvidenceFragment
 
 
 RESUME_PROMPT_NAME = "resume_evidence_extractor"
-RESUME_PROMPT_VERSION = "resume_evidence_extractor_v2"
+RESUME_PROMPT_VERSION = "resume_evidence_extractor_v3"
 RESUME_SCHEMA_VERSION = "resume_evidence_v0.7.1"
 
 
@@ -33,7 +33,13 @@ def build_resume_extractor_messages(
                 "This is source transcription, not candidate profiling. Preserve wording and "
                 "record boundaries. Do not summarize, infer proficiency, invent missing values, "
                 "or reconstruct redacted personal information. Use null or an empty list when a "
-                "section is absent. Every non-empty text block or record must cite one or more "
+                "section is absent. The root object has exactly these keys: personal_advantage, "
+                "career_expectations, work_experiences, project_experiences, "
+                "education_experiences, professional_skills, custom_sections. Never emit aliases "
+                "such as educations, projects or skills. personal_advantage and "
+                "professional_skills are always objects with exactly text and "
+                "evidence_fragment_ids; when absent use {\"text\":null,"
+                "\"evidence_fragment_ids\":[]}, never null. Every non-empty text block or record must cite one or more "
                 "supplied fragment_id values. personal_advantage and professional_skills remain "
                 "separate. Employment and internship positions go to work_experiences. Projects, "
                 "research, coursework, capstone and thesis records go to project_experiences and "
@@ -67,7 +73,9 @@ def build_resume_retry_messages(
         "role": "user",
         "content": (
             "The previous Tool result failed schema validation. Correct only its structure and "
-            f"source references. Error: {error}. Previous result: {previous}"
+            "source references. Use only the seven exact root keys from the system instruction; "
+            "text blocks use text, never content. "
+            f"Error: {error}. Previous result: {previous}"
         ),
     })
     return messages
