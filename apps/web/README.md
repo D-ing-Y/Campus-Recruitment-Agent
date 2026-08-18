@@ -17,6 +17,18 @@
 
 ## 本地启动
 
+在项目根目录执行一键启动脚本：
+
+```bash
+./scripts/dev/start_web.sh
+```
+
+脚本会同步当前 Python 包、按需安装 Web 依赖、启动 API 与前端，并在服务就绪后打开
+[http://localhost:3000](http://localhost:3000)。按 `Ctrl+C` 可同时停止两个服务。若不希望
+自动打开浏览器，可使用 `CAMPUS_WEB_NO_OPEN=1 ./scripts/dev/start_web.sh`。
+
+以下是需要分别控制两个进程时的手动启动方式。
+
 先在项目根目录安装 Python 环境，再安装 Web 依赖：
 
 ```bash
