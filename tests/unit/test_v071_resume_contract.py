@@ -20,6 +20,7 @@ from campus_job_agent.schemas import (
     ExtractedCustomSection,
 )
 from campus_job_agent.tools import candidate_profile as candidate_tools
+from campus_job_agent.prompts.resume_extractor import build_resume_extractor_messages
 from campus_job_agent.workflows.resume_evidence.extractor import (
     extract_personal_information,
     redact_personal_information,
@@ -85,6 +86,49 @@ def test_boss_section_order_and_model_tool_schema_exclude_personal_information()
     schema = ResumeExtractionBatch.model_json_schema()
     assert "personal_information" not in schema["properties"]
     assert schema["additionalProperties"] is False
+
+
+def test_resume_prompt_names_exact_root_and_text_block_shapes() -> None:
+    system = build_resume_extractor_messages(
+        [_fragment("Example University 2027 Python")], "candidate"
+    )[0]["content"]
+
+    assert "education_experiences" in system
+    assert "Never emit aliases such as educations" in system
+    assert '{"text":null,"evidence_fragment_ids":[]}' in system
+
+
+def test_resume_model_normalizes_only_observed_lossless_provider_aliases() -> None:
+    batch = ResumeExtractionBatch.model_validate({
+        "personal_advantage": None,
+        "career_expectations": [],
+        "work_experiences": [],
+        "project_experiences": [{
+            "name": "Campus Agent",
+            "text": "Implemented schema validation and tests.",
+            "evidence_fragment_ids": ["fragment-resume"],
+        }],
+        "educations": [{
+            "institution": "Example University",
+            "field": "Computer Science",
+            "evidence_fragment_ids": ["fragment-resume"],
+        }],
+        "professional_skills": {
+            "content": "Python, LangGraph",
+            "evidence_fragment_ids": ["fragment-resume"],
+        },
+        "custom_sections": [],
+    })
+
+    assert batch.personal_advantage.text is None
+    assert batch.project_experiences[0].content == (
+        "Implemented schema validation and tests."
+    )
+    assert batch.education_experiences[0].major == "Computer Science"
+    assert batch.professional_skills.text == "Python, LangGraph"
+
+    with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+        ResumeExtractionBatch.model_validate({"unexpected_section": []})
 
 
 def test_personal_information_is_local_and_redacted_before_model_input() -> None:

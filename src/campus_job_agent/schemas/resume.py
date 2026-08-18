@@ -239,6 +239,70 @@ class ResumeExtractionBatch(BaseModel):
     professional_skills: ExtractedTextBlock = Field(default_factory=ExtractedTextBlock)
     custom_sections: list[ExtractedCustomSection] = Field(default_factory=list)
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_observed_provider_aliases(cls, value: Any) -> Any:
+        """Repair only lossless, observed Tool-call aliases before validation."""
+
+        if not isinstance(value, dict):
+            return value
+        payload = dict(value)
+        if (
+            "education_experiences" not in payload
+            and isinstance(payload.get("educations"), list)
+        ):
+            payload["education_experiences"] = payload.pop("educations")
+
+        for field in ("personal_advantage", "professional_skills"):
+            block = payload.get(field)
+            if block is None:
+                payload[field] = {}
+            elif (
+                isinstance(block, dict)
+                and "text" not in block
+                and "content" in block
+            ):
+                normalized = dict(block)
+                normalized["text"] = normalized.pop("content")
+                payload[field] = normalized
+
+        for field in (
+            "work_experiences", "project_experiences", "custom_sections"
+        ):
+            records = payload.get(field)
+            if not isinstance(records, list):
+                continue
+            normalized_records: list[Any] = []
+            for record in records:
+                if (
+                    isinstance(record, dict)
+                    and "content" not in record
+                    and "text" in record
+                ):
+                    normalized = dict(record)
+                    normalized["content"] = normalized.pop("text")
+                    normalized_records.append(normalized)
+                else:
+                    normalized_records.append(record)
+            payload[field] = normalized_records
+
+        educations = payload.get("education_experiences")
+        if isinstance(educations, list):
+            normalized_educations: list[Any] = []
+            for record in educations:
+                if (
+                    isinstance(record, dict)
+                    and "major" not in record
+                    and "field" in record
+                ):
+                    normalized = dict(record)
+                    normalized["major"] = normalized.pop("field")
+                    normalized_educations.append(normalized)
+                else:
+                    normalized_educations.append(record)
+            payload["education_experiences"] = normalized_educations
+        return payload
+
 
 class PdfExtractionDiagnostics(BaseModel):
     model_config = ConfigDict(extra="forbid")

@@ -154,6 +154,17 @@ playwright install chromium
 ```
 
 如果本机没有 `python` 命令，可使用 `python3` 创建虚拟环境。
+本地 CLI 和 Web API 必须加载当前仓库构建出的代码。macOS 上如果文件同步服务反复把
+editable `.pth` 标为 hidden，导致从其他工作目录运行 CLI 时出现 `ModuleNotFoundError`，
+不要使用临时 `PYTHONPATH`；改为同步安装当前源码快照：
+
+```bash
+.venv/bin/python -m pip install . --force-reinstall --no-deps --no-build-isolation
+.venv/bin/python -c "import campus_job_agent; print(campus_job_agent.__file__)"
+```
+
+快照模式下每次修改 Python 业务源码后都必须重新执行同步安装，再启动 Web 或运行 installed
+CLI 黑盒测试；这样安装目录虽然位于 `site-packages`，内容仍来自当前工作树，而不是旧版本。
 
 ### 运行本地 Web Candidate 工作台
 

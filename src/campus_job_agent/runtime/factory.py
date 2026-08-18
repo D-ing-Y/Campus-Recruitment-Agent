@@ -15,8 +15,9 @@ from typing import Any, Iterator
 from campus_job_agent.evidence import ClaimExtractorService
 from campus_job_agent.llm import (
     LLMCache, LLMConfigError, LLMProviderError, build_llm_provider,
-    infer_model_integration,
+    infer_model_capabilities, infer_model_integration,
     load_llm_config,
+    resolve_structured_output_strategy,
 )
 from campus_job_agent.schemas import LLMConfig
 from campus_job_agent.integrations import (
@@ -540,10 +541,44 @@ class _LazyLLMProvider:
     def __init__(self, config: LLMConfig) -> None:
         self.config = config
         self.integration = infer_model_integration(config)
+        self.capabilities = infer_model_capabilities(config, self.integration)
         self.name = f"langchain_{self.integration}"
         self._provider: Any | None = None
 
     def generate(self, request: Any) -> Any:
+        return self._load().generate(request)
+
+    def generate_structured(
+        self,
+        request: Any,
+        output_model: Any,
+        *,
+        requested_strategy: Any = "auto",
+    ) -> Any:
+        strategy = requested_strategy
+        if self.integration == "deepseek" and requested_strategy == "auto":
+            # Resolve DeepSeek once at the runtime boundary and forward the
+            # selected strategy explicitly.  The concrete provider must not
+            # silently fall back from Tool Calling to JSON mode for business
+            # structured output.
+            strategy = resolve_structured_output_strategy(
+                requested_strategy, self.capabilities
+            )
+        provider = self._load()
+        structured = getattr(provider, "generate_structured", None)
+        if not callable(structured):
+            raise LLMProviderError(
+                "configured provider does not expose structured output",
+                error_type="unsupported_capability",
+                retryable=False,
+            )
+        return structured(
+            request,
+            output_model,
+            requested_strategy=strategy,
+        )
+
+    def _load(self) -> Any:
         if self._provider is None:
             self._provider = build_llm_provider(self.config)
-        return self._provider.generate(request)
+        return self._provider

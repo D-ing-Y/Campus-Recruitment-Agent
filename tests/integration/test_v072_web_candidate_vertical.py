@@ -160,3 +160,54 @@ def test_local_web_exposes_candidate_question_and_resumes_idempotently(tmp_path)
     assert replay.status_code == 200
     assert replay.json()["data"]["result"]["deduplicated"] is True
     assert len(replay.json()["data"]["workspace"]["profile_history"]) == history_count
+
+
+def test_resume_invalid_model_output_is_safe_and_closes_run(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("CAMPUS_AGENT_LLM_PROVIDER", "mock")
+    monkeypatch.setenv("CAMPUS_AGENT_MOCK_LLM_MODE", "always_invalid_json")
+    monkeypatch.setenv("CAMPUS_AGENT_LLM_CACHE_ENABLED", "false")
+    marker = "SYNTHETIC_PRIVATE_RESUME_MARKER"
+    pdf = tmp_path / "resume-invalid-model-output.pdf"
+    _text_pdf(
+        pdf,
+        (
+            f"{marker} Anonymous Candidate University 2027 Python Agent project "
+            "responsibility implementation evaluation evidence. "
+        ) * 4,
+    )
+    app = create_app(tmp_path / "data")
+    client = TestClient(app)
+    session_id = client.post("/api/sessions", json={}).json()["data"]["session"][
+        "session_id"
+    ]
+
+    with pdf.open("rb") as handle:
+        response = client.post(
+            f"/api/sessions/{session_id}/resume",
+            files={"file": ("resume.pdf", handle, "application/pdf")},
+        )
+
+    assert response.status_code == 502
+    payload = response.json()
+    assert payload["error"]["type"] == "llm_invalid_output"
+    assert payload["error"]["retryable"] is False
+    assert marker not in response.text
+
+    runtime = app.state.runtime
+    session = runtime.session_service.status(session_id)
+    assert session.status == "active"
+    assert session.latest_run_id is not None
+    manifest = runtime.artifact_writer.load_manifest(session.latest_run_id)
+    assert manifest.status == "failed"
+    assert manifest.next_action == "inspect.run"
+
+    run_root = runtime.paths.run_root / session.latest_run_id
+    errors = (run_root / "errors.jsonl").read_text(encoding="utf-8")
+    calls = (run_root / "llm_calls.jsonl").read_text(encoding="utf-8")
+    assert "model returned invalid structured resume output" in errors
+    assert "llm_invalid_output" in errors
+    assert calls.strip()
+    assert marker not in errors
+    assert marker not in calls

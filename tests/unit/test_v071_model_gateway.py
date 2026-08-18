@@ -12,6 +12,8 @@ from campus_job_agent.llm.langchain_provider import (
     resolve_structured_output_strategy,
 )
 from campus_job_agent.llm.base import LLMProviderError
+from campus_job_agent.llm.cache import LLMCache
+from campus_job_agent.llm.structured import parse_structured_output
 from campus_job_agent.schemas import LLMConfig, LLMRequest, ModelCapabilities
 
 
@@ -68,6 +70,47 @@ class NativeFallbackChatModel(FakeChatModel):
         return super().with_structured_output(
             schema, method=method, include_raw=include_raw, strict=strict
         )
+
+
+class RecoveringStructuredRunnable:
+    def __init__(self, model: "RecoveringChatModel") -> None:
+        self.model = model
+
+    def invoke(self, messages):
+        self.model.invocations += 1
+        if self.model.invocations == 1:
+            return {
+                "raw": AIMessage(
+                    content="",
+                    tool_calls=[{
+                        "name": "Answer",
+                        "args": {"value": "not-an-integer"},
+                        "id": "call-invalid",
+                    }],
+                ),
+                "parsed": None,
+                "parsing_error": ValueError("value must be an integer"),
+            }
+        return {
+            "raw": AIMessage(
+                content="",
+                tool_calls=[{
+                    "name": "Answer", "args": {"value": 7}, "id": "call-valid",
+                }],
+            ),
+            "parsed": Answer(value=7),
+            "parsing_error": None,
+        }
+
+
+class RecoveringChatModel(FakeChatModel):
+    def __init__(self) -> None:
+        super().__init__()
+        self.invocations = 0
+
+    def with_structured_output(self, schema, *, method, include_raw, strict=None):
+        self.methods.append(method)
+        return RecoveringStructuredRunnable(self)
 
 
 def _capabilities(**updates) -> ModelCapabilities:
@@ -186,3 +229,43 @@ def test_explicit_strategy_never_silently_falls_back() -> None:
             requested_strategy="provider_native_json_schema",
         )
     assert model.methods == ["json_schema"]
+
+
+def test_provider_schema_error_reaches_shared_bounded_retry(tmp_path) -> None:
+    model = RecoveringChatModel()
+    provider = LangChainChatProvider(
+        chat_model=model,
+        integration="deepseek",
+        model="deepseek-chat",
+        capabilities=_capabilities(),
+    )
+    config = LLMConfig(
+        provider="openai_compatible",
+        integration="deepseek",
+        base_url="https://api.deepseek.com",
+        api_key="synthetic-secret",
+        model="deepseek-chat",
+        cache_enabled=False,
+        cache_dir=str(tmp_path),
+        max_retries=1,
+    )
+
+    answer, calls = parse_structured_output(
+        messages=[{"role": "user", "content": "return an integer"}],
+        output_model=Answer,
+        config=config,
+        provider=provider,
+        cache=LLMCache(str(tmp_path)),
+        prompt_name="answer",
+        prompt_version="answer_v1",
+        schema_version="answer_v1",
+        retry_builder=lambda previous, error: [{
+            "role": "user",
+            "content": f"Fix {previous}. Validation error: {error}",
+        }],
+    )
+
+    assert answer.value == 7
+    assert calls[0].retry_count == 1
+    assert model.invocations == 2
+    assert model.methods == ["function_calling", "function_calling"]

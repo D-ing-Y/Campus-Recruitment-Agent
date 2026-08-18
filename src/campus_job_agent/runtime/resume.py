@@ -61,7 +61,7 @@ class ResumeApplicationService:
                 result = workflow.invoke(state)
             return self._finish(session, manifest, result, 0, 0)
         except Exception as exc:
-            self._fail(manifest.run_id, exc)
+            self._fail(session, manifest.run_id, exc)
             raise
 
     def resume(
@@ -105,7 +105,7 @@ class ResumeApplicationService:
                 len(previous.get("trace", [])), len(previous.get("llm_calls", [])),
             )
         except Exception as exc:
-            self._fail(manifest.run_id, exc)
+            self._fail(session, manifest.run_id, exc)
             raise
 
     def review_view(self, request: dict[str, Any]) -> dict[str, Any]:
@@ -365,18 +365,44 @@ class ResumeApplicationService:
             "errors": [],
         }
 
-    def _fail(self, run_id: str, exc: Exception) -> None:
+    def _fail(self, session: Any, run_id: str, exc: Exception) -> None:
+        calls = [
+            item.model_dump(mode="json")
+            for item in getattr(exc, "call_records", [])
+            if hasattr(item, "model_dump")
+        ]
         try:
-            error_type = str(getattr(exc, "error_type", "internal_error"))
+            self._append_llm(run_id, calls)
+        except Exception:
+            pass
+        source_error_type = str(
+            getattr(exc, "error_type", "internal_error")
+        )
+        error_type = _resume_error_type(source_error_type)
+        try:
             self.runtime.artifact_writer.append_error(ErrorEvent(
                 run_id=run_id, workflow="resume_evidence",
-                error_type=error_type, message=str(exc),
+                error_type=error_type,
+                message=_resume_failure_message(error_type),
                 retryable=bool(getattr(exc, "retryable", False)),
                 recovery_hint="inspect the ResumeEvidence run and checkpoint",
             ))
             self.runtime.artifact_writer.finish_run(
                 run_id, status="failed", next_action="inspect.run",
                 reason_codes=[error_type],
+            )
+        except Exception:
+            pass
+        try:
+            current = self.runtime.session_service.status(session.session_id)
+            self.runtime.session_repository.update_navigation(
+                current.session_id,
+                expected_version=current.session_version,
+                operation="resume_evidence_failed",
+                status=current.status,
+                current_stage=current.current_stage,
+                pending_request=current.pending_request,
+                latest_run_id=run_id,
             )
         except Exception:
             pass
@@ -391,6 +417,39 @@ def _pending_request(result: dict[str, Any]) -> dict[str, Any] | None:
         value = getattr(interrupts[0], "value", None)
         return dict(value) if isinstance(value, dict) else None
     return None
+
+
+def _resume_error_type(value: str) -> str:
+    return {
+        "unsupported_input": "invalid_input",
+        "validation_error": "contract_violation",
+        "schema_validation_error": "llm_invalid_output",
+        "json_parse_error": "llm_invalid_output",
+        "unsupported_capability": "llm_unavailable",
+        "provider_error": "llm_unavailable",
+        "network_timeout": "llm_unavailable",
+        "auth_required": "auth_required",
+        "rate_limited": "rate_limited",
+        "storage_error": "storage_failure",
+    }.get(value, value if value in {
+        "invalid_input", "contract_violation", "permission_denied", "not_found",
+        "stale_input", "auth_required", "rate_limited", "source_changed",
+        "adapter_required", "llm_invalid_output", "llm_unavailable",
+        "storage_failure", "checkpoint_failure", "budget_exhausted",
+        "internal_error",
+    } else "internal_error")
+
+
+def _resume_failure_message(error_type: str) -> str:
+    return {
+        "llm_invalid_output": "model returned invalid structured resume output",
+        "llm_unavailable": "configured model provider is unavailable",
+        "auth_required": "configured model provider authorization failed",
+        "rate_limited": "configured model provider rate limit exceeded",
+        "invalid_input": "resume input could not be processed",
+        "storage_failure": "resume evidence storage failed",
+        "checkpoint_failure": "resume workflow checkpoint failed",
+    }.get(error_type, "resume evidence workflow failed")
 
 
 def _hash(value: Any) -> str:

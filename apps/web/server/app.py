@@ -31,6 +31,7 @@ from starlette.status import (
     HTTP_409_CONFLICT,
     HTTP_413_CONTENT_TOO_LARGE,
     HTTP_500_INTERNAL_SERVER_ERROR,
+    HTTP_502_BAD_GATEWAY,
     HTTP_503_SERVICE_UNAVAILABLE,
 )
 from starlette.concurrency import run_in_threadpool
@@ -112,18 +113,37 @@ def _error_response(exc: Exception, runtime: Runtime | None = None) -> JSONRespo
             status_code, error_type = HTTP_403_FORBIDDEN, "permission_denied"
         elif "idempotency" in raw or "stale" in raw or "pending" in raw:
             status_code, error_type = HTTP_409_CONFLICT, "stale_input"
-        elif declared in {"config_error", "llm_unavailable", "source_unavailable"}:
-            status_code, error_type = HTTP_503_SERVICE_UNAVAILABLE, declared
-            retryable = True
+        elif declared in {"schema_validation_error", "json_parse_error"}:
+            status_code, error_type = HTTP_502_BAD_GATEWAY, "llm_invalid_output"
+            retryable = False
+        elif declared in {
+            "config_error", "llm_unavailable", "source_unavailable",
+            "provider_error", "network_timeout", "unsupported_capability",
+            "auth_required", "rate_limited",
+        }:
+            status_code = HTTP_503_SERVICE_UNAVAILABLE
+            error_type = (
+                declared
+                if declared in {"auth_required", "rate_limited", "config_error"}
+                else "llm_unavailable"
+            )
+            retryable = declared not in {"config_error", "unsupported_capability"}
         elif declared in {"contract_violation", "validation_error"}:
             status_code, error_type = HTTP_400_BAD_REQUEST, "contract_violation"
         else:
             status_code, error_type = HTTP_500_INTERNAL_SERVER_ERROR, "internal_error"
-        message = (
-            _safe_message(exc, runtime)
-            if status_code < HTTP_500_INTERNAL_SERVER_ERROR
-            else "本地服务处理失败，请查看服务端运行日志。"
-        )
+        if error_type == "llm_invalid_output":
+            message = "模型返回的简历结构不符合契约，系统重试后仍未通过。请重新上传；若持续失败，请检查当前模型配置。"
+        elif error_type in {
+            "llm_unavailable", "auth_required", "rate_limited", "config_error"
+        }:
+            message = "当前模型服务不可用，请检查模型配置或稍后重试。"
+        else:
+            message = (
+                _safe_message(exc, runtime)
+                if status_code < HTTP_500_INTERNAL_SERVER_ERROR
+                else "本地服务处理失败，请查看服务端运行日志。"
+            )
     return JSONResponse(
         {
             "ok": False,
